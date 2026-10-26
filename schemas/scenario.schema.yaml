@@ -1,0 +1,228 @@
+# Layer L2 - Scenario (test design)
+# One scenario = one situation to test. Two styles:
+#   simulated - an LLM caller with a persona, goal and fact sheet has a free conversation.
+#   scripted  - fixed caller lines, with exact checks on each agent reply (fast, cheap).
+# Every scenario is run `repeats` times; critical scenarios must pass all repeats (pass^k).
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: vatf/scenario/0.1
+title: Scenario
+type: object
+additionalProperties: false
+required: [schema_version, kind, id, title, profile, style, criticality]
+properties:
+  schema_version: {const: "0.1"}
+  kind: {const: scenario}
+  id: {type: string, pattern: "^[a-z0-9][a-z0-9._-]*$"}
+  title: {type: string}
+  description: {type: string}
+  profile: {description: "Client profile id this scenario is written for.", type: string}
+  tags: {type: array, items: {type: string}}
+  criticality:
+    description: critical scenarios gate the release on pass^k. Others feed the scores only.
+    enum: [critical, normal, exploratory]
+  repeats: {description: "Overrides the profile's repeats.", type: integer, minimum: 1}
+  style: {enum: [simulated, scripted]}
+
+  setup:
+    type: object
+    additionalProperties: false
+    properties:
+      now:
+        description: Fixed "current time" given to the agent and caller, so "next Tuesday" is stable.
+        type: string
+        format: date-time
+      fixtures:
+        description: SQL files or statements loaded into the backend before each call.
+        type: array
+        items: {type: string}
+      faults:
+        description: Faults the tool proxy injects (honesty under failure).
+        type: array
+        items: {$ref: "#/$defs/fault"}
+
+  caller:
+    description: Required for simulated style.
+    type: object
+    additionalProperties: false
+    required: [persona, goal, facts]
+    properties:
+      persona: {type: string}
+      goal: {description: "What the caller wants, in plain words.", type: string}
+      facts:
+        description: The caller's fact sheet. Values may also be used in probes (:name) and entity fidelity checks.
+        type: object
+        additionalProperties: {type: [string, number, boolean]}
+      rules:
+        description: Extra behaviour rules for the caller LLM.
+        type: array
+        items: {type: string}
+      end_when:
+        description: When the caller should end the call.
+        type: string
+      max_turns: {type: integer, minimum: 1}
+
+  turns:
+    description: Required for scripted style. Each caller line is followed by checks on the agent's reply.
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [caller]
+      properties:
+        caller: {type: string}
+        expect:
+          type: array
+          items: {$ref: "#/$defs/check"}
+
+  audio:
+    description: Voice mode only (Phase 2).
+    type: object
+    additionalProperties: false
+    properties:
+      noise: {enum: [none, office, street, cafe, car], default: none}
+      snr_db: {type: number}
+      barge_in:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [agent_turn, offset_ms, say]
+          properties:
+            agent_turn: {type: integer, minimum: 1}
+            offset_ms: {description: "Milliseconds after the agent starts speaking.", type: integer, minimum: 0}
+            say: {type: string}
+
+  outcome:
+    description: >
+      The outcome check (said vs did vs stored). Optional for scenarios with no business action.
+      `expected` says which outcome counts as a pass.
+    type: object
+    additionalProperties: false
+    required: [expected, action]
+    properties:
+      expected:
+        description: >
+          success - the action should happen and the agent should say so.
+          honest_failure - the action cannot succeed (e.g. injected fault) and the agent must say so.
+          no_action - nothing should be written.
+        enum: [success, honest_failure, no_action]
+      action:
+        type: object
+        additionalProperties: false
+        required: [tool]
+        properties:
+          tool: {description: "A write tool from the profile.", type: string}
+          args_match:
+            description: Expected argument values. Strings starting with $ refer to caller facts, e.g. $patient_name.
+            type: object
+      record:
+        type: object
+        additionalProperties: false
+        required: [probe]
+        properties:
+          probe: {description: "Probe id from the profile.", type: string}
+          expect_count: {type: integer, minimum: 0}
+          expect_fields: {type: object}
+      claim:
+        description: >
+          How to tell what the agent told the caller about the result. With patterns,
+          a final agent reply that matches neither list, or both, counts as "unclear",
+          and the outcome becomes NOT_VERIFIED (never PASS). The judge method (Phase 3)
+          is only asked about unclear replies.
+        type: object
+        additionalProperties: false
+        properties:
+          method: {enum: [patterns, judge], default: patterns}
+          success_patterns: {type: array, items: {type: string}}
+          failure_patterns: {type: array, items: {type: string}}
+
+  checks:
+    description: Hard checks and judge items for the whole call.
+    type: array
+    items:
+      allOf:
+        - {$ref: "#/$defs/check"}
+        - {required: [id]}
+
+allOf:
+  - if: {properties: {style: {const: simulated}}}
+    then: {required: [caller]}
+  - if: {properties: {style: {const: scripted}}}
+    then: {required: [turns]}
+
+$defs:
+  fault:
+    type: object
+    additionalProperties: false
+    required: [tool, type]
+    properties:
+      tool: {type: string}
+      on_call: {description: "Which call to this tool to break (1 = first). Omit for every call.", type: integer, minimum: 1}
+      type: {enum: [timeout, http_error, slow, malformed_response]}
+      status: {description: "For http_error.", type: integer}
+      delay_ms: {description: "For slow and timeout.", type: integer}
+      forward:
+        description: >
+          If true the request still reaches the backend before the fault is returned
+          (e.g. the booking was saved but the agent sees a timeout).
+        type: boolean
+        default: false
+
+  check:
+    type: object
+    required: [type]
+    properties:
+      id:
+        description: Required for call-level checks. Optional in scripted turns, where the framework names them turn<n>.<i> (e.g. turn2.1).
+        type: string
+        pattern: "^[a-z0-9][a-z0-9._-]*$"
+      type:
+        enum:
+          - tool_called       # tool, args_match?, times?
+          - tool_not_called   # tool
+          - tool_order        # first, then
+          - probe             # probe, expect_count?, expect_fields?
+          - said              # pattern (regex on agent speech)
+          - not_said          # pattern
+          - handoff           # to (multi-agent platforms)
+          - latency           # p95_ms (per call)
+          - entity_fidelity   # entities: caller fact names to compare across speech, tool args and backend
+          - max_turns         # n
+          - judge             # rubric (Phase 3) or intent (one-line judge question)
+      severity:
+        description: blocker failures stop the release on their own.
+        enum: [blocker, major, minor]
+        default: major
+      section: {enum: [accuracy, experience, security], default: accuracy}
+      description: {type: string}
+      tool: {type: string}
+      args_match: {type: object}
+      times: {type: integer, minimum: 0}
+      first: {type: string}
+      then: {type: string}
+      probe: {type: string}
+      expect_count: {type: integer, minimum: 0}
+      expect_fields: {type: object}
+      pattern: {type: string}
+      to: {type: string}
+      p95_ms: {type: integer}
+      entities: {type: array, items: {type: string}}
+      n: {type: integer}
+      rubric: {type: string}
+      intent: {type: string}
+    allOf:
+      - if: {properties: {type: {enum: [tool_called, tool_not_called]}}}
+        then: {required: [tool]}
+      - if: {properties: {type: {const: tool_order}}}
+        then: {required: [first, then]}
+      - if: {properties: {type: {const: probe}}}
+        then: {required: [probe]}
+      - if: {properties: {type: {enum: [said, not_said]}}}
+        then: {required: [pattern]}
+      - if: {properties: {type: {const: handoff}}}
+        then: {required: [to]}
+      - if: {properties: {type: {const: entity_fidelity}}}
+        then: {required: [entities]}
+      - if: {properties: {type: {const: judge}}}
+        then: {anyOf: [{required: [rubric]}, {required: [intent]}]}

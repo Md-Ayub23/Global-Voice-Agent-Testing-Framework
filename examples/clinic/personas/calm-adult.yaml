@@ -1,0 +1,7 @@
+schema_version: "0.1"
+kind: persona
+id: calm-adult
+description: A calm adult patient who answers questions clearly and waits for the agent to finish.
+traits: {patience: high, verbosity: normal, mood: calm, clarity: high}
+speech: {tts_voice: en_GB-alba-medium, speaking_rate: 1.0}
+behaviour: {interrupts: false}

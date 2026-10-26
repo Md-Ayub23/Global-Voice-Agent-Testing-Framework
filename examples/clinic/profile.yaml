@@ -1,0 +1,70 @@
+# Client profile for our own test agent #1: the clinic booking agent.
+# Architecture: single LLM + tools, SQLite backend (built in Phase 1).
+schema_version: "0.1"
+kind: client_profile
+id: clinic-booking
+name: Riverside Clinic booking agent
+description: Books, moves and cancels GP appointments by phone.
+domain: healthcare
+languages: [en]
+
+connection:
+  type: text_python                       # Phase 1. Becomes websocket_audio in Phase 2.
+  target: "zoo.clinic.agent:build_agent"
+
+test_id:
+  propagation: [proxy_header, session_metadata]
+  header_name: X-Test-Id
+
+tools:
+  - name: find_patient
+    effect: read
+    upstream: http://127.0.0.1:8701/patients/search
+    pii_args: [full_name, date_of_birth]
+  - name: list_free_slots
+    effect: read
+    upstream: http://127.0.0.1:8701/slots
+  - name: book_appointment
+    effect: write
+    upstream: http://127.0.0.1:8701/appointments
+    idempotency_key: [patient_id, slot_start]
+    pii_args: [patient_id]
+  - name: cancel_appointment
+    effect: write
+    upstream: http://127.0.0.1:8701/appointments/cancel
+    idempotency_key: [appointment_id]
+
+backend:
+  access: sql
+  connection: sqlite:///zoo/clinic/clinic.db
+  probes:
+    - id: appointments_for_test
+      description: Appointments created during this call.
+      query: >
+        SELECT a.id, p.full_name, d.name AS doctor, a.slot_start, a.status
+        FROM appointments a
+        JOIN patients p ON p.id = a.patient_id
+        JOIN doctors d ON d.id = a.doctor_id
+        WHERE a.test_id = :test_id
+      returns: rows
+
+thresholds:
+  repeats: 3
+  pass_k_required: 3
+  latency_p50_ms: 800
+  latency_p95_ms: 1500
+  min_coverage: 0.9
+  judge_min_kappa: 0.6
+  max_harness_retries: 2
+
+limits:
+  max_turns: 24
+  max_call_seconds: 240
+  max_reply_tokens: 300
+  budget_usd: 2
+  parallel_calls: 1
+
+pii:
+  mask_patterns:
+    - {name: date_of_birth, regex: "\\b\\d{4}-\\d{2}-\\d{2}\\b"}
+    - {name: uk_phone, regex: "\\b0\\d{10}\\b"}

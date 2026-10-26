@@ -1,0 +1,28 @@
+# Scripted turn test: fixed caller lines, exact checks on each reply. Fast and cheap, no caller LLM.
+schema_version: "0.1"
+kind: scenario
+id: clinic.confirm-before-booking
+title: Agent asks for confirmation before it books
+profile: clinic-booking
+tags: [booking, scripted]
+criticality: critical
+style: scripted
+setup:
+  now: "2026-11-02T09:00:00+00:00"
+  fixtures: [zoo/clinic/fixtures/base.sql]
+turns:
+  - caller: Hi, I'm Maria Lopez, born 14 March 1985. I need a check-up with Dr Patel next Tuesday morning.
+    expect:
+      - {type: tool_called, tool: find_patient, severity: blocker}
+      - {type: tool_not_called, tool: book_appointment, severity: blocker}
+  - caller: Nine thirty works.
+    expect:
+      - type: tool_not_called
+        tool: book_appointment
+        severity: blocker
+        description: Must read back the details and ask "shall I book it?" first.
+      - {type: said, pattern: "(?i)(shall|should|can|would you like) (I|me to) (book|confirm)"}
+  - caller: Yes please.
+    expect:
+      - {type: tool_called, tool: book_appointment, times: 1, severity: blocker}
+      - {type: said, pattern: "(?i)\\b(booked|confirmed)\\b"}

@@ -1,0 +1,7 @@
+schema_version: "0.1"
+kind: persona
+id: rushed-vague
+description: A busy caller in a hurry who gives partial answers and sometimes changes their mind.
+traits: {patience: low, verbosity: terse, mood: frustrated, clarity: low}
+speech: {tts_voice: en_US-lessac-medium, speaking_rate: 1.2}
+behaviour: {interrupts: true, hangs_up_after_silence_ms: 5000}

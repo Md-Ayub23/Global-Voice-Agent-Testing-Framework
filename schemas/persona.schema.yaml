@@ -1,0 +1,46 @@
+# Layer L2/L3 - Persona
+# Who the simulated caller is. Separate from the scenario so one scenario can be run
+# with many personas (scenario x persona x repeat = calls).
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: vatf/persona/0.1
+title: Persona
+type: object
+additionalProperties: false
+required: [schema_version, kind, id, description]
+properties:
+  schema_version: {const: "0.1"}
+  kind: {const: persona}
+  id: {type: string, pattern: "^[a-z0-9][a-z0-9._-]*$"}
+  description:
+    description: One or two plain sentences given to the caller LLM.
+    type: string
+  language: {type: string, default: en}
+  traits:
+    description: Grid dimensions. Each is a small fixed scale so personas can be generated as a grid.
+    type: object
+    additionalProperties: false
+    properties:
+      patience: {enum: [low, medium, high], default: medium}
+      verbosity: {enum: [terse, normal, rambling], default: normal}
+      mood: {enum: [calm, anxious, frustrated, angry], default: calm}
+      clarity:
+        description: How cleanly the caller gives information (low = vague, changes mind, gives partial answers).
+        enum: [low, medium, high]
+        default: high
+  speech:
+    description: Voice-mode only (Phase 2). Ignored in text mode.
+    type: object
+    additionalProperties: false
+    properties:
+      tts_voice: {type: string}
+      speaking_rate: {type: number, minimum: 0.5, maximum: 2.0, default: 1.0}
+      accent: {type: string}
+  behaviour:
+    type: object
+    additionalProperties: false
+    properties:
+      interrupts:
+        description: Whether the caller may talk over the agent. Exact barge-in timings are set per scenario.
+        type: boolean
+        default: false
+      hangs_up_after_silence_ms: {type: integer, default: 8000}

@@ -1,0 +1,41 @@
+# Layer L6 - Run trace: the call record (call.json)
+# One per call. Ties the timeline to the run, scenario, persona and repeat,
+# and locks the evidence with a hash once the call has ended.
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: vatf/call_record/0.1
+title: Call record
+type: object
+additionalProperties: false
+required: [schema_version, kind, test_id, run_id, profile_id, scenario_id, repeat, attempt, mode, started_at, status, events_file]
+properties:
+  schema_version: {const: "0.1"}
+  kind: {const: call_record}
+  test_id:
+    description: Unique id for this call. Sent to the agent and backend so all evidence can be joined.
+    type: string
+    pattern: "^t-[A-Za-z0-9-]+$"
+  run_id: {type: string}
+  profile_id: {type: string}
+  profile_sha256: {description: "Hash of the profile file used, so results can be compared fairly.", type: string}
+  scenario_id: {type: string}
+  scenario_sha256: {type: string}
+  persona_id: {type: string}
+  repeat: {description: "Which repeat this is, 1..k.", type: integer, minimum: 1}
+  attempt:
+    description: 1 for the first try. Higher only when an earlier try ended in a harness ERROR and was rerun.
+    type: integer
+    minimum: 1
+  mode: {enum: [text, voice]}
+  framework_version: {type: string}
+  started_at: {type: string, format: date-time}
+  ended_at: {type: string, format: date-time}
+  status:
+    description: Whether the harness completed the call. Says nothing about whether the agent passed.
+    enum: [running, completed, harness_error]
+  events_file: {type: string, default: events.jsonl}
+  event_count: {type: integer}
+  events_sha256: {description: "Set when the call is locked. Any later change to events.jsonl is detectable.", type: string}
+  locked: {type: boolean, default: false}
+  pii_masked: {type: boolean, default: false}
+  llm_log_dir: {description: "Folder with every LLM request and response made for this call (caller and judges).", type: string}
+  cost_usd: {type: number}

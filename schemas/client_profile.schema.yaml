@@ -1,0 +1,168 @@
+# Layer L1 - Client Profile
+# One YAML file describes one agent under test. Onboarding a new agent means
+# writing one of these, not writing framework code.
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: vatf/client_profile/0.1
+title: Client Profile
+type: object
+additionalProperties: false
+required: [schema_version, kind, id, name, domain, languages, connection, tools, backend]
+properties:
+  schema_version: {const: "0.1"}
+  kind: {const: client_profile}
+  id:
+    description: Short stable id, used by scenarios to point at this profile.
+    type: string
+    pattern: "^[a-z0-9][a-z0-9._-]*$"
+  name: {type: string}
+  description: {type: string}
+  domain:
+    description: Free text such as healthcare, trading, support. Used to pick rubrics and scenario packs.
+    type: string
+  languages:
+    description: BCP-47 language tags. Only "en" is supported for now.
+    type: array
+    minItems: 1
+    items: {type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$"}
+
+  connection:
+    description: How the framework reaches the agent (L4 Connectors).
+    type: object
+    required: [type]
+    properties:
+      type:
+        enum: [text_python, text_http, websocket_audio, sip, webrtc, platform]
+      target:
+        description: >
+          What to connect to. text_python: "module:callable" that builds the agent.
+          text_http / websocket_audio: a URL. sip: a phone number or SIP URI.
+          platform: an agent id on the platform.
+        type: string
+      platform: {enum: [vapi, retell, livekit, pipecat, elevenlabs]}
+      audio:
+        type: object
+        properties:
+          sample_rate_hz: {type: integer, enum: [8000, 16000, 24000, 48000]}
+          encoding: {enum: [pcm16, mulaw]}
+      options:
+        description: Connector-specific settings. Secrets are given as ${ENV_VAR} names, never as values.
+        type: object
+    allOf:
+      - if: {properties: {type: {const: platform}}}
+        then: {required: [platform]}
+
+  test_id:
+    description: >
+      How the unique test id reaches the agent and backend, so voice, tool calls and
+      database rows can be linked. "proxy_header" means the tool proxy adds it to each
+      upstream request; "session_metadata" means the connector passes it when the call starts.
+    type: object
+    properties:
+      propagation:
+        type: array
+        items: {enum: [proxy_header, session_metadata, tool_arg]}
+        default: [proxy_header]
+      header_name: {type: string, default: X-Test-Id}
+
+  tools:
+    description: The tools or APIs the agent may call. Calls go through our tool proxy (L5).
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [name, effect]
+      properties:
+        name: {type: string}
+        description: {type: string}
+        effect:
+          description: read tools only look things up; write tools change backend state and are what the outcome check follows.
+          enum: [read, write]
+        upstream:
+          description: Where the proxy forwards the call. Omit for agents that call tools in-process (the connector then reports tool events).
+          type: string
+        idempotency_key:
+          description: Argument names that identify "the same action". Two successful write calls with the same values are a DUPLICATE_ACTION.
+          type: array
+          items: {type: string}
+        pii_args:
+          description: Argument names to mask in stored evidence.
+          type: array
+          items: {type: string}
+
+  backend:
+    description: How to read the real backend state after a call (backend probes, L5).
+    type: object
+    required: [access]
+    properties:
+      access:
+        description: none means outcome checks that need the backend are reported as NOT_VERIFIED, never PASS.
+        enum: [sql, rest, none]
+      connection:
+        description: For sql, a URL like sqlite:///path/to/db. For rest, a base URL.
+        type: string
+      probes:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, query]
+          properties:
+            id: {type: string}
+            description: {type: string}
+            query:
+              description: >
+                SQL text, or "GET /path" for rest. Bind values available:
+                :test_id, :call_started_at and :call_ended_at (ISO times of the call),
+                and any :name from the scenario's caller facts. Agents that store the
+                test id should be probed by :test_id; agents that cannot should be
+                probed by caller facts inside the call's time window.
+              type: string
+            returns: {enum: [rows, one, count], default: rows}
+
+  thresholds:
+    description: Release gate settings (L8). Every field has a framework default.
+    type: object
+    additionalProperties: false
+    properties:
+      repeats: {type: integer, minimum: 1, default: 3}
+      pass_k_required:
+        description: How many of the repeats must pass for a critical scenario. Default equals repeats (pass^k).
+        type: integer
+        minimum: 1
+      latency_p50_ms: {type: integer, default: 800}
+      latency_p95_ms: {type: integer, default: 1500}
+      min_coverage:
+        description: Share of planned calls that must end with a verified result (PASS or FAIL).
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.9
+      judge_min_kappa:
+        description: A judge rubric item below this Cohen's kappa is advisory and cannot block.
+        type: number
+        default: 0.6
+      max_harness_retries: {type: integer, minimum: 0, default: 2}
+
+  limits:
+    description: Cost and safety caps for one run.
+    type: object
+    additionalProperties: false
+    properties:
+      max_turns: {type: integer, default: 30}
+      max_call_seconds: {type: integer, default: 300}
+      max_reply_tokens: {type: integer, default: 400}
+      budget_usd: {type: number, default: 5}
+      parallel_calls: {type: integer, default: 1}
+
+  pii:
+    description: Patterns to mask in transcripts and stored evidence.
+    type: object
+    properties:
+      mask_patterns:
+        type: array
+        items:
+          type: object
+          required: [name, regex]
+          properties:
+            name: {type: string}
+            regex: {type: string}

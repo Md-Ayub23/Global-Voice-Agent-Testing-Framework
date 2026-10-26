@@ -1,0 +1,133 @@
+# Layer L8 - Release decision for one run (decision.json)
+# Built only from call verdicts and the profile thresholds.
+#
+# Decision rules, checked in this order:
+#   1. NO_GO  - any blocking FAIL in a verified call (false success, silent data bug,
+#               duplicate action, data leak, security failure, or any check marked blocker).
+#   2. NO_GO  - a critical scenario has a FAIL in any repeat (pass^k not met),
+#               or latency p95 is above the limit (voice mode only; text-mode
+#               timings are shown for information and never gate).
+#   3. NO_GO_INSUFFICIENT_EVIDENCE - coverage below min_coverage, a critical scenario
+#               has fewer verified repeats than pass_k_required, or NEEDS_REVIEW items remain.
+#               This means: fix the harness or add tests, not the agent.
+#   4. GO     - none of the above.
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: vatf/run_decision/0.1
+title: Run decision
+type: object
+additionalProperties: false
+required: [schema_version, kind, run_id, profile_id, decision, exit_code, reasons, scorecard, reliability, coverage]
+properties:
+  schema_version: {const: "0.1"}
+  kind: {const: run_decision}
+  run_id: {type: string}
+  profile_id: {type: string}
+  created_at: {type: string, format: date-time}
+  decision: {enum: [GO, NO_GO, NO_GO_INSUFFICIENT_EVIDENCE]}
+  exit_code:
+    description: For CI. 0 = GO, 1 = NO_GO, 2 = NO_GO_INSUFFICIENT_EVIDENCE. A crash of the framework itself writes no decision and exits 3.
+    enum: [0, 1, 2]
+  reasons:
+    description: Why the decision came out this way, most important first.
+    type: array
+    minItems: 1
+    items:
+      type: object
+      additionalProperties: false
+      required: [rule, message]
+      properties:
+        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met]}
+        message: {type: string}
+        refs:
+          description: test_id or test_id/check_id pointing at the verdicts behind this reason.
+          type: array
+          items: {type: string}
+
+  scorecard:
+    description: Accuracy and Experience are kept apart on purpose; one blended score hides tradeoffs.
+    type: object
+    additionalProperties: false
+    required: [accuracy, experience]
+    properties:
+      accuracy: {$ref: "#/$defs/section_score"}
+      experience: {$ref: "#/$defs/section_score"}
+      security: {$ref: "#/$defs/section_score"}
+
+  reliability:
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [scenario_id, criticality, k, passed, failed, unverified]
+      properties:
+        scenario_id: {type: string}
+        criticality: {enum: [critical, normal, exploratory]}
+        k: {type: integer}
+        passed: {type: integer}
+        failed: {type: integer}
+        unverified: {description: "Repeats that ended ERROR, NOT_VERIFIED or NEEDS_REVIEW.", type: integer}
+        pass_at_k: {description: "At least one repeat passed.", type: [boolean, "null"]}
+        pass_hat_k: {description: "All k repeats passed. null when there is not enough evidence to say.", type: [boolean, "null"]}
+
+  latency:
+    description: Measured from recorded audio in voice mode. null in text-only runs.
+    type: object
+    additionalProperties: false
+    properties:
+      turns_measured: {type: integer}
+      p50_ms: {type: [integer, "null"]}
+      p95_ms: {type: [integer, "null"]}
+      p50_limit_ms: {type: integer}
+      p95_limit_ms: {type: integer}
+      within_limits: {type: [boolean, "null"]}
+
+  coverage:
+    type: object
+    additionalProperties: false
+    required: [planned_calls, verified_calls, ratio, min_required]
+    properties:
+      planned_calls: {type: integer}
+      verified_calls: {description: "Calls whose status is PASS or FAIL.", type: integer}
+      error_calls: {type: integer}
+      not_verified_calls: {type: integer}
+      needs_review_calls: {type: integer}
+      ratio: {type: number, minimum: 0, maximum: 1}
+      min_required: {type: number}
+
+  judges:
+    description: Calibration status of each judge rubric item used in this run (Phase 3).
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [rubric_item, kappa, can_block]
+      properties:
+        rubric_item: {type: string}
+        kappa: {type: [number, "null"]}
+        labelled_calls: {type: integer}
+        can_block: {type: boolean}
+
+  calls:
+    description: Pointers to every call verdict in the run.
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [test_id, scenario_id, repeat, status]
+      properties:
+        test_id: {type: string}
+        scenario_id: {type: string}
+        repeat: {type: integer}
+        status: {enum: [PASS, FAIL, ERROR, NOT_VERIFIED, NEEDS_REVIEW]}
+
+$defs:
+  section_score:
+    type: object
+    additionalProperties: false
+    required: [score, passed, failed, total, coverage]
+    properties:
+      score: {description: "passed / (passed + failed). null if nothing was verified.", type: [number, "null"], minimum: 0, maximum: 1}
+      passed: {type: integer}
+      failed: {type: integer}
+      total: {description: "All check results in this section, including unverified ones.", type: integer}
+      coverage: {description: "(passed + failed) / total. Always shown next to the score.", type: number, minimum: 0, maximum: 1}

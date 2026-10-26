@@ -1,0 +1,139 @@
+# Layer L7 - Verdict for one call (verdict.json)
+# Written by the evaluators after the evidence is locked. Every PASS or FAIL must cite evidence.
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: vatf/call_verdict/0.1
+title: Call verdict
+type: object
+additionalProperties: false
+required: [schema_version, kind, test_id, run_id, scenario_id, repeat, status, checks]
+properties:
+  schema_version: {const: "0.1"}
+  kind: {const: call_verdict}
+  test_id: {type: string}
+  run_id: {type: string}
+  scenario_id: {type: string}
+  persona_id: {type: string}
+  repeat: {type: integer, minimum: 1}
+  evaluated_at: {type: string, format: date-time}
+  status:
+    description: >
+      Rolled up in this order: ERROR (harness failed or caller went off-script),
+      then FAIL, then NEEDS_REVIEW, then NOT_VERIFIED, then PASS.
+      An ERROR call is rerun. Its check results are still stored and shown in the
+      report as warnings, but they never count toward the decision.
+    enum: [PASS, FAIL, ERROR, NOT_VERIFIED, NEEDS_REVIEW]
+
+  outcome:
+    description: The outcome check result. Absent when the scenario has no outcome block.
+    type: object
+    additionalProperties: false
+    required: [class, expected, said, did, stored, result, evidence]
+    properties:
+      class:
+        enum:
+          - TRUE_SUCCESS      # said done, write ok, record matches
+          - HONEST_FAILURE    # said it failed, write failed, no record
+          - NO_ACTION         # nothing claimed, nothing written
+          - FALSE_SUCCESS     # said done, but write failed or no record (critical)
+          - FALSE_FAILURE     # said it failed, but write ok and record exists
+          - SILENT_DATA_BUG   # write ok, but record missing or wrong
+          - DUPLICATE_ACTION  # same write done more than once
+          - UNEXPECTED_ACTION # a write happened when none should
+          - NOT_VERIFIED      # evidence missing (e.g. no backend access, probe error)
+      expected: {enum: [success, honest_failure, no_action]}
+      said: {description: "What the agent told the caller.", enum: [success, failure, unclear, nothing]}
+      did:
+        type: object
+        additionalProperties: false
+        properties:
+          write_calls: {type: integer}
+          ok_calls: {type: integer}
+          reached_backend: {type: integer}
+      stored: {enum: [match, missing, wrong_values, duplicate, unknown]}
+      result: {$ref: "#/$defs/result"}
+      evidence: {type: array, items: {$ref: "#/$defs/evidence_ref"}}
+
+  checks:
+    type: array
+    items: {$ref: "#/$defs/check_result"}
+
+  metrics:
+    description: Measured numbers. Latency is from the call clock (end of caller speech to first agent audio).
+    type: object
+    additionalProperties: false
+    properties:
+      turns: {type: integer}
+      duration_ms: {type: integer}
+      latency_ms: {description: "One value per agent turn.", type: array, items: {type: integer}}
+      latency_p50_ms: {type: integer}
+      latency_p95_ms: {type: integer}
+      cost_usd: {type: number}
+
+$defs:
+  result:
+    enum: [PASS, FAIL, ERROR, NOT_VERIFIED, NOT_APPLICABLE, NEEDS_REVIEW]
+
+  evidence_ref:
+    type: object
+    additionalProperties: false
+    required: [event]
+    properties:
+      event: {description: "seq of the cited timeline event.", type: integer, minimum: 1}
+      note: {type: string}
+
+  check_result:
+    type: object
+    additionalProperties: false
+    required: [check_id, origin, result, severity, section, message, evidence, evidence_level]
+    properties:
+      check_id: {type: string}
+      type: {description: "The check type from the scenario, if any.", type: string}
+      origin: {enum: [hard_check, outcome, metric, judge, validator]}
+      result: {$ref: "#/$defs/result"}
+      severity: {enum: [blocker, major, minor]}
+      section: {enum: [accuracy, experience, security]}
+      message: {description: "One plain sentence a person can read in the report.", type: string}
+      evidence: {type: array, items: {$ref: "#/$defs/evidence_ref"}}
+      evidence_level:
+        description: The strongest kind of evidence behind this result (the evidence ranking).
+        enum: [backend, tool_traffic, platform, speech, ai_opinion, none]
+      can_block:
+        description: >
+          false for judge items whose kappa is below the threshold (advisory only).
+          Hard checks and the outcome check can always block.
+        type: boolean
+        default: true
+      judge:
+        description: Present only when origin is judge (Phase 3).
+        type: object
+        additionalProperties: false
+        required: [rubric_item, applicable, votes]
+        properties:
+          rubric_item: {type: string}
+          applicable: {type: boolean}
+          votes:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [judge, model, result, reason]
+              properties:
+                judge: {enum: [primary, secondary]}
+                model: {type: string}
+                result: {enum: [PASS, FAIL, NOT_APPLICABLE]}
+                reason: {type: string}
+                cites: {type: array, items: {type: integer}}
+          kappa: {type: number}
+    allOf:
+      - if: {properties: {result: {enum: [PASS, FAIL]}}}
+        then:
+          properties:
+            evidence: {minItems: 1}
+            evidence_level: {not: {const: none}}
+      - if: {properties: {origin: {const: judge}}}
+        then: {required: [judge]}
+      # AI can raise but never clear: a judge may only add FAIL / NEEDS_REVIEW findings,
+      # it cannot turn a hard-check FAIL into PASS. That is enforced in code; here we
+      # record that judge-only evidence is always ai_opinion.
+      - if: {properties: {origin: {const: judge}}}
+        then: {properties: {evidence_level: {const: ai_opinion}}}

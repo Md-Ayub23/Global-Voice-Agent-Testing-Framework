@@ -1,0 +1,154 @@
+# Layer L5/L6 - Run trace: one timeline event
+# A call's timeline is events.jsonl: one JSON object per line, in seq order.
+# Events are raw evidence only (what was seen). Opinions and scores live in the verdict.
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: vatf/trace_event/0.1
+title: Trace event
+type: object
+additionalProperties: false
+required: [seq, t_ms, source, type, data]
+properties:
+  seq: {description: "Counts 1, 2, 3... within the call. Verdicts cite events by seq.", type: integer, minimum: 1}
+  t_ms:
+    description: >
+      Milliseconds since the call started, from the observer that saw the event
+      (for audio: the recorder's wire timestamp, not when our STT finished).
+    type: integer
+    minimum: 0
+  source: {enum: [connector, caller, recorder, tool_proxy, probe, platform, validator, harness]}
+  type:
+    enum:
+      - call_started
+      - caller_turn
+      - agent_turn
+      - tool_request
+      - tool_response
+      - fault_injected
+      - handoff
+      - probe_result
+      - platform_event
+      - validator_result
+      - harness_event
+      - call_ended
+  turn: {description: "Conversation turn number this event belongs to, if any.", type: integer, minimum: 1}
+  data: {type: object}
+
+allOf:
+  - if: {properties: {type: {const: call_started}}}
+    then:
+      properties:
+        data:
+          required: [test_id, mode]
+          properties:
+            test_id: {type: string}
+            mode: {enum: [text, voice]}
+  - if: {properties: {type: {const: caller_turn}}}
+    then:
+      properties:
+        data:
+          required: [text]
+          properties:
+            text: {description: "What the simulated caller said (its own words).", type: string}
+            audio: {$ref: "#/$defs/audio_span"}
+            barge_in: {type: boolean}
+  - if: {properties: {type: {const: agent_turn}}}
+    then:
+      properties:
+        data:
+          required: [heard_text]
+          properties:
+            heard_text:
+              description: >
+                The agent's words as the caller heard them: our own STT in voice mode,
+                the raw reply in text mode. This is what the caller simulator sees.
+              type: string
+            audio: {$ref: "#/$defs/audio_span"}
+            platform_transcript:
+              description: The platform's own transcript, kept for comparison only. Never shown to the caller.
+              type: string
+            agent_name: {description: "For multi-agent platforms, which sub-agent spoke.", type: string}
+  - if: {properties: {type: {const: tool_request}}}
+    then:
+      properties:
+        data:
+          required: [call_id, tool, args]
+          properties:
+            call_id: {type: string}
+            tool: {type: string}
+            args: {type: object}
+  - if: {properties: {type: {const: tool_response}}}
+    then:
+      properties:
+        data:
+          required: [call_id, tool, ok, duration_ms, reached_backend]
+          properties:
+            call_id: {type: string}
+            tool: {type: string}
+            ok: {description: "What the agent was told.", type: boolean}
+            status: {type: integer}
+            body: {}
+            duration_ms: {type: integer}
+            reached_backend: {description: "Whether the request was really forwarded upstream.", type: boolean}
+  - if: {properties: {type: {const: fault_injected}}}
+    then:
+      properties:
+        data:
+          required: [call_id, tool, fault]
+          properties:
+            call_id: {type: string}
+            tool: {type: string}
+            fault: {type: object}
+  - if: {properties: {type: {const: handoff}}}
+    then:
+      properties:
+        data:
+          required: [to]
+          properties:
+            from: {type: string}
+            to: {type: string}
+  - if: {properties: {type: {const: probe_result}}}
+    then:
+      properties:
+        data:
+          required: [probe, ok]
+          properties:
+            probe: {type: string}
+            ok: {description: "false means the probe itself failed (harness problem), not that the record is missing.", type: boolean}
+            rows: {type: array}
+            value: {}
+            error: {type: string}
+  - if: {properties: {type: {const: validator_result}}}
+    then:
+      properties:
+        data:
+          required: [on_script]
+          properties:
+            on_script: {description: "false means the simulated caller broke its goal or facts; the call is a harness ERROR.", type: boolean}
+            problems: {type: array, items: {type: string}}
+  - if: {properties: {type: {const: harness_event}}}
+    then:
+      properties:
+        data:
+          required: [level, code, message]
+          properties:
+            level: {enum: [info, warning, error]}
+            code: {description: "Stable code such as stt_failed, connector_dropped, budget_exceeded, llm_error.", type: string}
+            message: {type: string}
+  - if: {properties: {type: {const: call_ended}}}
+    then:
+      properties:
+        data:
+          required: [ended_by]
+          properties:
+            ended_by: {enum: [caller, agent, max_turns, timeout, harness]}
+            reason: {type: string}
+
+$defs:
+  audio_span:
+    type: object
+    additionalProperties: false
+    required: [file, start_ms, end_ms]
+    properties:
+      file: {description: "Path relative to the call folder.", type: string}
+      start_ms: {description: "First audio sample, on the call clock.", type: integer}
+      end_ms: {description: "Last audio sample (end of speech), on the call clock.", type: integer}
