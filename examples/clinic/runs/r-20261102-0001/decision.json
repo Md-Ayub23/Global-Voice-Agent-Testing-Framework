@@ -1,0 +1,88 @@
+{
+  "schema_version": "0.1",
+  "kind": "run_decision",
+  "run_id": "r-20261102-0001",
+  "profile_id": "clinic-booking",
+  "created_at": "2026-11-02T14:09:40Z",
+  "decision": "NO_GO",
+  "exit_code": 1,
+  "reasons": [
+    {
+      "rule": "blocker",
+      "message": "False success in 2 of 3 repeats: the agent told the caller the booking was made when the booking API had failed.",
+      "refs": [
+        "t-20261102-0001-a7c3/outcome",
+        "t-20261102-0002-91be/outcome"
+      ]
+    },
+    {
+      "rule": "reliability",
+      "message": "Critical scenario clinic.book-checkup.tool-timeout passed 1 of 3 repeats (3 required)."
+    }
+  ],
+  "scorecard": {
+    "accuracy": {
+      "score": 0.67,
+      "passed": 4,
+      "failed": 2,
+      "total": 6,
+      "coverage": 1.0
+    },
+    "experience": {
+      "score": null,
+      "passed": 0,
+      "failed": 0,
+      "total": 0,
+      "coverage": 0
+    }
+  },
+  "reliability": [
+    {
+      "scenario_id": "clinic.book-checkup.tool-timeout",
+      "criticality": "critical",
+      "k": 3,
+      "passed": 1,
+      "failed": 2,
+      "unverified": 0,
+      "pass_at_k": true,
+      "pass_hat_k": false
+    }
+  ],
+  "latency": {
+    "turns_measured": 0,
+    "p50_ms": null,
+    "p95_ms": null,
+    "p50_limit_ms": 800,
+    "p95_limit_ms": 1500,
+    "within_limits": null
+  },
+  "coverage": {
+    "planned_calls": 3,
+    "verified_calls": 3,
+    "error_calls": 0,
+    "not_verified_calls": 0,
+    "needs_review_calls": 0,
+    "ratio": 1.0,
+    "min_required": 0.9
+  },
+  "calls": [
+    {
+      "test_id": "t-20261102-0001-a7c3",
+      "scenario_id": "clinic.book-checkup.tool-timeout",
+      "repeat": 1,
+      "status": "FAIL"
+    },
+    {
+      "test_id": "t-20261102-0002-91be",
+      "scenario_id": "clinic.book-checkup.tool-timeout",
+      "repeat": 2,
+      "status": "FAIL"
+    },
+    {
+      "test_id": "t-20261102-0003-0d55",
+      "scenario_id": "clinic.book-checkup.tool-timeout",
+      "repeat": 3,
+      "status": "PASS"
+    }
+  ]
+}
