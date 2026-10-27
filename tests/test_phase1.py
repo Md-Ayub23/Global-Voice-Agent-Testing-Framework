@@ -303,3 +303,19 @@ def test_clinic_llm_brain_without_a_key_fails_at_start(monkeypatch, tmp_path):
     monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
     orch, decision = run(tmp_path, project(brain="llm"), scenario_ids=(SCRIPTED,), repeats=1)
     assert decision["calls"][0]["status"] == "ERROR"  # a setup problem, never blamed on the agent
+
+
+def test_dotenv_is_loaded_but_never_overrides_the_shell(tmp_path, monkeypatch):
+    from vatf.cli import load_dotenv
+
+    (tmp_path / ".env").write_text('# key\nVATF_TEST_A="from-file"\nexport VATF_TEST_B=file\n', encoding="utf-8")
+    monkeypatch.delenv("VATF_TEST_A", raising=False)
+    monkeypatch.setenv("VATF_TEST_B", "from-shell")
+    assert load_dotenv(tmp_path / ".env") == ["VATF_TEST_A"]
+    import os
+    assert os.environ["VATF_TEST_A"] == "from-file" and os.environ["VATF_TEST_B"] == "from-shell"
+    monkeypatch.delenv("VATF_TEST_A")
+
+
+def test_dotenv_is_git_ignored():
+    assert ".env" in (ROOT / ".gitignore").read_text(encoding="utf-8").split()

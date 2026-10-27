@@ -18,6 +18,10 @@ uv run vatf run examples/clinic           # full run (needs ANTHROPIC_API_KEY)
 uv run vatf exit-check examples/clinic    # clean agent + each bug switch
 ```
 
+For real runs, copy `.env.example` to `.env` in the repo folder and paste your
+Anthropic API key after `ANTHROPIC_API_KEY=`. vatf reads it at start-up; a key
+already set in the shell wins. `.env` is in `.gitignore`, so it is never committed.
+
 Useful options for `run` and `exit-check`:
 
 | Option | What it does |

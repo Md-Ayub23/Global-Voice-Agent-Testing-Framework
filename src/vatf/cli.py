@@ -24,6 +24,26 @@ EXIT_CHECK = {
 }
 
 
+def load_dotenv(path: Path) -> list[str]:
+    """Reads KEY=VALUE lines from a .env file into the environment.
+
+    Variables already set in the shell win over the file. Returns the names it set.
+    """
+    if not path.is_file():
+        return []
+    loaded = []
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.removeprefix("export ").partition("=")
+        key, value = key.strip(), value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+            loaded.append(key)
+    return loaded
+
+
 def _agent_options(pairs: list[str]) -> dict:
     options = {}
     for pair in pairs:
@@ -44,7 +64,8 @@ def _llm(args, project):
     if args.offline:
         return None
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
-        print("warning: ANTHROPIC_API_KEY is not set; simulated calls will fail. Use --offline for a free dry run.")
+        print("warning: ANTHROPIC_API_KEY is not set (in the shell or in a .env file); simulated calls will fail. "
+              "Use --offline for a free dry run.")
     budget = Budget(project.profile.get("limits", {}).get("budget_usd", 5))
     return ClaudeClient(budget, cache_dir=Path(args.root) / args.runs_dir / ".llm-cache")
 
@@ -124,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
         p.set_defaults(func=func)
 
     args = parser.parse_args(argv)
+    load_dotenv(Path(getattr(args, "root", ".")) / ".env")
     try:
         return args.func(args)
     except ProjectError as e:

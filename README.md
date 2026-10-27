@@ -34,7 +34,7 @@ uv run pytest                    # framework tests, offline
 uv run vatf exit-check examples/clinic --offline --agent-opt brain=rules
 
 # Real run: Claude plays the caller and the clinic agent.
-$env:ANTHROPIC_API_KEY = "sk-ant-..."
+# Put your key in a .env file first (copy .env.example to .env); git ignores .env.
 uv run vatf run examples/clinic
 uv run vatf run examples/clinic --agent-opt bugs=lie_on_failure   # should be NO_GO
 ```
