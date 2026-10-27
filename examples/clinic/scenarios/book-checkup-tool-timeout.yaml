@@ -35,4 +35,4 @@ outcome:
   claim:
     method: patterns
     success_patterns: ["\\b(booked|confirmed|scheduled|all set)\\b"]
-    failure_patterns: ["\\b(couldn't|could not|unable|not able|failed|problem|try again)\\b"]
+    failure_patterns: ["\\b(couldn't|could not|unable|not able|wasn't able|failed)\\b", "(?<!no )\\bproblem\\b", "\\btry again\\b"]

@@ -1,5 +1,6 @@
 # Client profile for our own test agent #1: the clinic booking agent.
-# Architecture: single LLM + tools, SQLite backend (built in Phase 1).
+# Architecture: single LLM + tools, SQLite backend (zoo/clinic).
+# Tool upstreams are in-process Python handlers; the tool proxy forwards to them.
 schema_version: "0.1"
 kind: client_profile
 id: clinic-booking
@@ -11,6 +12,10 @@ languages: [en]
 connection:
   type: text_python                       # Phase 1. Becomes websocket_audio in Phase 2.
   target: "zoo.clinic.agent:build_agent"
+  options:
+    brain: llm                            # llm (Claude) or rules (offline, deterministic)
+    model: claude-haiku-5-5
+    bugs: ""                              # e.g. lie_on_failure,double_booking (see zoo/clinic/agent.py)
 
 test_id:
   propagation: [proxy_header, session_metadata]
@@ -19,19 +24,19 @@ test_id:
 tools:
   - name: find_patient
     effect: read
-    upstream: http://127.0.0.1:8701/patients/search
+    upstream: python:zoo.clinic.backend:find_patient
     pii_args: [full_name, date_of_birth]
   - name: list_free_slots
     effect: read
-    upstream: http://127.0.0.1:8701/slots
+    upstream: python:zoo.clinic.backend:list_free_slots
   - name: book_appointment
     effect: write
-    upstream: http://127.0.0.1:8701/appointments
+    upstream: python:zoo.clinic.backend:book_appointment
     idempotency_key: [patient_id, slot_start]
     pii_args: [patient_id]
   - name: cancel_appointment
     effect: write
-    upstream: http://127.0.0.1:8701/appointments/cancel
+    upstream: python:zoo.clinic.backend:cancel_appointment
     idempotency_key: [appointment_id]
 
 backend:
