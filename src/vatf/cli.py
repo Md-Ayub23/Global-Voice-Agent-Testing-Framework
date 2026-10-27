@@ -54,10 +54,18 @@ def _agent_options(pairs: list[str]) -> dict:
     return options
 
 
+def _project(args):
+    """The project with its agent options: offline_options first (with --offline), then --agent-opt."""
+    project = load_project(args.project)
+    if args.offline:
+        project = project.with_agent_options(project.profile["connection"].get("offline_options", {}))
+    return project.with_agent_options(_agent_options(args.agent_opt or []))
+
+
 def _config(args) -> RunConfig:
     return RunConfig(root=Path(args.root).resolve(), runs_dir=Path(args.runs_dir), offline=args.offline,
                      caller_model=args.model, validator_model=args.model, repeats=args.repeats,
-                     scenario_ids=tuple(args.scenario or ()))
+                     scenario_ids=tuple(args.scenario or ()), mask_pii=not args.show_pii)
 
 
 def _llm(args, project):
@@ -78,21 +86,29 @@ def cmd_validate(args) -> int:
 
 
 def cmd_run(args) -> int:
-    project = load_project(args.project).with_agent_options(_agent_options(args.agent_opt or []))
-    orch = Orchestrator(project, _config(args), llm=_llm(args, project))
+    project = _project(args)
+    llm = _llm(args, project)
+    orch = Orchestrator(project, _config(args), llm=llm)
     decision = asyncio.run(orch.run())
     print()
-    print(f"DECISION: {decision['decision']}")
-    for r in decision["reasons"]:
-        print(f"  - {r['message']}")
+    if args.quiet:
+        print(f"DECISION: {decision['decision']}")
+        for r in decision["reasons"]:
+            print(f"  - {r['message']}")
+    else:
+        # Every call in plain English (conversation, tool calls, database, judgement), then the decision.
+        print(Path(decision["_transcript"]).read_text(encoding="utf-8"))
+    if llm is not None:
+        print(f"framework LLM cost (caller + validator): ${llm.spent_usd:.4f}")
     print(f"report: {decision['_report']}")
+    print(f"transcript: {decision['_transcript']}")
     return decision["exit_code"]
 
 
 def cmd_exit_check(args) -> int:
     """Runs the clean agent and each bug switch, and checks the Phase 1 exit criterion:
     every bug caught in every repeat, and no false alarms on the clean agent."""
-    base = load_project(args.project).with_agent_options(_agent_options(args.agent_opt or []))
+    base = _project(args)
     config = _config(args)
     llm = _llm(args, base)
     rows, all_ok = [], True
@@ -112,7 +128,7 @@ def cmd_exit_check(args) -> int:
             detail = (f"caught in {r['failed']} of {r['k']} repeats of {EXIT_CHECK[bug]}; {decision['decision']}"
                       if r else f"scenario {EXIT_CHECK[bug]} was not run")
         all_ok &= ok
-        rows.append((label, "OK  " if ok else "MISS", detail, decision["_report"]))
+        rows.append((label, "OK  " if ok else "MISS", detail, decision["_transcript"]))
     print("\nPhase 1 exit check")
     for label, mark, detail, report in rows:
         print(f"  [{mark}] {label:<18} {detail}")
@@ -142,6 +158,11 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--model", default=DEFAULT_MODEL, help=f"caller and validator model (default {DEFAULT_MODEL})")
         p.add_argument("--root", default=".", help="project root that relative paths resolve from (default: here)")
         p.add_argument("--runs-dir", default="runs", help="where runs are written (default: runs)")
+        p.add_argument("--show-pii", action="store_true",
+                       help="keep names, dates of birth and ids readable in the saved run (for checking; don't share)")
+        if name == "run":
+            p.add_argument("--quiet", action="store_true",
+                           help="don't print each call's conversation (it is still saved in transcript.txt)")
         p.set_defaults(func=func)
 
     args = parser.parse_args(argv)

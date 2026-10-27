@@ -23,6 +23,7 @@ from .outcome import evaluate_outcome
 from .probe import ProbeSetupError, SqlProbe, load_fixtures
 from .proxy import InProcessToolProxy
 from .report import write_report
+from .story import call_story_text, load_events, run_story_text
 from .util import write_json
 from .verdict import LocalVerdictBuilder
 
@@ -42,6 +43,7 @@ class RunConfig:
     validator_model: str = DEFAULT_MODEL
     repeats: int | None = None                    # override the profile's repeats
     scenario_ids: tuple[str, ...] = ()            # empty = all scenarios
+    mask_pii: bool = True                         # False (--show-pii) keeps names and dates readable
 
 
 class Orchestrator:
@@ -99,9 +101,27 @@ class Orchestrator:
         decision = LocalDecisionEngine().decide(run_id, finals, self.scenarios(), self.profile)
         run_dir = self.store.runs_dir / run_id
         write_json(run_dir / "decision.json", decision)
+        decision["_pii_masked"] = self.config.mask_pii
         report = write_report(decision, finals, error_attempts, run_dir, self.store)
         decision["_report"] = str(report)
+        decision["_transcript"] = str(self._write_stories(decision, finals, error_attempts, run_dir))
         return decision
+
+    def _write_stories(self, decision, finals, error_attempts, run_dir: Path) -> Path:
+        """story.txt per call and transcript.txt for the whole run, in plain English."""
+        def with_events(verdicts):
+            out = []
+            for v in verdicts:
+                call_dir = self.store.call_dir(v["run_id"], v["test_id"])
+                events = load_events(call_dir)
+                (call_dir / "story.txt").write_text(call_story_text(v, events), encoding="utf-8")
+                out.append((v, events))
+            return out
+
+        path = run_dir / "transcript.txt"
+        path.write_text(run_story_text(decision, with_events(finals), with_events(error_attempts)),
+                        encoding="utf-8")
+        return path
 
     def _test_id(self) -> str:
         self._counter += 1
@@ -113,12 +133,14 @@ class Orchestrator:
                           repeat=pc.repeat, attempt=attempt, mode="text")
         writer = self.store.open_call(ctx, persona_id=pc.persona_id,
                                       profile_sha256=self.project.profile_sha256,
-                                      scenario_sha256=self.project.scenario_sha256.get(scenario["id"], ""))
+                                      scenario_sha256=self.project.scenario_sha256.get(scenario["id"], ""),
+                                      mask=self.config.mask_pii)
         meta = {"test_id": ctx.test_id, "log_dir": str(writer.llm_dir)}
         cost_before = self._spent()
         status = "completed"
         ended = False
         validator_off_script = None
+        session = None
         try:
             try:
                 load_fixtures(self.profile, scenario, self.config.root)
@@ -173,6 +195,7 @@ class Orchestrator:
                 if session.has_output() and (await session.receive()).kind == "closed":
                     ended_by, reason = "agent", "the agent hung up"
             await session.close()
+            session = None
             writer.emit("connector", "call_ended", {"ended_by": ended_by, "reason": reason}, turn=turn)
             ended = True
 
@@ -200,6 +223,11 @@ class Orchestrator:
                                                      "message": f"{type(e).__name__}: {e}"})
             if not ended:
                 writer.emit("connector", "call_ended", {"ended_by": "harness", "reason": code})
+            if session is not None:
+                try:
+                    await session.close()
+                except Exception:
+                    pass  # the call is already recorded as a harness error
             status = "harness_error"
             self.log(f"    harness error ({code}): {e}")
 
@@ -218,8 +246,7 @@ class Orchestrator:
             raise HarnessError("no_llm", "simulated scenarios need an LLM (set ANTHROPIC_API_KEY or use --offline)")
         persona = self.project.personas[scenario["caller"]["persona"]]
         return LLMCaller(scenario, persona, self.llm, model=self.config.caller_model,
-                         agent_name=self.profile.get("name", "the agent"),
-                         max_tokens=self.profile.get("limits", {}).get("max_reply_tokens", 300), metadata=meta)
+                         agent_name=self.profile.get("name", "the agent"), metadata=meta)
 
     def _probes_needed(self, scenario: Mapping[str, Any]) -> list[str]:
         if self.profile.get("backend", {}).get("access") != "sql":
@@ -266,6 +293,6 @@ def _error_code(e: Exception) -> str:
     name = type(e).__name__
     if name == "BudgetExceeded":
         return "budget_exceeded"
-    if name == "LLMError":
+    if name in ("LLMError", "ValueError"):
         return "llm_error"
     return "harness_crash"

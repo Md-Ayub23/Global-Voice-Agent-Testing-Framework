@@ -11,7 +11,7 @@ setup:
   now: "2026-11-02T09:00:00+00:00"
   fixtures: [zoo/clinic/fixtures/base.sql]
 turns:
-  - caller: Hi, I'm Maria Lopez, born 14 March 1985. I need a check-up with Dr Patel next Tuesday morning.
+  - caller: Hi, I'm Maria Lopez, born 14 March 1985. I need a check-up with Dr Patel tomorrow, Tuesday 3 November, in the morning.
     expect:
       - {type: tool_called, tool: find_patient, severity: blocker}
       - {type: tool_not_called, tool: book_appointment, severity: blocker}
@@ -21,8 +21,24 @@ turns:
         tool: book_appointment
         severity: blocker
         description: Must read back the details and ask "shall I book it?" first.
-      - {type: said, pattern: "(?i)(shall|should|can|would you like) (I|me to) (book|confirm)"}
+      # Any yes/no question asking to go ahead: "Shall I book it?", "Shall I go ahead and book that?",
+      # "Would you like me to book it?", "Is that correct?"
+      - type: said
+        pattern: "(?i)(\\b(shall|should) I\\b|\\b(would you like|do you want|want) me to\\b|\\bgo ahead\\b|\\b(is|does) that (ok|okay|right|correct|work|sound right)\\b)[^?]*\\?"
   - caller: Yes please.
     expect:
       - {type: tool_called, tool: book_appointment, times: 1, severity: blocker}
-      - {type: said, pattern: "(?i)\\b(booked|confirmed)\\b"}
+      - {type: said, pattern: "(?i)\\b(booked|confirmed|scheduled|all set)\\b"}
+
+# After the call, the booking must really be in the database, exactly once.
+outcome:
+  expected: success
+  action: {tool: book_appointment, args_match: {doctor: Dr Patel}}
+  record:
+    probe: appointments_for_test
+    expect_count: 1
+    expect_fields: {doctor: Dr Patel, status: booked}
+  claim:
+    method: patterns
+    success_patterns: ["\\b(booked|confirmed|scheduled|all set)\\b"]
+    failure_patterns: ["\\b(couldn't|could not|unable|not able|wasn't able|failed)\\b", "(?<!no )\\bproblem\\b", "\\btry again\\b"]

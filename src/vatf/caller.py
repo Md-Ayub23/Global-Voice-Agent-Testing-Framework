@@ -50,7 +50,7 @@ directions, no quotation marks, no descriptions of tone."""
 
 class LLMCaller:
     def __init__(self, scenario: Mapping[str, Any], persona: Mapping[str, Any], llm: Any, *,
-                 model: str, agent_name: str, max_tokens: int = 200, metadata: Mapping[str, str] = ()):
+                 model: str, agent_name: str, max_tokens: int = 2048, metadata: Mapping[str, str] = ()):
         self._llm = llm
         self._model = model
         self._max_tokens = max_tokens
@@ -125,13 +125,16 @@ class RuleCaller:
 
 
 VALIDATOR_SYSTEM = """You review a recorded phone call made by a SIMULATED CALLER (an AI playing a person).
-Decide whether the caller stayed on script. The caller is off script if it:
-- invented or changed personal details that contradict its fact sheet,
-- pursued a different goal than the one it was given,
-- broke character (talked like an AI, or played the agent's role),
-- ignored one of its extra rules.
-The agent's behaviour does not matter here: only judge the caller.
-Answer with JSON only, no other text: {"on_script": true or false, "problems": ["short reason", ...]}"""
+Decide whether the caller stayed on script. The caller is off script only for a CLEAR violation:
+- it stated a personal detail that contradicts its fact sheet, or invented one that matters,
+- it pursued a different goal than the one it was given,
+- it broke character (talked like an AI, or played the agent's role),
+- it plainly broke one of its extra rules.
+Not violations: answering a question the agent asked (including several details asked for together),
+reasonable small talk, rephrasing, asking the agent to try again, or reacting to the agent's mistakes.
+The agent's behaviour does not matter here: only judge the caller. If you are unsure, the caller is on script.
+Decide first, then answer once with JSON only, no other text:
+{"on_script": true or false, "problems": ["short reason", ...]}"""
 
 
 class LLMValidator:
@@ -153,12 +156,26 @@ class LLMValidator:
         prompt = f"The caller's brief:\n{brief}\n\nThe call:\n" + "\n".join(lines)
         response = await self._llm.complete(LLMRequest(
             purpose="validator", model=self._model, system=VALIDATOR_SYSTEM,
-            messages=(LLMMessage("user", prompt),), max_tokens=400, metadata=self._metadata))
-        m = re.search(r"\{.*\}", response.text, re.S)
+            messages=(LLMMessage("user", prompt),), max_tokens=4096, metadata=self._metadata))
+        data = _last_json_object(response.text)
         try:
-            data = json.loads(m.group(0)) if m else None
             on_script = bool(data["on_script"])
             problems = [str(p) for p in data.get("problems", [])]
         except (ValueError, KeyError, TypeError) as e:
             raise ValueError(f"validator gave an unreadable answer: {response.text[:200]!r}") from e
         return ValidatorResult(on_script=on_script, problems=tuple(problems))
+
+
+def _last_json_object(text: str) -> dict | None:
+    """The model's final answer: it sometimes writes a JSON verdict, corrects itself, then writes another."""
+    decoder, found, i = json.JSONDecoder(), None, text.find("{")
+    while i != -1:
+        try:
+            obj, end = decoder.raw_decode(text, i)
+        except ValueError:
+            i = text.find("{", i + 1)
+            continue
+        if isinstance(obj, dict):
+            found = obj
+        i = text.find("{", end)
+    return found

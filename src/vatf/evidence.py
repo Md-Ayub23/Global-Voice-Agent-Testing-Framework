@@ -30,10 +30,13 @@ class EvidenceLocked(Exception):
 class LocalCallWriter:
     """Append-only while the call runs. lock() masks PII and seals the file with a hash."""
 
-    def __init__(self, folder: Path, record: dict[str, Any], profile: Mapping[str, Any]):
+    def __init__(self, folder: Path, record: dict[str, Any], profile: Mapping[str, Any],
+                 facts: Mapping[str, Any] | None = None, mask: bool = True):
         self.folder = folder
         self.record = record
         self._profile = profile
+        self._facts = dict(facts or {})
+        self._mask = mask  # False only with --show-pii: personal data is then stored as spoken
         self._events: list[TraceEvent] = []
         self._start = time.monotonic()
         self._locked = False
@@ -69,7 +72,16 @@ class LocalCallWriter:
         raise NotImplementedError("audio arrives in Phase 2 (voice mode)")
 
     def lock(self, status: str, cost_usd: float = 0.0) -> Mapping[str, Any]:
-        masked = [_mask_event(e, self._profile, self.record["test_id"]) for e in self._events]
+        # Personal values to find in free text: the caller's fact sheet, plus whatever personal
+        # values the agent actually sent to its tools (scripted scenarios have no fact sheet).
+        values: list[tuple[str, Any]] = list(self._facts.items())
+        keys = pii_keys(self._profile)
+        for e in self._events:
+            if e.type == "tool_request":
+                values += [(k, v) for k, v in e.data.get("args", {}).items() if k in keys]
+        patterns = fact_patterns(self._profile, values)
+        masked = ([_mask_event(e, self._profile, self.record["test_id"], patterns) for e in self._events]
+                  if self._mask else list(self._events))
         self._file.write_text("".join(_event_line(e) + "\n" for e in masked), encoding="utf-8")
         self._events = masked
         self._locked = True
@@ -79,7 +91,7 @@ class LocalCallWriter:
             "event_count": len(masked),
             "events_sha256": sha256_file(self._file),
             "locked": True,
-            "pii_masked": True,
+            "pii_masked": self._mask,
             "cost_usd": round(cost_usd, 6),
         })
         write_json(self.folder / "call.json", self.record)
@@ -107,11 +119,50 @@ def _mask_keys(node: Any, keys: set[str], salt: str) -> Any:
     return node
 
 
-def _mask_event(e: TraceEvent, profile: Mapping[str, Any], salt: str) -> TraceEvent:
+MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+          "October", "November", "December"]
+
+
+def fact_patterns(profile: Mapping[str, Any], facts: Any) -> list[tuple[str, re.Pattern]]:
+    """Regexes for the caller's personal facts as they may be spoken, so free text is masked too.
+
+    A fact is personal when its name is a tool pii_arg or a pii.mask_patterns name
+    (for the clinic: full_name and date_of_birth). Names are also masked word by word
+    ("Thank you, Maria"), and an ISO date also matches its spoken forms ("14th of March, 1985").
+    """
+    personal = pii_keys(profile) | {p["name"] for p in profile.get("pii", {}).get("mask_patterns", [])}
+    out, seen = [], set()
+    items = facts.items() if isinstance(facts, Mapping) else facts
+    for name, value in items:
+        if name not in personal or not isinstance(value, str) or not value.strip() or (name, value) in seen:
+            continue
+        seen.add((name, value))
+        m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", value.strip())
+        if m:
+            y, mo, d = m.group(1), int(m.group(2)), int(m.group(3))
+            month = f"(?:{MONTHS[mo - 1]}|{MONTHS[mo - 1][:3]})"
+            day = rf"0?{d}(?:st|nd|rd|th)?"
+            forms = [re.escape(value.strip()),
+                     rf"(?:the\s+)?{day}\s+(?:of\s+)?{month},?\s+{y}",
+                     rf"{month}\s+(?:the\s+)?{day},?\s+{y}",
+                     rf"0?{d}[/.-]0?{mo}[/.-]{y}"]
+            out.append((name, re.compile(r"\b(?:" + "|".join(forms) + r")\b", re.I)))
+            continue
+        out.append((name, re.compile(rf"\b{re.escape(value.strip())}\b", re.I)))
+        words = [w for w in re.split(r"\s+", value.strip()) if len(w) >= 3]
+        if len(words) > 1:
+            out.append((name, re.compile(r"\b(?:" + "|".join(map(re.escape, words)) + r")\b", re.I)))
+    return out
+
+
+def _mask_event(e: TraceEvent, profile: Mapping[str, Any], salt: str,
+                text_patterns: list[tuple[str, re.Pattern]] = ()) -> TraceEvent:
     data = dict(e.data)
     field = TEXT_FIELDS.get(e.type)
     if field and isinstance(data.get(field), str):
         text = data[field]
+        for name, pattern in text_patterns:
+            text = pattern.sub(f"[{name}]", text)
         for p in profile.get("pii", {}).get("mask_patterns", []):
             text = re.sub(p["regex"], f"[{p['name']}]", text)
         data[field] = text
@@ -128,7 +179,7 @@ class LocalEvidenceStore:
         return self.runs_dir / run_id / "calls" / test_id
 
     def open_call(self, ctx: CallContext, *, persona_id: str | None = None,
-                  profile_sha256: str = "", scenario_sha256: str = "") -> LocalCallWriter:
+                  profile_sha256: str = "", scenario_sha256: str = "", mask: bool = True) -> LocalCallWriter:
         folder = self.call_dir(ctx.run_id, ctx.test_id)
         folder.mkdir(parents=True, exist_ok=False)
         record = {
@@ -151,7 +202,7 @@ class LocalEvidenceStore:
         }
         if persona_id:
             record["persona_id"] = persona_id
-        return LocalCallWriter(folder, record, ctx.profile)
+        return LocalCallWriter(folder, record, ctx.profile, ctx.scenario.get("caller", {}).get("facts", {}), mask)
 
     def read_call(self, run_id: str, test_id: str) -> CallTrace:
         folder = self.call_dir(run_id, test_id)

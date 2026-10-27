@@ -26,8 +26,9 @@ Useful options for `run` and `exit-check`:
 
 | Option | What it does |
 |---|---|
-| `--offline` | No API calls. A rule-based caller answers from the fact sheet and the validator is skipped. A smoke test, not a real test. |
-| `--agent-opt brain=rules` | Use the clinic agent's deterministic brain instead of Claude. |
+| `--show-pii` | Keep personal data readable in the saved run (for checking only; the run is marked "NOT masked"). |
+| `--offline` | No API calls at all. A rule-based caller answers from the fact sheet, the validator is skipped, and the profile's `connection.offline_options` are applied (for the clinic: `brain: rules`). A smoke test, not a real test. |
+| `--agent-opt brain=rules` | Use the clinic agent's deterministic brain instead of Claude (Claude still plays the caller unless `--offline`). |
 | `--agent-opt bugs=lie_on_failure` | Turn on a bug switch (`lie_on_failure`, `skip_confirmation`, `double_booking`; comma-separate several). |
 | `--scenario ID` | Run one scenario only (repeatable). |
 | `--repeats N` | Override the profile's 3 repeats. |
@@ -37,6 +38,23 @@ A full real run is 9 calls (3 scenarios x 3 repeats). With Claude Haiku 5.5 as
 caller, validator and clinic agent it should cost a few cents. The profile's
 `budget_usd` caps it; when the cap is reached the remaining calls stop as
 harness errors.
+
+## Reading the output
+
+`vatf run` prints every call in plain English, then the decision:
+
+- **Conversation and actions**: each line says who acted. `CALLER` is the simulated customer, `AGENT` is the agent
+  under test, `AGENT uses tool` / `tool answer` are its tool calls as the proxy saw them, `vatf breaks tool` is an
+  injected fault, and `database check` is the backend probe after the call.
+- **Database after the call**: the rows the probe found for this call's test id.
+- **How it was judged**: expected outcome, what the agent said, what it did, what was stored, and the outcome class.
+- **Checks**: every check with PASS / FAIL / UNSURE / skip and the event numbers it is based on.
+
+The same text is saved as `runs/<run id>/transcript.txt` (and `story.txt` in each call folder), and
+`report.html` shows it as tables with failed calls opened. Add `--quiet` to print only the decision.
+Add `--show-pii` to keep names, dates of birth and ids readable in the saved run, so you can check that
+the right values went in and came back. Such a run is marked "NOT masked"; `runs/` is git-ignored, but don't
+share it.
 
 ## What happens in one call
 
@@ -73,8 +91,10 @@ The heart of the framework: compares what the agent **said**, what it **did**
 | NOT_VERIFIED | unclear | or no backend evidence: never counted as a pass |
 
 "Said" comes from the scenario's regex patterns, read from the agent's turns
-after the first write call. A turn that matches both lists, or none after a
-write, is "unclear" and gives NOT_VERIFIED.
+after the last write call, so a retry is judged on how it ended. A turn that
+matches both lists, or none after a write, is "unclear" and gives NOT_VERIFIED.
+In a failure scenario, a call where the agent never attempted the write is
+NOT_VERIFIED (the fault was never reached), never a pass.
 
 ## Hard checks
 
@@ -86,7 +106,8 @@ skipped as NOT_APPLICABLE until Phase 3. If the agent raises an error mid-call,
 the blocker check `agent-did-not-crash` fails.
 
 `entity_fidelity` compares each caller fact with the tool arguments and the
-backend record of the same name. The speech leg (what our STT heard) comes in
+backend record of the same name. Case, dots, spacing and a leading title do not
+matter ("Patel" equals "Dr Patel"). The speech leg (what our STT heard) comes in
 voice mode.
 
 ## PII masking
@@ -95,7 +116,10 @@ When a call is locked, every value of an argument listed in a tool's `pii_args`
 (in tool requests, responses and probe rows) is replaced by a salted hash such
 as `[masked:8bb543ace231]`. The same value always gives the same hash within a
 call, so the checks can still compare names and ids without storing them.
-Free text is masked with the profile's `pii.mask_patterns`. The llm/ folder
+Free text (what the caller and agent said) is masked too: the caller's personal facts
+and the personal values the agent sent to its tools become `[full_name]`,
+`[date_of_birth]` and so on, including first or last name alone and spoken dates
+("14th of March, 1985"). The profile's `pii.mask_patterns` are applied as well. The llm/ folder
 keeps the raw prompts, so treat it as sensitive.
 
 ## The clinic agent (zoo/clinic)

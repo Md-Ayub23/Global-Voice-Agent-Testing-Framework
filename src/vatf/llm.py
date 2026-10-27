@@ -75,6 +75,10 @@ class ClaudeClient:
         self._cache_dir = cache_dir
         self._effort = effort
 
+    @property
+    def spent_usd(self) -> float:
+        return self._budget.spent_usd
+
     def request_kwargs(self, request: LLMRequest) -> dict:
         # No temperature: current Claude models reject non-default sampling settings.
         return {
@@ -110,6 +114,10 @@ class ClaudeClient:
         text = "".join(b.text for b in msg.content if b.type == "text").strip()
         cost = price(msg.model, msg.usage.input_tokens, msg.usage.output_tokens)
         self._budget.charge(cost)
+        if not text:
+            # Usually max_tokens was used up by thinking before any answer was written.
+            raise LLMError(f"empty answer from {msg.model} (stop_reason={msg.stop_reason}, "
+                           f"{msg.usage.output_tokens} output tokens)")
         response = LLMResponse(text, msg.model, msg.usage.input_tokens, msg.usage.output_tokens, cost)
         log_exchange(request, response)
         if cache_file:

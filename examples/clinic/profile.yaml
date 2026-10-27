@@ -16,6 +16,8 @@ connection:
     brain: llm                            # llm (Claude) or rules (offline, deterministic)
     model: claude-haiku-5-5
     bugs: ""                              # e.g. lie_on_failure,double_booking (see zoo/clinic/agent.py)
+  offline_options:                        # merged into options with --offline, so nothing calls an API
+    brain: rules
 
 test_id:
   propagation: [proxy_header, session_metadata]

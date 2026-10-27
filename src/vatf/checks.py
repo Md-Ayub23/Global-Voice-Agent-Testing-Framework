@@ -117,12 +117,14 @@ def evaluate_check(check: Mapping[str, Any], check_id: str, events: Events, all_
         hits = [e for e in agent_turns if pattern.search(e.data.get("heard_text", ""))]
         if kind == "said":
             if hits:
-                return _result(check, check_id, Result.PASS, f"The agent said something matching {check['pattern']}.",
+                quote = pattern.search(hits[0].data.get("heard_text", "")).group(0)
+                return _result(check, check_id, Result.PASS, f'The agent said "{quote}" (matches the expected pattern).',
                                _refs(hits[:1]), EvidenceLevel.SPEECH)
             return _result(check, check_id, Result.FAIL, f"The agent never said anything matching {check['pattern']}.",
                            _refs(agent_turns), EvidenceLevel.SPEECH)
         if hits:
-            return _result(check, check_id, Result.FAIL, f"The agent said something matching {check['pattern']}.",
+            quote = pattern.search(hits[0].data.get("heard_text", "")).group(0)
+            return _result(check, check_id, Result.FAIL, f'The agent said "{quote}", which it must not say.',
                            _refs(hits), EvidenceLevel.SPEECH)
         return _result(check, check_id, Result.PASS, f"The agent never said anything matching {check['pattern']}.",
                        _refs(agent_turns), EvidenceLevel.SPEECH)

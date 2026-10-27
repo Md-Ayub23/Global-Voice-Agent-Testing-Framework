@@ -14,15 +14,15 @@ setup:
 
 caller:
   persona: calm-adult
-  goal: Book a routine check-up with Dr Patel next Tuesday morning.
+  goal: Book a routine check-up with Dr Patel tomorrow, Tuesday 3 November, in the morning.
   facts:
     full_name: Maria Lopez
     date_of_birth: "1985-03-14"
     doctor: Dr Patel
-    preferred_day: next Tuesday
+    preferred_day: Tuesday 3 November
     preferred_time: morning
   rules:
-    - Only give your date of birth when asked.
+    - Do not give your date of birth until the agent asks for it.
     - If no morning slot is free, accept the earliest afternoon slot that day.
   end_when: The agent confirms the booking, or says it cannot book.
   max_turns: 16

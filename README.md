@@ -31,7 +31,7 @@ uv sync                          # install
 uv run pytest                    # framework tests, offline
 
 # Free dry run: rule-based caller and agent, no API calls.
-uv run vatf exit-check examples/clinic --offline --agent-opt brain=rules
+uv run vatf exit-check examples/clinic --offline
 
 # Real run: Claude plays the caller and the clinic agent.
 # Put your key in a .env file first (copy .env.example to .env); git ignores .env.
@@ -39,5 +39,5 @@ uv run vatf run examples/clinic
 uv run vatf run examples/clinic --agent-opt bugs=lie_on_failure   # should be NO_GO
 ```
 
-Each run writes `runs/<run_id>/report.html`. Exit codes: 0 GO, 1 NO_GO,
+Each run prints every call (conversation, tool calls, database result, judgement) and writes the same to `runs/<run_id>/transcript.txt` and `runs/<run_id>/report.html`. Exit codes: 0 GO, 1 NO_GO,
 2 NO_GO (not enough evidence), 3 the framework itself failed.

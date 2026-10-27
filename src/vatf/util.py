@@ -11,9 +11,14 @@ from typing import Any, Mapping
 MASK_PREFIX = "[masked:"
 
 
+TITLES = re.compile(r"^(dr|doctor|mr|mrs|ms|miss|mx|prof)\s+")
+
+
 def norm(value: Any) -> str:
-    """Loose comparison form: case, dots and extra spaces do not matter ("Dr. Patel" == "dr patel")."""
-    return re.sub(r"\s+", " ", str(value).replace(".", " ")).strip().lower()
+    """Loose comparison form: case, dots, extra spaces and a leading title do not matter
+    ("Dr. Patel" == "dr patel" == "Patel")."""
+    text = re.sub(r"\s+", " ", str(value).replace(".", " ")).strip().lower()
+    return TITLES.sub("", text)
 
 
 def mask_token(value: Any, salt: str) -> str:

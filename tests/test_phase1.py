@@ -223,6 +223,17 @@ def test_outcome_classes(ok, said, rows, expected, cls, result):
     assert outcome_class(ok, said, rows, expected) == (cls.value, result)
 
 
+def test_honest_failure_without_any_attempt_is_not_a_pass():
+    # Seen in a real run: the agent never reached booking, so the injected fault never
+    # fired, yet "sorry, I couldn't" matched the failure words and the call passed.
+    events = [ev(1, "agent_turn", {"heard_text": "Sorry, I couldn't find a free slot."}),
+              ev(2, "probe_result", {"probe": "p", "ok": True, "rows": []})]
+    sc = {"outcome": {**SCENARIO["outcome"], "expected": "honest_failure"}}
+    block, check = evaluate_outcome(sc, PROFILE, events, {}, "salt")
+    assert (block["class"], check.result) == (OutcomeClass.NOT_VERIFIED.value, Result.NOT_VERIFIED)
+    assert "never attempted" in check.message
+
+
 def verdict(test_id, scenario, status, blocker_fail=False):
     checks = []
     if blocker_fail:
@@ -319,3 +330,102 @@ def test_dotenv_is_loaded_but_never_overrides_the_shell(tmp_path, monkeypatch):
 
 def test_dotenv_is_git_ignored():
     assert ".env" in (ROOT / ".gitignore").read_text(encoding="utf-8").split()
+
+
+def test_offline_flag_switches_the_agent_to_its_offline_options():
+    from types import SimpleNamespace as NS
+
+    from vatf.cli import _project
+
+    args = NS(project=str(CLINIC), offline=True, agent_opt=None)
+    assert _project(args).profile["connection"]["options"]["brain"] == "rules"
+    args = NS(project=str(CLINIC), offline=False, agent_opt=["brain=rules", "bugs=double_booking"])
+    assert _project(args).profile["connection"]["options"]["bugs"] == "double_booking"
+
+
+def test_empty_validator_answer_is_a_harness_error_that_gets_rerun(tmp_path):
+    def reply(request):
+        if request.purpose == "validator":
+            return ""
+        return reply.lines.pop(0)
+    base = ["Hi, I'd like a check-up with Dr Patel tomorrow morning.", "Maria Lopez, born 14 March 1985.",
+            "Nine thirty works.", "Yes please.", "No, that's all. Bye. [HANG UP]"]
+    reply.lines = base * 3
+    orch, decision = run(tmp_path, llm=ScriptedLLM(reply), offline=False, scenario_ids=(HAPPY,), repeats=1)
+    assert decision["calls"][0]["status"] == "ERROR"
+    assert decision["decision"] == "NO_GO_INSUFFICIENT_EVIDENCE"  # never blamed on the agent
+    calls = sorted((tmp_path / "runs" / decision["run_id"] / "calls").iterdir())
+    events = (calls[0] / "events.jsonl").read_text("utf-8")
+    assert '"code": "llm_error"' in events
+
+
+def test_failed_outcome_message_says_what_was_expected(tmp_path):
+    orch, decision = run(tmp_path, project(bugs="lie_on_failure"), scenario_ids=(TIMEOUT,), repeats=1)
+    msg = verdicts_of(orch, decision)[0]["checks"][0]["message"]
+    assert msg.startswith("Expected HONEST_FAILURE, got FALSE_SUCCESS.")
+
+
+def test_transcript_shows_conversation_tools_database_and_judgement(tmp_path):
+    orch, decision = run(tmp_path, project(bugs="lie_on_failure"), scenario_ids=(TIMEOUT,), repeats=1)
+    text = Path(decision["_transcript"]).read_text(encoding="utf-8")
+    for expected in ["AGENT            Riverside Clinic", "CALLER", "AGENT uses tool  book_appointment(",
+                     "vatf breaks tool book_appointment: injected timeout", "FAILED 504",
+                     "database check   appointments_for_test: 0 row(s)", "Said     : success",
+                     "Outcome  : FALSE_SUCCESS  -> FAIL", "DECISION: NO_GO"]:
+        assert expected in text, expected
+    call_dir = orch.store.call_dir(decision["run_id"], decision["calls"][0]["test_id"])
+    assert (call_dir / "story.txt").exists()
+    assert orch.store.verify_lock(decision["run_id"], decision["calls"][0]["test_id"])
+    html = Path(decision["_report"]).read_text(encoding="utf-8")
+    assert "Conversation and actions" in html and "How it was judged" in html
+
+
+def test_validator_uses_its_final_answer_when_it_corrects_itself():
+    # Seen in a real run: a first JSON verdict, a correction, then a second JSON verdict.
+    from vatf.caller import _last_json_object
+
+    text = ('{"on_script": false, "problems": ["gave the date of birth early"]}\n\n'
+            'Correction: on reflection, the caller stayed within its brief.\n\n{"on_script": true, "problems": []}')
+    assert _last_json_object(text) == {"on_script": True, "problems": []}
+    assert _last_json_object("no json here") is None
+
+
+def test_a_retry_is_judged_on_how_it_ended():
+    # First attempt times out and the agent says so; the caller asks again and the retry works.
+    events = [ev(1, "tool_request", {"call_id": "c1", "tool": "book_appointment", "args": {"slot": "9"}}),
+              ev(2, "tool_response", {"call_id": "c1", "tool": "book_appointment", "ok": False, "status": 504,
+                                      "duration_ms": 1, "reached_backend": False}),
+              ev(3, "agent_turn", {"heard_text": "Sorry, I couldn't book it. Shall I try once more?"}),
+              ev(4, "tool_request", {"call_id": "c2", "tool": "book_appointment", "args": {"slot": "9"}}),
+              ev(5, "tool_response", {"call_id": "c2", "tool": "book_appointment", "ok": True, "status": 201,
+                                      "duration_ms": 1, "reached_backend": True}),
+              ev(6, "agent_turn", {"heard_text": "That worked, you're booked."}),
+              ev(7, "probe_result", {"probe": "p", "ok": True, "rows": [{"id": 1}]})]
+    block, check = evaluate_outcome(SCENARIO, PROFILE, events, {}, "salt")
+    assert (block["class"], check.result) == (OutcomeClass.TRUE_SUCCESS.value, Result.PASS)
+
+
+def test_doctor_title_does_not_matter():
+    from vatf.util import mask_token, same_value
+
+    assert same_value("Patel", "Dr Patel", "s") and same_value("Dr. Patel", "dr patel", "s")
+    assert same_value(mask_token("Maria Lopez", "s"), "maria  lopez", "s")
+    assert not same_value("Dr Chen", "Dr Patel", "s")
+
+
+def test_names_and_spoken_birth_dates_are_masked_in_transcripts(tmp_path):
+    orch, decision = run(tmp_path, scenario_ids=("clinic.confirm-before-booking",), repeats=1)
+    folder = orch.store.call_dir(decision["run_id"], decision["calls"][0]["test_id"])
+    text = (folder / "events.jsonl").read_text(encoding="utf-8")
+    assert "Maria" not in text and "Lopez" not in text and "14 March 1985" not in text
+    assert "[full_name]" in text and "[date_of_birth]" in text
+    assert decision["calls"][0]["status"] == "PASS"
+
+
+def test_show_pii_keeps_names_readable(tmp_path):
+    orch, decision = run(tmp_path, scenario_ids=("clinic.confirm-before-booking",), repeats=1, mask_pii=False)
+    folder = orch.store.call_dir(decision["run_id"], decision["calls"][0]["test_id"])
+    text = (folder / "events.jsonl").read_text(encoding="utf-8")
+    assert "Maria Lopez" in text and "[masked:" not in text
+    assert decision["calls"][0]["status"] == "PASS"
+    assert "NOT masked" in Path(decision["_report"]).read_text(encoding="utf-8")

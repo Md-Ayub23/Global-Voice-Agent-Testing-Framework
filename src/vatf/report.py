@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from html import escape
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from .story import database_rows, judgement, load_events, story_rows
 
 
 BADGE = {"PASS": "ok", "GO": "ok", "FAIL": "bad", "NO_GO": "bad", "ERROR": "warn",
@@ -39,7 +40,11 @@ th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;le
 .b.warn{background:var(--warn-bg);color:var(--warn)}.b.muted{color:var(--muted);border:1px solid var(--line)}
 details{background:var(--card);border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:8px 12px}
 summary{cursor:pointer}
-.turn{margin:4px 0;font-size:14px}.who{color:var(--muted);display:inline-block;min-width:74px}
+h3{font-size:14px;margin:16px 0 6px}
+table.story td.who{white-space:nowrap;font-weight:600}
+tr.agent td.who{color:var(--ok)}tr.caller td.who{color:#2f6fbf}
+tr.sys td,tr.db td{color:var(--muted);font-size:13px}tr.fault td{color:var(--bad)}
+tr.db td{font-weight:600}
 .ev{color:var(--muted);font-size:12px;font-family:ui-monospace,Consolas,monospace}
 a{color:inherit}
 """
@@ -49,49 +54,61 @@ def _badge(status: str) -> str:
     return f'<span class="b {BADGE.get(status, "muted")}">{escape(status)}</span>'
 
 
-def _transcript(events: Sequence[Mapping[str, Any]]) -> str:
-    rows = []
-    for e in events:
-        d, seq = e["data"], f'<span class="ev">#{e["seq"]}</span>'
-        if e["type"] == "caller_turn":
-            rows.append(f'<div class="turn">{seq} <span class="who">Caller</span> {escape(d["text"])}</div>')
-        elif e["type"] == "agent_turn":
-            rows.append(f'<div class="turn">{seq} <span class="who">Agent</span> {escape(d["heard_text"])}</div>')
-        elif e["type"] == "tool_request":
-            rows.append(f'<div class="turn ev">#{e["seq"]} tool call {escape(d["tool"])} {escape(str(d["args"]))}</div>')
-        elif e["type"] == "tool_response":
-            rows.append(f'<div class="turn ev">#{e["seq"]} {escape(d["tool"])} returned {d.get("status")}'
-                        f'{"" if d["ok"] else " (failed)"}</div>')
-        elif e["type"] in ("fault_injected", "probe_result", "harness_event", "validator_result", "call_ended"):
-            rows.append(f'<div class="turn ev">#{e["seq"]} {escape(e["type"])} {escape(str(d))}</div>')
-    return "\n".join(rows)
+WHO_CLASS = {"AGENT": "agent", "CALLER": "caller", "vatf breaks tool": "fault", "vatf error": "fault",
+             "database check": "db"}
+
+
+def _story_table(events: Sequence[Mapping[str, Any]]) -> str:
+    rows = "".join(
+        f"<tr class='{WHO_CLASS.get(who, 'sys')}'><td class='ev'>#{n}</td><td class='who'>{escape(who)}</td>"
+        f"<td>{escape(text)}</td></tr>" for n, who, text in story_rows(events))
+    return (f"<div class='table-wrap'><table class='story'><tr><th>#</th><th>Who</th><th>What happened</th></tr>"
+            f"{rows}</table></div>")
+
+
+def _database_tables(events: Sequence[Mapping[str, Any]]) -> str:
+    parts = []
+    for probe, rows in database_rows(events):
+        if rows:
+            cols = list(rows[0])
+            head = "".join(f"<th>{escape(c)}</th>" for c in cols)
+            body = "".join("<tr>" + "".join(f"<td>{escape(str(r.get(c)))}</td>" for c in cols) + "</tr>"
+                           for r in rows)
+            table = f"<div class='table-wrap'><table><tr>{head}</tr>{body}</table></div>"
+        else:
+            table = "<p class='sub'>No rows: nothing was stored for this call.</p>"
+        parts.append(f"<h3>Database after the call <span class='ev'>{escape(probe)}</span></h3>{table}")
+    return "".join(parts)
+
+
+def _judgement(v: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> str:
+    lines = judgement(v, events)
+    if not lines:
+        return ""
+    rows = "".join(f"<tr><th>{escape(label)}</th><td>{escape(text)}</td></tr>" for label, text in lines)
+    return f"<h3>How it was judged: said vs did vs stored</h3><div class='table-wrap'><table>{rows}</table></div>"
 
 
 def _call_section(v: Mapping[str, Any], call_dir: Path, run_dir: Path, warning: bool = False) -> str:
     rel = call_dir.relative_to(run_dir).as_posix()
-    events = []
-    events_file = call_dir / "events.jsonl"
-    if events_file.exists():
-        events = [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines() if line]
+    events = load_events(call_dir)
     checks = "".join(
         f"<tr><td>{escape(c['check_id'])}</td><td>{_badge(c['result'])}</td><td>{escape(c['severity'])}</td>"
         f"<td>{escape(c['message'])}<br><span class='ev'>evidence: "
         f"{', '.join('#' + str(r['event']) for r in c['evidence']) or 'none'} ({escape(c['evidence_level'])})"
         f"</span></td></tr>" for c in v["checks"])
-    outcome = ""
-    if v.get("outcome"):
-        o = v["outcome"]
-        outcome = (f"<p><b>Outcome:</b> {escape(o['class'])} (expected {escape(o['expected'])}; said "
-                   f"{escape(o['said'])}; writes ok {o['did'].get('ok_calls', 0)}/{o['did'].get('write_calls', 0)}; "
-                   f"stored {escape(o['stored'])})</p>")
     note = " (harness error, rerun; findings shown as warnings only)" if warning else ""
-    return (f"<details id='{escape(v['test_id'])}'><summary>{_badge(v['status'])} "
+    headline = next((c["message"] for c in v["checks"] if c["check_id"] == "outcome"), "")
+    opened = "" if v["status"] == "PASS" or warning else " open"
+    return (f"<details id='{escape(v['test_id'])}'{opened}><summary>{_badge(v['status'])} "
             f"<b>{escape(v['scenario_id'])}</b> repeat {v['repeat']} <span class='ev'>{escape(v['test_id'])}</span>"
-            f"{escape(note)}</summary>{outcome}"
-            f"<div class='table-wrap'><table><tr><th>Check</th><th>Result</th><th>Severity</th><th>Details</th></tr>"
-            f"{checks}</table></div><h3 style='font-size:14px'>Timeline</h3>{_transcript(events)}"
-            f"<p class='ev'><a href='{rel}/events.jsonl'>events.jsonl</a> · <a href='{rel}/verdict.json'>verdict.json</a>"
-            f" · <a href='{rel}/call.json'>call.json</a></p></details>")
+            f"{escape(note)}<br><span class='sub'>{escape(headline)}</span></summary>"
+            f"<h3>Conversation and actions</h3>{_story_table(events)}"
+            f"{_database_tables(events)}{_judgement(v, events)}"
+            f"<h3>Checks</h3><div class='table-wrap'><table><tr><th>Check</th><th>Result</th><th>Severity</th>"
+            f"<th>Details</th></tr>{checks}</table></div>"
+            f"<p class='ev'><a href='{rel}/story.txt'>story.txt</a> · <a href='{rel}/events.jsonl'>events.jsonl</a>"
+            f" · <a href='{rel}/verdict.json'>verdict.json</a> · <a href='{rel}/call.json'>call.json</a></p></details>")
 
 
 def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, Any]],
@@ -124,6 +141,7 @@ def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, An
 <body><main>
 <h1>{escape(d['profile_id'])}: release check</h1>
 <div class="sub">Run {escape(d['run_id'])} · {escape(d['created_at'])} · text mode</div>
+{'' if d.get('_pii_masked', True) else '<p class="b warn">Personal data is NOT masked in this run (--show-pii). Do not share or commit it.</p>'}
 <div class="banner {BADGE[d['decision']]}">{escape(TITLE[d['decision']])}</div>
 <ul class="reasons">{reasons}</ul>
 <h2>Scorecard</h2><div class="grid">{''.join(cards)}</div>
@@ -131,7 +149,10 @@ def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, An
 <div class="table-wrap"><table><tr><th>Scenario</th><th>Criticality</th><th>Passed</th><th>Failed</th>
 <th>Unverified</th><th>All repeats passed</th></tr>{rel_rows}</table></div>
 <p class="sub">Latency is not gated in text mode; it is measured from recorded audio in voice mode (Phase 2).</p>
-<h2>Calls</h2>{calls}
+<h2>Calls</h2>
+<p class="sub">CALLER is the simulated customer, AGENT is the voice agent under test. Tool calls, injected faults
+and the database check are recorded by vatf. Failed calls are opened; click a call to open or close it.
+The same text is in transcript.txt next to this file.</p>{calls}
 {'<h2>Harness errors (rerun)</h2>' + errors if errors else ''}
 </main></body></html>
 """

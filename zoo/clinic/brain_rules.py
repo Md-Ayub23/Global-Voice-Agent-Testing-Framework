@@ -71,6 +71,14 @@ def find_doctor(text: str) -> str | None:
 
 def find_day(text: str, now: datetime) -> str | None:
     low = text.lower()
+    patterns = [r"\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+)\b(?!\s*,?\s*\d{4})",
+                r"\b([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?\b(?!\s*,?\s*\d{4})"]
+    for pattern in patterns:  # explicit dates first: "3 November", "the 10th of November", "November 17th"
+        for m in re.finditer(pattern, low):
+            day, month = (m.group(1), m.group(2)) if m.group(1).isdigit() else (m.group(2), m.group(1))
+            if month in MONTHS and 1 <= int(day) <= 31:
+                year = now.year + (1 if MONTHS[month] < now.month else 0)
+                return f"{year}-{MONTHS[month]:02d}-{int(day):02d}"
     if "tomorrow" in low:
         return (now + timedelta(days=1)).strftime("%Y-%m-%d")
     if "today" in low:
