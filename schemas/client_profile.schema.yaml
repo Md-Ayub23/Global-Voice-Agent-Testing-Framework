@@ -10,6 +10,12 @@ required: [schema_version, kind, id, name, domain, languages, connection, tools,
 properties:
   schema_version: {const: "0.1"}
   kind: {const: client_profile}
+  extends:
+    description: >
+      Another profile file in the same folder to start from (e.g. profile-voice.yaml extends
+      profile.yaml and only changes the connection). Mappings are merged key by key; lists
+      and values here replace the base's. Removed by the loader before the schema check.
+    type: string
   id:
     description: Short stable id, used by scenarios to point at this profile.
     type: string
@@ -37,6 +43,12 @@ properties:
           What to connect to. text_python: "module:callable" that builds the agent.
           text_http / websocket_audio: a URL. sip: a phone number or SIP URI.
           platform: an agent id on the platform.
+        type: string
+      launch:
+        description: >
+          websocket_audio only: "module:function" that starts a Python agent for each call.
+          It is called as launch(tools=<tool proxy>, options=<options>) and returns an object
+          with .url and async close(). Without it, vatf dials target.
         type: string
       platform: {enum: [vapi, retell, livekit, pipecat, elevenlabs]}
       audio:
@@ -153,6 +165,14 @@ properties:
       max_reply_tokens: {type: integer, default: 400}
       budget_usd: {type: number, default: 5}
       parallel_calls: {type: integer, default: 1}
+      end_of_turn_ms:
+        description: Voice. Silence after which the simulated caller takes the agent's turn as finished.
+        type: integer
+        default: 1000
+      no_reply_ms:
+        description: Voice. How long the caller waits for an answer before reacting (a persona's hangs_up_after_silence_ms wins).
+        type: integer
+        default: 15000
 
   pii:
     description: Patterns to mask in transcripts and stored evidence.

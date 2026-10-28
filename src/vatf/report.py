@@ -54,7 +54,7 @@ def _badge(status: str) -> str:
     return f'<span class="b {BADGE.get(status, "muted")}">{escape(status)}</span>'
 
 
-WHO_CLASS = {"AGENT": "agent", "CALLER": "caller", "vatf breaks tool": "fault", "vatf error": "fault",
+WHO_CLASS = {"AGENT": "agent", "second listen": "sys", "CALLER": "caller", "vatf breaks tool": "fault", "vatf error": "fault",
              "database check": "db"}
 
 
@@ -81,6 +81,30 @@ def _database_tables(events: Sequence[Mapping[str, Any]]) -> str:
     return "".join(parts)
 
 
+def _voice(v: Mapping[str, Any], events: Sequence[Mapping[str, Any]], rel: str) -> str:
+    """Voice calls: the recording (playable) and each answer's response time."""
+    recording = next((e["data"]["recording"] for e in events if e["type"] == "call_ended"
+                      and "recording" in e["data"]), None)
+    rows = v.get("metrics", {}).get("latency_turns")
+    if recording is None and rows is None:
+        return ""
+    out = ""
+    if recording:
+        src = f"{rel}/{recording['file']}"
+        out += (f"<h3>Recording</h3><audio controls preload='none' src='{escape(src)}'></audio>"
+                f"<p class='sub'>Left channel: caller. Right channel: agent, as the caller heard it. "
+                f"Seconds in the file are seconds on the timeline. <a href='{escape(src)}'>call.wav</a></p>")
+    if rows:
+        body = "".join(
+            f"<tr><td>{r['turn']}</td><td class='ev'>#{r['seq']}</td>"
+            f"<td>{'-' if r['ms'] is None else str(r['ms']) + ' ms'}</td>"
+            f"<td>{'counts' if r['counted'] else escape('not counted: ' + r['note'])}</td></tr>" for r in rows)
+        out += ("<h3>Response times</h3><p class='sub'>End of the caller's words to the first sound of the "
+                "agent's answer, read off the recording.</p><div class='table-wrap'><table><tr><th>Turn</th>"
+                f"<th>Event</th><th>Answered after</th><th>Gate</th></tr>{body}</table></div>")
+    return out
+
+
 def _judgement(v: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> str:
     lines = judgement(v, events)
     if not lines:
@@ -104,7 +128,7 @@ def _call_section(v: Mapping[str, Any], call_dir: Path, run_dir: Path, warning: 
             f"<b>{escape(v['scenario_id'])}</b> repeat {v['repeat']} <span class='ev'>{escape(v['test_id'])}</span>"
             f"{escape(note)}<br><span class='sub'>{escape(headline)}</span></summary>"
             f"<h3>Conversation and actions</h3>{_story_table(events)}"
-            f"{_database_tables(events)}{_judgement(v, events)}"
+            f"{_voice(v, events, rel)}{_database_tables(events)}{_judgement(v, events)}"
             f"<h3>Checks</h3><div class='table-wrap'><table><tr><th>Check</th><th>Result</th><th>Severity</th>"
             f"<th>Details</th></tr>{checks}</table></div>"
             f"<p class='ev'><a href='{rel}/story.txt'>story.txt</a> · <a href='{rel}/events.jsonl'>events.jsonl</a>"
@@ -124,6 +148,15 @@ def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, An
         score = "n/a" if s["score"] is None else f"{s['score']:.0%}"
         cards.append(f"<div class='card'>{escape(name.title())}<b>{score}</b>"
                      f"<span class='sub'>{s['passed']} passed, {s['failed']} failed, coverage {s['coverage']:.0%}</span></div>")
+    lat = d.get("latency", {})
+    voice = d.get("_mode") == "voice"
+    if voice:
+        within = lat.get("within_limits")
+        shown = "n/a" if lat.get("p95_ms") is None else f"{lat['p95_ms']} ms"
+        cards.append(f"<div class='card'>Response time (p95)<b>{shown}</b><span class='sub'>p50 {lat.get('p50_ms')} ms;"
+                     f" limits {lat.get('p50_limit_ms')} / {lat.get('p95_limit_ms')} ms; "
+                     f"{lat.get('turns_measured', 0)} answers timed"
+                     f"{'' if within is None else (', within limits' if within else ', TOO SLOW')}</span></div>")
     cov = d["coverage"]
     cards.append(f"<div class='card'>Coverage<b>{cov['ratio']:.0%}</b><span class='sub'>{cov['verified_calls']} of "
                  f"{cov['planned_calls']} calls verified (need {cov['min_required']:.0%})</span></div>")
@@ -140,7 +173,7 @@ def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, An
 <title>vatf run {escape(d['run_id'])}</title><style>{CSS}</style></head>
 <body><main>
 <h1>{escape(d['profile_id'])}: release check</h1>
-<div class="sub">Run {escape(d['run_id'])} · {escape(d['created_at'])} · text mode</div>
+<div class="sub">Run {escape(d['run_id'])} · {escape(d['created_at'])} · {'voice' if voice else 'text'} mode</div>
 {'' if d.get('_pii_masked', True) else '<p class="b warn">Personal data is NOT masked in this run (--show-pii). Do not share or commit it.</p>'}
 <div class="banner {BADGE[d['decision']]}">{escape(TITLE[d['decision']])}</div>
 <ul class="reasons">{reasons}</ul>
@@ -148,7 +181,7 @@ def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, An
 <h2>Reliability (pass^k)</h2>
 <div class="table-wrap"><table><tr><th>Scenario</th><th>Criticality</th><th>Passed</th><th>Failed</th>
 <th>Unverified</th><th>All repeats passed</th></tr>{rel_rows}</table></div>
-<p class="sub">Latency is not gated in text mode; it is measured from recorded audio in voice mode (Phase 2).</p>
+{'<p class="sub">Response time is measured on the recorded audio of every call and gates the release.</p>' if voice else '<p class="sub">Latency is not gated in text mode; it is measured from recorded audio in voice mode.</p>'}
 <h2>Calls</h2>
 <p class="sub">CALLER is the simulated customer, AGENT is the voice agent under test. Tool calls, injected faults
 and the database check are recorded by vatf. Failed calls are opened; click a call to open or close it.

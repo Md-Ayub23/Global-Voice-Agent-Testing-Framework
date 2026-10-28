@@ -22,6 +22,11 @@ properties:
     enum: [critical, normal, exploratory]
   repeats: {description: "Overrides the profile's repeats.", type: integer, minimum: 1}
   style: {enum: [simulated, scripted]}
+  modes:
+    description: Which runs include this scenario. Default both; barge-in and noise tests need voice.
+    type: array
+    minItems: 1
+    items: {enum: [text, voice]}
 
   setup:
     type: object
@@ -41,10 +46,12 @@ properties:
         items: {$ref: "#/$defs/fault"}
 
   caller:
-    description: Required for simulated style.
+    description: >
+      Required for simulated style (persona, goal, facts). A scripted scenario may give just
+      facts: the personal values its caller lines contain, so they are masked like any other call's.
     type: object
     additionalProperties: false
-    required: [persona, goal, facts]
+    required: [facts]
     properties:
       persona: {type: string}
       goal: {description: "What the caller wants, in plain words.", type: string}
@@ -80,8 +87,12 @@ properties:
     type: object
     additionalProperties: false
     properties:
-      noise: {enum: [none, office, street, cafe, car], default: none}
-      snr_db: {type: number}
+      noise:
+        description: Synthetic background noise on the caller's line (see src/vatf/audio/noise.py).
+        enum: [none, office, street, cafe, car]
+        default: none
+      noise_file: {description: "A WAV recording to use as background noise instead (path from the repo root).", type: string}
+      snr_db: {description: "Speech-to-noise ratio in dB. Lower is noisier. Default 15.", type: number}
       barge_in:
         type: array
         items:
@@ -89,9 +100,11 @@ properties:
           additionalProperties: false
           required: [agent_turn, offset_ms, say]
           properties:
-            agent_turn: {type: integer, minimum: 1}
+            agent_turn: {description: "The agent's n-th turn (1 = its greeting).", type: integer, minimum: 1}
             offset_ms: {description: "Milliseconds after the agent starts speaking.", type: integer, minimum: 0}
             say: {type: string}
+            stop_within_ms: {description: "The agent must stop talking this soon after the caller cuts in. Default 1000.", type: integer, minimum: 0}
+            severity: {enum: [blocker, major, minor], default: major}
 
   outcome:
     description: >
@@ -147,7 +160,7 @@ properties:
 
 allOf:
   - if: {properties: {style: {const: simulated}}}
-    then: {required: [caller]}
+    then: {required: [caller], properties: {caller: {required: [persona, goal, facts]}}}
   - if: {properties: {style: {const: scripted}}}
     then: {required: [turns]}
 
@@ -188,6 +201,7 @@ $defs:
           - handoff           # to (multi-agent platforms)
           - latency           # p95_ms (per call)
           - entity_fidelity   # entities: caller fact names to compare across speech, tool args and backend
+          - readback          # tool, field: the agent must say the value the tool returned (probe?, column?)
           - max_turns         # n
           - judge             # rubric (Phase 3) or intent (one-line judge question)
       severity:
@@ -207,6 +221,9 @@ $defs:
       pattern: {type: string}
       to: {type: string}
       p95_ms: {type: integer}
+      min_answers: {description: "latency: at least this many answers must be timed, or the check is NOT_VERIFIED (default 1).", type: integer, minimum: 1}
+      field: {description: "readback: the key in the tool's response body, e.g. reference.", type: string}
+      column: {description: "readback: the probe column holding the same value (default: field).", type: string}
       entities: {type: array, items: {type: string}}
       n: {type: integer}
       rubric: {type: string}
@@ -222,6 +239,10 @@ $defs:
         then: {required: [pattern]}
       - if: {properties: {type: {const: handoff}}}
         then: {required: [to]}
+      - if: {properties: {type: {const: readback}}}
+        then: {required: [tool, field]}
+      - if: {properties: {type: {const: latency}}}
+        then: {required: [p95_ms]}
       - if: {properties: {type: {const: entity_fidelity}}}
         then: {required: [entities]}
       - if: {properties: {type: {const: judge}}}

@@ -55,7 +55,7 @@ def test_scenario_and_references(path):
     facts = sc.get("caller", {}).get("facts", {})
 
     assert sc["profile"] == profile["id"]
-    if "caller" in sc:
+    if "persona" in sc.get("caller", {}):
         assert sc["caller"]["persona"] in personas
     for fault in sc.get("setup", {}).get("faults", []):
         assert fault["tool"] in tools

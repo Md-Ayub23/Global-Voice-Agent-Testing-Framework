@@ -10,6 +10,10 @@ style: scripted
 setup:
   now: "2026-11-02T09:00:00+00:00"
   fixtures: [zoo/clinic/fixtures/base.sql]
+caller:
+  facts:                     # what the scripted lines say, so it is masked even if the agent mishears it
+    full_name: Maria Lopez
+    date_of_birth: "1985-03-14"
 turns:
   - caller: Hi, I'm Maria Lopez, born 14 March 1985. I need a check-up with Dr Patel tomorrow, Tuesday 3 November, in the morning.
     expect:

@@ -51,9 +51,26 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
     for e in events:
         d, t, n = e["data"], e["type"], e["seq"]
         if t == "agent_turn":
-            rows.append((n, "AGENT", d.get("heard_text", "")))
+            text = d.get("heard_text", "")
+            if d.get("silent"):
+                text = "(said nothing)"
+            notes = []
+            if "latency_ms" in d:
+                notes.append(f"answered after {d['latency_ms']} ms")
+            if d.get("interrupted"):
+                notes.append(f"interrupted; stopped {d.get('stopped_after_ms')} ms after the caller cut in")
+            if "audio" in d:
+                notes.append(f"heard at {_secs(d['audio']['start_ms'])}-{_secs(d['audio']['end_ms'])}")
+            rows.append((n, "AGENT", text + (f"  [{'; '.join(notes)}]" if notes else "")))
         elif t == "caller_turn":
-            rows.append((n, "CALLER", d.get("text", "")))
+            text = d.get("text", "")
+            if "audio" in d:
+                text += f"  [{'cut in, ' if d.get('barge_in') else ''}spoke {_secs(d['audio']['start_ms'])}" \
+                        f"-{_secs(d['audio']['end_ms'])}]"
+            rows.append((n, "CALLER", text))
+        elif t == "stt_text":
+            rows.append((n, "second listen", f"turn #{d.get('agent_turn')} heard again ({d.get('model', '')}): "
+                                             f"{d.get('text', '')}"))
         elif t == "tool_request":
             rows.append((n, "AGENT uses tool", f"{d['tool']}({_value(d.get('args', {}))})"))
         elif t == "fault_injected":
@@ -83,6 +100,26 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
     return rows
 
 
+def _secs(ms: int) -> str:
+    return f"{ms / 1000:.2f}s"
+
+
+def latency_lines(verdict: Mapping[str, Any]) -> list[str]:
+    """Voice: each timed answer, and whether it counts toward the release gate."""
+    m = verdict.get("metrics", {})
+    rows = m.get("latency_turns")
+    if rows is None:
+        return []
+    out = []
+    for r in rows:
+        ms = "no answer" if r["ms"] is None else f"{r['ms']} ms"
+        out.append(f"  turn {r['turn']:<3} {ms:>10}   {'counts' if r['counted'] else 'not counted: ' + r['note']}"
+                   f"  [event #{r['seq']}]")
+    if m.get("latency_p50_ms") is not None:
+        out.append(f"  this call: p50 {m['latency_p50_ms']} ms, p95 {m['latency_p95_ms']} ms")
+    return out
+
+
 def database_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
     """What each probe found in the backend after the call."""
     return [(e["data"]["probe"], e["data"].get("rows") or [])
@@ -98,7 +135,9 @@ def judgement(verdict: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -
     claim = next((r["event"] for r in o.get("evidence", []) if r["note"].startswith("agent claim")), None)
     said = o["said"]
     if claim in by_seq:
-        said += f'  ("{_short(by_seq[claim]["data"].get("heard_text", ""), 120)}", event {claim})'
+        text = o.get("said_text", by_seq[claim]["data"].get("heard_text", ""))
+        how = ", from the second listen" if o.get("said_heard_by") == "second listen" else ""
+        said += f'  ("{_short(text, 120)}", event {claim}{how})'
     tools = sorted({m.group(1) for r in o.get("evidence", []) for m in [re.match(r"(\w+) returned", r["note"])] if m})
     did = o["did"]
     action = " / ".join(tools) or "the write tool"
@@ -127,6 +166,15 @@ def call_story_text(verdict: Mapping[str, Any], events: Sequence[Mapping[str, An
     if lines:
         out += ["", "HOW IT WAS JUDGED (said vs did vs stored)"]
         out += [f"  {label:<9}: {text}" for label, text in lines]
+    lat = latency_lines(verdict)
+    if lat:
+        out += ["", "RESPONSE TIMES (end of the caller's words -> first sound of the agent's answer, from the recording)"]
+        out += lat
+    recording = next((e["data"]["recording"] for e in events if e["type"] == "call_ended"
+                      and "recording" in e["data"]), None)
+    if recording:
+        out += ["", f"RECORDING: {recording['file']} in the call folder (left = caller, right = agent;"
+                    f" seconds in the file = seconds on the timeline above)"]
     out += ["", "CHECKS"]
     for c in verdict["checks"]:
         refs = ", ".join(f"#{r['event']}" for r in c["evidence"])
@@ -138,7 +186,8 @@ def call_story_text(verdict: Mapping[str, Any], events: Sequence[Mapping[str, An
 
 def run_story_text(decision: Mapping[str, Any], calls: Sequence[tuple[Mapping[str, Any], list]],
                    errors: Sequence[tuple[Mapping[str, Any], list]] = ()) -> str:
-    out = [f"vatf run {decision['run_id']}  ({decision['profile_id']}, text mode)",
+    voice = decision.get("latency", {}).get("p50_ms") is not None or decision.get("_mode") == "voice"
+    out = [f"vatf run {decision['run_id']}  ({decision['profile_id']}, {'voice' if voice else 'text'} mode)",
            "",
            "Who is who: CALLER = the simulated customer (an AI or a script). AGENT = the voice agent under test.",
            "'AGENT uses tool' = the agent called one of its tools; vatf records it on the way through.",
@@ -152,6 +201,11 @@ def run_story_text(decision: Mapping[str, Any], calls: Sequence[tuple[Mapping[st
         out += ["#" * 78, "HARNESS ERRORS (vatf's own failures, rerun automatically, never blamed on the agent)",
                 "#" * 78, ""]
         out += [call_story_text(v, ev, note="  (harness error, rerun)") for v, ev in errors]
+    lat = decision.get("latency", {})
+    if voice:
+        out += ["=" * 78, f"RESPONSE TIME over {lat.get('turns_measured', 0)} timed answers: "
+                          f"p50 {lat.get('p50_ms')} ms (limit {lat.get('p50_limit_ms')}), "
+                          f"p95 {lat.get('p95_ms')} ms (limit {lat.get('p95_limit_ms')})"]
     out += ["=" * 78, f"DECISION: {decision['decision']}"]
     out += [f"  - {r['message']}" for r in decision["reasons"]]
     out.append("")

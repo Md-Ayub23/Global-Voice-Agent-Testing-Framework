@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import statistics
 from typing import Any, Mapping, Sequence
 
 from .contracts.models import CallTrace, CheckResult, Result
 from .evidence import utc_now
+from .latency import percentile, turn_latencies
 
 ROLLUP = [Result.ERROR, Result.FAIL, Result.NEEDS_REVIEW, Result.NOT_VERIFIED]
 
@@ -54,18 +54,27 @@ def call_metrics(trace: CallTrace) -> dict[str, Any]:
     events = trace.events
     caller_turns = [e for e in events if e.type == "caller_turn"]
     ended = [e for e in events if e.type == "call_ended"]
-    latencies, last_caller = [], None
-    for e in events:
-        if e.type == "caller_turn":
-            last_caller = e
-        elif e.type == "agent_turn" and last_caller is not None:
-            latencies.append(e.t_ms - last_caller.t_ms)
-            last_caller = None
     metrics: dict[str, Any] = {"turns": len(caller_turns), "duration_ms": ended[-1].t_ms if ended else 0}
-    if latencies:  # text mode: informational only, never gates
-        metrics["latency_ms"] = latencies
-        metrics["latency_p50_ms"] = int(statistics.median(latencies))
-        metrics["latency_p95_ms"] = int(sorted(latencies)[max(0, round(0.95 * len(latencies)) - 1)])
+    if trace.record.get("mode") == "voice":
+        # From the recorded audio: end of the caller's words to the agent's first sound.
+        rows = turn_latencies(events)
+        counted = [r["ms"] for r in rows if r["counted"]]
+        metrics["latency_ms"] = counted
+        metrics["latency_turns"] = rows
+        metrics["latency_p50_ms"] = percentile(counted, 50)
+        metrics["latency_p95_ms"] = percentile(counted, 95)
+    else:
+        latencies, last_caller = [], None
+        for e in events:
+            if e.type == "caller_turn":
+                last_caller = e
+            elif e.type == "agent_turn" and last_caller is not None:
+                latencies.append(e.t_ms - last_caller.t_ms)
+                last_caller = None
+        if latencies:  # text mode: processing time only, informational, never gates
+            metrics["latency_ms"] = latencies
+            metrics["latency_p50_ms"] = percentile(latencies, 50)
+            metrics["latency_p95_ms"] = percentile(latencies, 95)
     metrics["cost_usd"] = trace.record.get("cost_usd", 0.0)
     return metrics
 

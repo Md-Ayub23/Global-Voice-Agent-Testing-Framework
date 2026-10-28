@@ -30,6 +30,7 @@ CREATE TABLE appointments (
   doctor_id  TEXT NOT NULL REFERENCES doctors(id),
   slot_start TEXT NOT NULL,
   status     TEXT NOT NULL,
+  reference  TEXT NOT NULL,              -- booking reference the agent reads to the caller
   test_id    TEXT,
   created_at TEXT NOT NULL
 );

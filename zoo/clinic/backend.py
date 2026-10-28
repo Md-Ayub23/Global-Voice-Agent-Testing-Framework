@@ -11,6 +11,7 @@ The database is zoo/clinic/clinic.db (override with the CLINIC_DB variable).
 from __future__ import annotations
 
 import os
+import random
 import re
 import sqlite3
 from datetime import datetime, timezone
@@ -36,6 +37,16 @@ def _doctor_id(conn: sqlite3.Connection, name: str) -> str | None:
         if _norm(row["name"]) == wanted or _norm(row["name"]).split()[-1] == wanted.split()[-1]:
             return row["id"]
     return None
+
+
+def new_reference() -> str:
+    """A six-digit booking reference the caller is told. Its 3rd and 4th digits always differ,
+    so the misread_reference bug switch (which swaps them when speaking) always changes it."""
+    rng = random.SystemRandom()
+    while True:
+        ref = "".join(rng.choice("0123456789") for _ in range(6))
+        if ref[2] != ref[3]:
+            return ref
 
 
 def find_patient(args: dict, headers: dict) -> tuple[int, dict]:
@@ -83,13 +94,14 @@ def book_appointment(args: dict, headers: dict) -> tuple[int, dict]:
             "SELECT 1 FROM slots WHERE doctor_id = ? AND slot_start = ?", (doctor_id, slot)
         ).fetchone():
             return 409, {"error": "that slot does not exist"}
+        reference = new_reference()
         cur = conn.execute(
-            "INSERT INTO appointments (patient_id, doctor_id, slot_start, status, test_id, created_at)"
-            " VALUES (?, ?, ?, 'booked', ?, ?)",
-            (patient_id, doctor_id, slot, headers.get("X-Test-Id"),
+            "INSERT INTO appointments (patient_id, doctor_id, slot_start, status, reference, test_id, created_at)"
+            " VALUES (?, ?, ?, 'booked', ?, ?, ?)",
+            (patient_id, doctor_id, slot, reference, headers.get("X-Test-Id"),
              datetime.now(timezone.utc).isoformat(timespec="seconds")),
         )
-        return 201, {"appointment_id": cur.lastrowid, "status": "booked"}
+        return 201, {"appointment_id": cur.lastrowid, "reference": reference, "status": "booked"}
 
 
 def cancel_appointment(args: dict, headers: dict) -> tuple[int, dict]:

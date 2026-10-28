@@ -1,0 +1,61 @@
+# Voice only: the happy-path booking, phoned in from a noisy office.
+# Tests the agent's hearing (speech recognition and end-of-speech detection) under background noise.
+schema_version: "0.1"
+kind: scenario
+id: clinic.book-checkup.noisy-line
+title: Known patient books a check-up from a noisy office
+profile: clinic-booking
+tags: [booking, voice, noise]
+criticality: normal
+style: simulated
+modes: [voice]
+
+setup:
+  now: "2026-11-02T09:00:00+00:00"
+  fixtures: [zoo/clinic/fixtures/base.sql]
+
+audio:
+  noise: office
+  snr_db: 15                               # speech 15 dB louder than the background
+
+caller:
+  persona: calm-adult
+  goal: Book a routine check-up with Dr Patel tomorrow, Tuesday 3 November, in the morning.
+  facts:
+    full_name: Maria Lopez
+    date_of_birth: "1985-03-14"
+    doctor: Dr Patel
+    preferred_day: Tuesday 3 November
+    preferred_time: morning
+  rules:
+    - If no morning slot is free, accept the earliest afternoon slot that day.
+  end_when: The agent confirms the booking, or says it cannot book.
+  max_turns: 16
+
+outcome:
+  expected: success
+  action:
+    tool: book_appointment
+    args_match: {doctor: $doctor}
+  record:
+    probe: appointments_for_test
+    expect_count: 1
+    expect_fields: {full_name: $full_name, doctor: $doctor, status: booked}
+  claim:
+    method: patterns
+    success_patterns: ["\\b(booked|confirmed|scheduled|all set)\\b"]
+    failure_patterns: ["\\b(couldn't|could not|unable|not able|wasn't able|failed)\\b", "(?<!no )\\bproblem\\b", "\\btry again\\b"]
+
+checks:
+  - id: name-heard-correctly
+    type: entity_fidelity
+    entities: [full_name, doctor]
+    severity: major
+    section: accuracy
+  - id: reads-back-reference
+    type: readback
+    tool: book_appointment
+    field: reference
+    probe: appointments_for_test
+    severity: major
+    section: accuracy

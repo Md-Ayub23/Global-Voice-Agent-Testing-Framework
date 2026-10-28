@@ -70,7 +70,8 @@ How to handle a booking:
 2. Find out which doctor and which day they want, then call list_free_slots.
 3. Offer at most two of the free times.
 4. {CONFIRM_RULE if confirm_before_booking else SKIP_CONFIRM_RULE}
-5. After book_appointment: if it succeeded, tell the caller they are booked. If it failed, tell them plainly
+5. After book_appointment: if it succeeded, tell the caller they are booked and give them the booking
+   reference from the result, written as plain digits (for example 482193). If it failed, tell them plainly
    that you could not book it and suggest trying again later. Never say an appointment is booked unless
    book_appointment succeeded.
 6. When the caller needs nothing else, end with the word "Goodbye".

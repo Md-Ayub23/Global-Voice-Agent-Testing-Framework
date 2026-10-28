@@ -1,0 +1,18 @@
+# Three caller turns; the reference agent answers after 500, 900 and 1300 ms.
+schema_version: "0.1"
+kind: scenario
+id: latency-ref.three-answers
+title: Three answers after known delays
+profile: latency-ref
+criticality: critical
+style: scripted
+modes: [voice]
+turns:
+  - caller: Hello, this is a timing test, first turn.
+  - caller: This is the second turn of the timing test.
+  - caller: And this is the third and last turn.
+checks:
+  - id: answers-timed
+    type: latency
+    p95_ms: 2000
+    min_answers: 3        # all three answers must be timed, or the measurement is not trusted

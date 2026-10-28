@@ -113,6 +113,15 @@ def find_time(text: str) -> tuple[int, int | None] | None:
         elif not m.group(3):
             hour = _to_24h(hour, low)
         return hour, int(m.group(2)) if m.group(2) else None
+    # Speech recognisers often write a spoken "nine thirty" as "930" (or "1130 am").
+    m = re.search(r"\b(1[0-2]|[1-9])(00|15|30|45)\s*(am|pm|a\.m\.|p\.m\.)?(?![\d/-])", low)
+    if m:
+        hour = int(m.group(1))
+        if m.group(3) and m.group(3).startswith("p") and hour < 12:
+            hour += 12
+        elif not m.group(3):
+            hour = _to_24h(hour, low)
+        return hour, int(m.group(2))
     words = "|".join(NUMBER_WORDS)
     minutes = "|".join(MINUTE_WORDS)
     m = re.search(rf"\b({words})(?:\s+({minutes}))?\b", low)
@@ -238,7 +247,11 @@ class RulesBrain:
         result = self.tools.call("book_appointment", {
             "patient_id": self.patient_id, "doctor": self.doctor, "slot_start": self.chosen})
         if result.get("ok"):
-            return (f"You're booked with {self.doctor} on {say_day(self.chosen)} at {say_time(self.chosen)}. "
+            body = result.get("body") or {}
+            ref = f" Your booking reference is {body['reference']}." if body.get("reference") else ""
+            # Said so it is hard to mishear on a phone line ("you're booked" is often heard as "your book").
+            return (f"That's all booked. Your appointment with {self.doctor} on {say_day(self.chosen)} "
+                    f"at {say_time(self.chosen)} is confirmed.{ref} "
                     "Is there anything else I can help with?")
         return ("I'm sorry, I couldn't book that appointment because our booking system isn't responding. "
                 "Please try again later. Is there anything else I can help with?")

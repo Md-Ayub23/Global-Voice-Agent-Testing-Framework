@@ -30,29 +30,58 @@ MESSAGES = {
 }
 
 
-def detect_claim(agent_turns: list[TraceEvent], claim: Mapping[str, Any], after_seq: int | None
-                 ) -> tuple[str, TraceEvent | None]:
-    """success | failure | unclear | nothing, plus the agent turn it came from.
+NEGATION = re.compile(r"\b(?:not|never|n't|no longer)\s+(?:\w+\s+){0,2}$", re.I)
+
+
+def _negated(text: str, start: int) -> bool:
+    """True when a success word is negated just before it: "you are not booked yet", "isn't confirmed"."""
+    return bool(NEGATION.search(text[max(0, start - 40):start].replace("n't", " n't")))
+
+
+def detect_claim(agent_turns: list[TraceEvent], claim: Mapping[str, Any], after_seq: int | None,
+                 second_listen: Mapping[int, str] | None = None) -> tuple[str, TraceEvent | None, str]:
+    """success | failure | unclear | nothing, plus the agent turn it came from and the words that decided.
 
     Looks at agent turns after the last write call (or all of them if there was
     none), so a retry is judged on how it ended. The first turn matching either
     list decides; matching both is unclear.
+
+    In voice, a turn may have been heard twice: by the caller's ears (heard_text) and by
+    the careful second listen (stt_text events, `second_listen` = {agent_turn seq: text}).
+    A plain mishearing ("your book with..." for "you're booked with...") must not make a
+    clear answer unclear, so a turn counts as a clear claim when its hearings agree or only
+    one of them is clear. If one hearing says success and the other failure, it is unclear.
     """
     success = [re.compile(p, re.I) for p in claim.get("success_patterns", [])]
     failure = [re.compile(p, re.I) for p in claim.get("failure_patterns", [])]
+
+    def says_success(text: str) -> bool:
+        return any(not _negated(text, m.start()) for p in success for m in p.finditer(text))
+
+    second_listen = second_listen or {}
     turns = [e for e in agent_turns if after_seq is None or e.seq > after_seq]
     for e in turns:
-        text = e.data.get("heard_text", "")
-        s, f = any(p.search(text) for p in success), any(p.search(text) for p in failure)
-        if s and f:
-            return "unclear", e
-        if s:
-            return "success", e
-        if f:
-            return "failure", e
+        hearings = [e.data.get("heard_text", "")]
+        if e.seq in second_listen:
+            hearings.append(second_listen[e.seq])
+        found: dict[str, str] = {}
+        both = None
+        for text in hearings:
+            s, f = says_success(text), any(p.search(text) for p in failure)
+            if s and f:
+                both = both or text
+            elif s:
+                found.setdefault("success", text)
+            elif f:
+                found.setdefault("failure", text)
+        if len(found) == 1:
+            said, text = next(iter(found.items()))
+            return said, e, text
+        if found or both is not None:
+            return "unclear", e, e.data.get("heard_text", "")
     if after_seq is not None:
-        return "unclear", turns[-1] if turns else None
-    return "nothing", None
+        return "unclear", (turns[-1] if turns else None), (turns[-1].data.get("heard_text", "") if turns else "")
+    return "nothing", None, ""
 
 
 def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], events: list[TraceEvent],
@@ -86,7 +115,9 @@ def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], ev
 
     # What the agent said.
     agent_turns = [e for e in events if e.type == "agent_turn"]
-    said, claim_event = detect_claim(agent_turns, spec.get("claim", {}), requests[-1].seq if requests else None)
+    second = {e.data["agent_turn"]: e.data.get("text", "") for e in events if e.type == "stt_text"}
+    said, claim_event, said_text = detect_claim(agent_turns, spec.get("claim", {}),
+                                                requests[-1].seq if requests else None, second)
 
     # What was stored.
     stored, probe_event = "unknown", None
@@ -145,6 +176,9 @@ def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], ev
 
     block = {
         "class": cls.value, "expected": expected, "said": said, "did": did, "stored": stored,
+        "said_text": said_text,
+        "said_heard_by": ("second listen" if claim_event is not None
+                          and said_text != claim_event.data.get("heard_text", "") else "caller"),
         "result": result.value, "evidence": [{"event": r.event, "note": r.note} for r in evidence],
     }
     check = CheckResult(

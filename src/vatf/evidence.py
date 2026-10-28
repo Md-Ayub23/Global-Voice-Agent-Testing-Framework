@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,7 +17,9 @@ from . import __version__
 from .contracts.models import AudioClip, CallContext, CallTrace, TraceEvent
 from .util import mask_token, read_json, sha256_file, write_json
 
-TEXT_FIELDS = {"caller_turn": "text", "agent_turn": "heard_text"}
+# Free-text fields that may hold spoken personal data, per event type.
+TEXT_FIELDS = {"caller_turn": ("text",), "agent_turn": ("heard_text", "platform_transcript"),
+               "stt_text": ("text",)}
 
 
 def utc_now() -> str:
@@ -40,6 +43,7 @@ class LocalCallWriter:
         self._events: list[TraceEvent] = []
         self._start = time.monotonic()
         self._locked = False
+        self._lock = threading.Lock()  # the agent's tool calls can arrive from another thread
         self._file = folder / record["events_file"]
         self._file.write_text("", encoding="utf-8")
         write_json(folder / "call.json", record)
@@ -55,21 +59,32 @@ class LocalCallWriter:
     def now_ms(self) -> int:
         return int((time.monotonic() - self._start) * 1000)
 
+    def elapsed(self) -> float:
+        """The call clock in seconds (float), for sample-accurate audio timing."""
+        return time.monotonic() - self._start
+
     def emit(self, source: str, type: str, data: Mapping[str, Any],
              turn: int | None = None, t_ms: int | None = None) -> TraceEvent:
-        if self._locked:
-            raise EvidenceLocked(f"call {self.record['test_id']} is locked")
-        t = self.now_ms() if t_ms is None else t_ms
-        if self._events:
-            t = max(t, self._events[-1].t_ms)  # one clock, never goes backwards
-        event = TraceEvent(len(self._events) + 1, t, source, type, dict(data), turn)
-        self._events.append(event)
-        with self._file.open("a", encoding="utf-8") as f:
-            f.write(_event_line(event) + "\n")
-        return event
+        with self._lock:
+            if self._locked:
+                raise EvidenceLocked(f"call {self.record['test_id']} is locked")
+            t = self.now_ms() if t_ms is None else t_ms
+            if self._events:
+                t = max(t, self._events[-1].t_ms)  # one clock, never goes backwards
+            event = TraceEvent(len(self._events) + 1, t, source, type, dict(data), turn)
+            self._events.append(event)
+            with self._file.open("a", encoding="utf-8") as f:
+                f.write(_event_line(event) + "\n")
+            return event
 
     def save_audio(self, name: str, clip: AudioClip) -> str:
-        raise NotImplementedError("audio arrives in Phase 2 (voice mode)")
+        """Writes a mono WAV into the call folder. Audio is never masked: treat recordings as personal data."""
+        from .audio.pcm import from_pcm16, write_wav
+
+        if self._locked:
+            raise EvidenceLocked(f"call {self.record['test_id']} is locked")
+        write_wav(self.folder / name, [from_pcm16(clip.pcm16)], clip.sample_rate_hz)
+        return name
 
     def lock(self, status: str, cost_usd: float = 0.0) -> Mapping[str, Any]:
         # Personal values to find in free text: the caller's fact sheet, plus whatever personal
@@ -131,7 +146,7 @@ def fact_patterns(profile: Mapping[str, Any], facts: Any) -> list[tuple[str, re.
     ("Thank you, Maria"), and an ISO date also matches its spoken forms ("14th of March, 1985").
     """
     personal = pii_keys(profile) | {p["name"] for p in profile.get("pii", {}).get("mask_patterns", [])}
-    out, seen = [], set()
+    out, whole, words_out, seen = [], [], [], set()
     items = facts.items() if isinstance(facts, Mapping) else facts
     for name, value in items:
         if name not in personal or not isinstance(value, str) or not value.strip() or (name, value) in seen:
@@ -148,18 +163,22 @@ def fact_patterns(profile: Mapping[str, Any], facts: Any) -> list[tuple[str, re.
                      rf"0?{d}[/.-]0?{mo}[/.-]{y}"]
             out.append((name, re.compile(r"\b(?:" + "|".join(forms) + r")\b", re.I)))
             continue
-        out.append((name, re.compile(rf"\b{re.escape(value.strip())}\b", re.I)))
+        whole.append((len(value.strip()), name, re.compile(rf"\b{re.escape(value.strip())}\b", re.I)))
         words = [w for w in re.split(r"\s+", value.strip()) if len(w) >= 3]
         if len(words) > 1:
-            out.append((name, re.compile(r"\b(?:" + "|".join(map(re.escape, words)) + r")\b", re.I)))
-    return out
+            words_out.append((name, re.compile(r"\b(?:" + "|".join(map(re.escape, words)) + r")\b", re.I)))
+    # Whole values first, longest first, then single words: otherwise a misheard tool value
+    # ("Maria") would be masked first and leave "Lopez" of the real name in plain text.
+    whole.sort(key=lambda w: -w[0])
+    return out + [(n, p) for _, n, p in whole] + words_out
 
 
 def _mask_event(e: TraceEvent, profile: Mapping[str, Any], salt: str,
                 text_patterns: list[tuple[str, re.Pattern]] = ()) -> TraceEvent:
     data = dict(e.data)
-    field = TEXT_FIELDS.get(e.type)
-    if field and isinstance(data.get(field), str):
+    for field in TEXT_FIELDS.get(e.type, ()):
+        if not isinstance(data.get(field), str):
+            continue
         text = data[field]
         for name, pattern in text_patterns:
             text = pattern.sub(f"[{name}]", text)

@@ -14,6 +14,7 @@ from collections import defaultdict
 from typing import Any, Mapping, Sequence
 
 from .evidence import utc_now
+from .latency import percentile
 
 EXIT_CODES = {"GO": 0, "NO_GO": 1, "NO_GO_INSUFFICIENT_EVIDENCE": 2}
 VERIFIED = {"PASS", "FAIL"}
@@ -118,6 +119,24 @@ class LocalDecisionEngine:
             reasons_evidence.append({"rule": "needs_review",
                                      "message": f"{needs_review} call(s) need a human review."})
 
+        # Rule 2 (voice): response time over every timed turn of every call that ran.
+        voice = any("latency_turns" in v.get("metrics", {}) for v in verdicts)
+        p50_limit, p95_limit = th.get("latency_p50_ms", 800), th.get("latency_p95_ms", 1500)
+        timed = [ms for v in verdicts if v["status"] != "ERROR" for ms in v.get("metrics", {}).get("latency_ms", [])]
+        p50, p95 = (percentile(timed, 50), percentile(timed, 95)) if voice else (None, None)
+        within = None
+        if voice and timed:
+            within = p50 <= p50_limit and p95 <= p95_limit
+            if not within:
+                slow = [v["test_id"] for v in verdicts if v["status"] != "ERROR"
+                        and any(ms > p95_limit for ms in v.get("metrics", {}).get("latency_ms", []))]
+                reasons_bad.append({"rule": "latency",
+                                    "message": f"Agent too slow to answer: p50 {p50} ms (limit {p50_limit}), "
+                                               f"p95 {p95} ms (limit {p95_limit}) over {len(timed)} timed turns.",
+                                    "refs": slow})
+        elif voice:
+            reasons_evidence.append({"rule": "coverage", "message": "No agent answer could be timed."})
+
         if reasons_bad:
             decision, reasons = "NO_GO", reasons_bad + reasons_evidence
         elif reasons_evidence:
@@ -126,7 +145,9 @@ class LocalDecisionEngine:
             decision = "GO"
             reasons = [{"rule": "all_targets_met",
                                       "message": f"All {planned} calls verified; every critical scenario passed "
-                                                 f"all its repeats; no blocking failures."}]
+                                                 f"all its repeats; no blocking failures"
+                                                 + (f"; answers within time (p50 {p50} ms, p95 {p95} ms)."
+                                                    if voice else ".")}]
 
         return {
             "schema_version": "0.1",
@@ -140,10 +161,10 @@ class LocalDecisionEngine:
             "scorecard": _section_scores(verdicts),
             "reliability": reliability,
             "latency": {
-                # Text mode: latency is never measured for the gate (Phase 0 review decision 3).
-                "turns_measured": 0, "p50_ms": None, "p95_ms": None,
-                "p50_limit_ms": th.get("latency_p50_ms", 800), "p95_limit_ms": th.get("latency_p95_ms", 1500),
-                "within_limits": None,
+                # Voice mode only; text-mode timings never gate (Phase 0 review decision 3).
+                "turns_measured": len(timed) if voice else 0, "p50_ms": p50, "p95_ms": p95,
+                "p50_limit_ms": p50_limit, "p95_limit_ms": p95_limit,
+                "within_limits": within,
             },
             "coverage": {
                 "planned_calls": planned, "verified_calls": verified, "error_calls": errors,

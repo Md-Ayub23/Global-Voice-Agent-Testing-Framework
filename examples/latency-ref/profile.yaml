@@ -1,0 +1,37 @@
+# Measuring stick for vatf's latency numbers (Phase 2 exit criterion).
+# The agent (zoo/latency_ref.py) understands nothing: it answers each caller turn with a
+# 0.8 s tone exactly delays_ms after the caller stops talking. vatf's measured response
+# times must match those delays within 50 ms, and so must a measurement by hand in an
+# audio editor (open the call's audio/call.wav: left = caller, right = agent).
+#   uv run vatf run examples/latency-ref
+schema_version: "0.1"
+kind: client_profile
+id: latency-ref
+name: Latency reference agent
+description: Answers with a tone after a known delay. For checking vatf's own timing.
+domain: test
+languages: [en]
+
+connection:
+  type: websocket_audio
+  launch: "zoo.latency_ref:launch"
+  audio: {sample_rate_hz: 16000, encoding: pcm16}
+  options:
+    delays_ms: "500,900,1300"
+
+test_id:
+  propagation: [session_metadata]
+
+tools: []
+
+backend:
+  access: none
+
+thresholds:
+  repeats: 1
+  pass_k_required: 1
+  latency_p50_ms: 1500
+  latency_p95_ms: 2000
+
+limits:
+  max_call_seconds: 60

@@ -54,6 +54,14 @@ checks:
     entities: [full_name, doctor]
     severity: major
     section: accuracy
+  - id: reads-back-reference
+    type: readback
+    tool: book_appointment
+    field: reference
+    probe: appointments_for_test
+    severity: major
+    section: accuracy
+    description: The caller must be told the booking reference the system created, exactly (caught by misread_reference).
   - id: reads-back-before-booking
     type: judge
     intent: Before booking, did the agent read back the doctor, day and time and get a yes from the caller?

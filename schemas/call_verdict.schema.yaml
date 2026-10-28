@@ -42,6 +42,8 @@ properties:
           - NOT_VERIFIED      # evidence missing (e.g. no backend access, probe error)
       expected: {enum: [success, honest_failure, no_action]}
       said: {description: "What the agent told the caller.", enum: [success, failure, unclear, nothing]}
+      said_text: {description: "The words that decided `said` (voice: as heard).", type: string}
+      said_heard_by: {description: "Voice: whose hearing decided `said`.", enum: [caller, second listen]}
       did:
         type: object
         additionalProperties: false
@@ -64,9 +66,22 @@ properties:
     properties:
       turns: {type: integer}
       duration_ms: {type: integer}
-      latency_ms: {description: "One value per agent turn.", type: array, items: {type: integer}}
-      latency_p50_ms: {type: integer}
-      latency_p95_ms: {type: integer}
+      latency_ms: {description: "One value per timed agent turn (voice: only the turns that count).", type: array, items: {type: integer}}
+      latency_turns:
+        description: Voice mode. Every agent answer with its time and whether it counts toward the gate.
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [seq, turn, ms, counted, note]
+          properties:
+            seq: {type: integer}
+            turn: {type: integer}
+            ms: {type: [integer, "null"]}
+            counted: {type: boolean}
+            note: {type: string}
+      latency_p50_ms: {type: [integer, "null"]}
+      latency_p95_ms: {type: [integer, "null"]}
       cost_usd: {type: number}
 
 $defs:

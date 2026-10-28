@@ -1,4 +1,4 @@
-"""L4 connectors. Phase 1: text_python."""
+"""L4 connectors: text_python (text mode) and websocket_audio (voice mode)."""
 
 from __future__ import annotations
 
@@ -16,4 +16,8 @@ def build_connector(profile: Mapping[str, Any], root: Path, tools: Any):
         from .text_python import TextPythonConnector
 
         return TextPythonConnector(profile, root, tools)
-    raise ConnectError(f"connection type {kind!r} is not supported yet (Phase 1 has text_python)")
+    if kind == "websocket_audio":
+        from .websocket_audio import WebSocketAudioConnector
+
+        return WebSocketAudioConnector(profile, root, tools)
+    raise ConnectError(f"connection type {kind!r} is not supported yet (text_python and websocket_audio are)")

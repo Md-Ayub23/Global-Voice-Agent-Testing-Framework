@@ -15,6 +15,7 @@ from pathlib import Path
 from .llm import DEFAULT_MODEL, Budget, ClaudeClient
 from .loader import ProjectError, load_project
 from .orchestrator import Orchestrator, RunConfig
+from .speech import ENGINES, SpeechConfig
 
 # Which scenario each clinic bug switch must be caught by (the Phase 1 exit criterion).
 EXIT_CHECK = {
@@ -22,6 +23,8 @@ EXIT_CHECK = {
     "skip_confirmation": "clinic.confirm-before-booking",
     "double_booking": "clinic.book-checkup",
 }
+# Voice adds the speech-layer bug (Phase 2 exit criterion): only audibly wrong, so text mode can't see it.
+EXIT_CHECK_VOICE = {**EXIT_CHECK, "misread_reference": "clinic.book-checkup"}
 
 
 def load_dotenv(path: Path) -> list[str]:
@@ -56,7 +59,7 @@ def _agent_options(pairs: list[str]) -> dict:
 
 def _project(args):
     """The project with its agent options: offline_options first (with --offline), then --agent-opt."""
-    project = load_project(args.project)
+    project = load_project(args.project, getattr(args, "profile", "profile.yaml"))
     if args.offline:
         project = project.with_agent_options(project.profile["connection"].get("offline_options", {}))
     return project.with_agent_options(_agent_options(args.agent_opt or []))
@@ -65,7 +68,9 @@ def _project(args):
 def _config(args) -> RunConfig:
     return RunConfig(root=Path(args.root).resolve(), runs_dir=Path(args.runs_dir), offline=args.offline,
                      caller_model=args.model, validator_model=args.model, repeats=args.repeats,
-                     scenario_ids=tuple(args.scenario or ()), mask_pii=not args.show_pii)
+                     scenario_ids=tuple(args.scenario or ()), mask_pii=not args.show_pii,
+                     speech=SpeechConfig(engine=args.speech, ears_model=args.stt_model,
+                                         check_model=args.stt_check_model))
 
 
 def _llm(args, project):
@@ -79,8 +84,9 @@ def _llm(args, project):
 
 
 def cmd_validate(args) -> int:
-    project = load_project(args.project)
-    print(f"OK: profile {project.profile['id']}, {len(project.personas)} persona(s), "
+    project = load_project(args.project, args.profile)
+    print(f"OK: profile {project.profile['id']} ({args.profile}, {project.profile['connection']['type']}), "
+          f"{len(project.personas)} persona(s), "
           f"{len(project.scenarios)} scenario(s)")
     return 0
 
@@ -112,7 +118,9 @@ def cmd_exit_check(args) -> int:
     config = _config(args)
     llm = _llm(args, base)
     rows, all_ok = [], True
-    for bug in [None, *EXIT_CHECK]:
+    voice = base.profile["connection"]["type"] == "websocket_audio"
+    expected = EXIT_CHECK_VOICE if voice else EXIT_CHECK
+    for bug in [None, *expected]:
         label = bug or "clean"
         print(f"\n=== {label} ===")
         project = base.with_agent_options({"bugs": bug or ""})
@@ -123,13 +131,13 @@ def cmd_exit_check(args) -> int:
             ok = decision["decision"] == "GO"
             detail = "GO, no false alarms" if ok else f"{decision['decision']}; failing: {', '.join(failed) or '-'}"
         else:
-            r = rel.get(EXIT_CHECK[bug])
+            r = rel.get(expected[bug])
             ok = bool(r) and r["failed"] == r["k"] and decision["decision"] == "NO_GO"
-            detail = (f"caught in {r['failed']} of {r['k']} repeats of {EXIT_CHECK[bug]}; {decision['decision']}"
-                      if r else f"scenario {EXIT_CHECK[bug]} was not run")
+            detail = (f"caught in {r['failed']} of {r['k']} repeats of {expected[bug]}; {decision['decision']}"
+                      if r else f"scenario {expected[bug]} was not run")
         all_ok &= ok
         rows.append((label, "OK  " if ok else "MISS", detail, decision["_transcript"]))
-    print("\nPhase 1 exit check")
+    print(f"\n{'Phase 2 (voice)' if voice else 'Phase 1 (text)'} exit check")
     for label, mark, detail, report in rows:
         print(f"  [{mark}] {label:<18} {detail}")
         print(f"         {report}")
@@ -141,14 +149,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="vatf", description="Voice Agent Testing Framework")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    def profile_arg(p):
+        p.add_argument("--profile", default="profile.yaml",
+                       help="profile file in the project folder (default profile.yaml; "
+                            "the clinic's voice profile is profile-voice.yaml)")
+
     p = sub.add_parser("validate", help="check a project's files against the schemas")
     p.add_argument("project", help="project folder, e.g. examples/clinic")
+    profile_arg(p)
     p.set_defaults(func=cmd_validate)
 
     for name, func, text in [("run", cmd_run, "run the scenarios and give a GO / NO-GO decision"),
-                             ("exit-check", cmd_exit_check, "Phase 1 exit check: clean agent + each bug switch")]:
+                             ("exit-check", cmd_exit_check, "exit check: clean agent + each bug switch")]:
         p = sub.add_parser(name, help=text)
         p.add_argument("project", help="project folder, e.g. examples/clinic")
+        profile_arg(p)
+        p.add_argument("--speech", default="local", choices=ENGINES,
+                       help="voice mode: the caller's speech engines. local = Piper + faster-whisper (default); "
+                            "codec = test tones, only for vatf's own tests")
+        p.add_argument("--stt-model", default="base.en", help="voice: whisper model the caller hears with")
+        p.add_argument("--stt-check-model", default="small.en",
+                       help="voice: whisper model for the careful second listen behind read-back checks")
         p.add_argument("--scenario", action="append", help="run only this scenario id (repeatable)")
         p.add_argument("--repeats", type=int, help="override the profile's repeats")
         p.add_argument("--agent-opt", action="append", metavar="KEY=VALUE",

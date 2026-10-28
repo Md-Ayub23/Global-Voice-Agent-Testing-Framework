@@ -19,8 +19,14 @@ from .contracts.models import CallTrace, LLMMessage, LLMRequest
 HANG_UP = "[HANG UP]"
 
 
+VOICE_NOTE = """
+This is a real phone call. You hear the agent through speech recognition, so its words may
+contain small recognition mistakes; if something important is unclear, ask the agent to repeat it.
+Say numbers and dates the way people say them out loud (for example "the 14th of March, 1985")."""
+
+
 def caller_system_prompt(scenario: Mapping[str, Any], persona: Mapping[str, Any],
-                         agent_name: str) -> str:
+                         agent_name: str, voice: bool = False) -> str:
     c = scenario["caller"]
     traits = ", ".join(f"{k}: {v}" for k, v in persona.get("traits", {}).items())
     facts = "\n".join(f"- {k}: {v}" for k, v in c.get("facts", {}).items())
@@ -45,16 +51,17 @@ End the call when: {c.get('end_when', 'your goal is reached or clearly cannot be
 To end the call, say a short goodbye and then write {HANG_UP} at the very end.
 
 Reply with only the words you say out loud: one or two short spoken sentences, no stage
-directions, no quotation marks, no descriptions of tone."""
+directions, no quotation marks, no descriptions of tone.""" + (VOICE_NOTE if voice else "")
 
 
 class LLMCaller:
     def __init__(self, scenario: Mapping[str, Any], persona: Mapping[str, Any], llm: Any, *,
-                 model: str, agent_name: str, max_tokens: int = 2048, metadata: Mapping[str, str] = ()):
+                 model: str, agent_name: str, max_tokens: int = 2048, metadata: Mapping[str, str] = (),
+                 voice: bool = False):
         self._llm = llm
         self._model = model
         self._max_tokens = max_tokens
-        self._system = caller_system_prompt(scenario, persona, agent_name)
+        self._system = caller_system_prompt(scenario, persona, agent_name, voice)
         self._metadata = dict(metadata or {})
         self._history: list[LLMMessage] = []
 
@@ -69,6 +76,11 @@ class LLMCaller:
         said = re.sub(re.escape(HANG_UP), "", text, flags=re.I).strip().strip('"').strip()
         self._history.append(LLMMessage("assistant", said or "(hangs up)"))
         return CallerAction(say=said or None, hang_up=hang_up)
+
+    def note_barge_in(self, heard_before: str, said: str) -> None:
+        """Voice: the scenario made the caller cut in with fixed words; keep the history true."""
+        self._history.append(LLMMessage("user", (heard_before.strip() or "(silence)") + " ..."))
+        self._history.append(LLMMessage("assistant", said))
 
 
 class ScriptedCaller:
@@ -85,7 +97,8 @@ class RuleCaller:
     """Answers the agent from the fact sheet using keywords. Not a real simulator:
     it exists so the pipeline can run end to end with no API key."""
 
-    def __init__(self, scenario: Mapping[str, Any]):
+    def __init__(self, scenario: Mapping[str, Any], spoken: bool = False):
+        self._spoken = spoken  # voice: say dates as words ("14 March 1985"), not 1985-03-14
         c = scenario["caller"]
         self._goal = c["goal"]
         self._facts = c.get("facts", {})
@@ -108,20 +121,31 @@ class RuleCaller:
         if "name" in heard and "full_name" in f:
             parts.append(str(f["full_name"]))
         if re.search(r"birth|\bdob\b", heard) and "date_of_birth" in f:
-            parts.append(str(f["date_of_birth"]))
+            parts.append(_spoken_date(str(f["date_of_birth"])) if self._spoken else str(f["date_of_birth"]))
         if parts:
             return CallerAction(say=", ".join(parts) + ".")
         if "which doctor" in heard and "doctor" in f:
             return CallerAction(say=f"{f['doctor']}, please.")
         if "which day" in heard or "which other day" in heard:
             return CallerAction(say=f"{f.get('preferred_day', 'next Tuesday')}, please.")
-        times = re.findall(r"\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b", heard)
+        # "9:30am", or as speech recognition may write it: "9:30 a.m.", "9.30 a m"
+        times = re.findall(r"\b(\d{1,2})(?:[:.](\d{2}))?\s?([ap])\.?\s?m\b", heard)
         if times and re.search(r"\b(which|what time|would you like|suit)\b", heard):
-            return CallerAction(say=f"{times[0]} please.")
+            hour, minute, half = times[0]
+            return CallerAction(say=f"{hour}{':' + minute if minute else ''}{half}m please.")
         self._confused += 1
         if self._confused >= 3:
             return CallerAction(say="Sorry, I'll call back later. Bye.", hang_up=True)
         return CallerAction(say="Sorry, could you say that again?")
+
+
+def _spoken_date(iso: str) -> str:
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", iso.strip())
+    if not m:
+        return iso
+    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+              "October", "November", "December"]
+    return f"{int(m.group(3))} {months[int(m.group(2)) - 1]} {m.group(1)}"
 
 
 VALIDATOR_SYSTEM = """You review a recorded phone call made by a SIMULATED CALLER (an AI playing a person).

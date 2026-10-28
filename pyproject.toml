@@ -1,9 +1,17 @@
 [project]
 name = "vatf"
-version = "0.2.0"
+version = "0.3.0"
 description = "Voice Agent Testing Framework: test any voice agent, local-first."
 requires-python = ">=3.12"
-dependencies = ["pyyaml>=6", "jsonschema>=4.23", "anthropic>=2.3"]
+dependencies = [
+    "pyyaml>=6",
+    "jsonschema>=4.23",
+    "anthropic>=2.3",
+    "numpy>=2.5.4",
+    "websockets>=17.3",
+    "piper-tts>=1.8.0",
+    "faster-whisper>=1.2.1",
+]
 
 [project.scripts]
 vatf = "vatf.cli:main"

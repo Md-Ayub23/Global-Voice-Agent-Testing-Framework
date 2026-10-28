@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,15 +55,42 @@ def _load_yaml(path: Path) -> Any:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def load_project(folder: str | Path) -> Project:
+def merge(base: Any, over: Any) -> Any:
+    """Mappings merge key by key; anything else in `over` replaces the base value."""
+    if isinstance(base, dict) and isinstance(over, dict):
+        return {**base, **{k: merge(base.get(k), v) if k in base else v for k, v in over.items()}}
+    return copy.deepcopy(over)
+
+
+def load_profile(folder: Path, name: str) -> tuple[dict[str, Any], str]:
+    """The profile with its `extends` chain applied, and a hash over every file involved."""
+    chain, path = [], folder / name
+    while True:
+        if not path.exists():
+            raise ProjectError(f"{path} not found")
+        if path in [p for p, _ in chain]:
+            raise ProjectError(f"{path}: extends loops back on itself")
+        doc = _load_yaml(path)
+        if not isinstance(doc, dict):
+            raise ProjectError(f"{path}: not a YAML mapping")
+        chain.append((path, doc))
+        if not doc.get("extends"):
+            break
+        path = folder / doc["extends"]
+    profile: dict[str, Any] = {}
+    for _, doc in reversed(chain):
+        profile = merge(profile, {k: v for k, v in doc.items() if k != "extends"})
+    digest = hashlib.sha256("".join(sha256_file(p) for p, _ in chain).encode()).hexdigest() \
+        if len(chain) > 1 else sha256_file(chain[0][0])
+    return profile, digest
+
+
+def load_project(folder: str | Path, profile_file: str = "profile.yaml") -> Project:
     folder = Path(folder)
-    profile_path = folder / "profile.yaml"
-    if not profile_path.exists():
-        raise ProjectError(f"{profile_path} not found")
     problems: list[str] = []
 
-    profile = _load_yaml(profile_path)
-    problems += [f"profile.yaml: {e}" for e in schema_errors("client_profile", profile)]
+    profile, profile_sha256 = load_profile(folder, profile_file)
+    problems += [f"{profile_file}: {e}" for e in schema_errors("client_profile", profile)]
 
     personas = {}
     for path in sorted((folder / "personas").glob("*.yaml")):
@@ -85,14 +113,14 @@ def load_project(folder: str | Path) -> Project:
         raise ProjectError("the project files have problems:\n  " + "\n  ".join(problems))
     if not scenarios:
         raise ProjectError(f"no scenarios found in {folder / 'scenarios'}")
-    return Project(folder, profile, sha256_file(profile_path), personas, scenarios, hashes)
+    return Project(folder, profile, profile_sha256, personas, scenarios, hashes)
 
 
 def _reference_problems(sc, profile, personas, tools, probes) -> list[str]:
     out = []
     if sc.get("profile") != profile.get("id"):
         out.append(f"written for profile {sc.get('profile')!r}, not {profile.get('id')!r}")
-    if "caller" in sc and sc["caller"].get("persona") not in personas:
+    if "caller" in sc and "persona" in sc["caller"] and sc["caller"]["persona"] not in personas:
         out.append(f"unknown persona {sc['caller'].get('persona')!r}")
     facts = sc.get("caller", {}).get("facts", {})
     for fault in sc.get("setup", {}).get("faults", []):

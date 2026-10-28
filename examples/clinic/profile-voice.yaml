@@ -1,0 +1,31 @@
+# The same clinic agent, reached by phone: audio over a WebSocket (docs/voice-protocol.md).
+# Everything not listed here (tools, backend, probes, PII rules) comes from profile.yaml.
+#   uv run vatf run examples/clinic --profile profile-voice.yaml
+schema_version: "0.1"
+kind: client_profile
+extends: profile.yaml
+
+connection:
+  type: websocket_audio
+  # vatf starts the zoo agent's voice front-end for each call and dials the URL it returns.
+  # For an agent that is already running somewhere, drop launch and set target: ws://host:port/...
+  launch: "zoo.clinic.voice:launch"
+  target: ""
+  audio: {sample_rate_hz: 16000, encoding: pcm16}
+  options:
+    voice: en_US-amy-medium               # the agent's Piper voice
+    stt_model: base.en                    # what the agent listens with
+    speech: local                         # local (Piper + faster-whisper) or codec (framework tests only)
+
+thresholds:
+  # Production voice agents should answer within p50 800 ms / p95 1500 ms (the schema defaults).
+  # This zoo agent waits 0.6 s to be sure the caller has finished, then runs speech recognition,
+  # Claude and speech synthesis one after the other on a laptop CPU, so it is far slower.
+  # These limits are set for it; use the defaults for a real agent.
+  latency_p50_ms: 3500
+  latency_p95_ms: 6000
+
+limits:
+  max_call_seconds: 300
+  end_of_turn_ms: 1000                    # caller takes 1 s of silence as "the agent has finished"
+  no_reply_ms: 15000                      # then waits up to 15 s for an answer before reacting

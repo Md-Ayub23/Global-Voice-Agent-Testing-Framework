@@ -28,6 +28,7 @@ properties:
       - probe_result
       - platform_event
       - validator_result
+      - stt_text
       - harness_event
       - call_ended
   turn: {description: "Conversation turn number this event belongs to, if any.", type: integer, minimum: 1}
@@ -125,6 +126,15 @@ allOf:
           properties:
             on_script: {description: "false means the simulated caller broke its goal or facts; the call is a harness ERROR.", type: boolean}
             problems: {type: array, items: {type: string}}
+  - if: {properties: {type: {const: stt_text}}}
+    then:
+      properties:
+        data:
+          required: [agent_turn, text]
+          properties:
+            agent_turn: {description: "seq of the agent_turn whose audio was transcribed again.", type: integer}
+            text: {description: "The careful second transcription (voice mode, read-back checks).", type: string}
+            model: {type: string}
   - if: {properties: {type: {const: harness_event}}}
     then:
       properties:

@@ -9,7 +9,9 @@ to the tool's upstream:
   http://... or https://...        JSON POST
 
 In text mode the delays of "slow" and "timeout" faults are recorded, not
-waited out, because text-mode timing never gates the release anyway.
+waited out, because text-mode timing never gates the release anyway. In voice
+mode (real_delays=True) they are really waited out, so the caller hears the
+agent go quiet exactly as it would on a slow day.
 """
 
 from __future__ import annotations
@@ -28,7 +30,9 @@ DEFAULT_TIMEOUT_MS = 10_000
 
 
 class InProcessToolProxy:
-    def __init__(self, profile: Mapping[str, Any], faults: Sequence[Mapping[str, Any]] = ()):
+    def __init__(self, profile: Mapping[str, Any], faults: Sequence[Mapping[str, Any]] = (),
+                 real_delays: bool = False):
+        self._real_delays = real_delays
         self._tools = {t["name"]: t for t in profile.get("tools", [])}
         test_id_cfg = profile.get("test_id", {})
         self._propagation = test_id_cfg.get("propagation", ["proxy_header"])
@@ -78,15 +82,22 @@ class InProcessToolProxy:
             status, body, ms = self._forward(tool, args)
             reached = True
         if kind == "timeout":
+            self._wait(fault.get("delay_ms", DEFAULT_TIMEOUT_MS) - ms)
             return self._respond(call_id, tool, 504, {"error": "timeout"},
                                  fault.get("delay_ms", DEFAULT_TIMEOUT_MS), reached)
         if kind == "http_error":
             code = fault.get("status", 500)
             return self._respond(call_id, tool, code, {"error": f"upstream returned {code}"}, ms, reached)
         if kind == "slow":
+            self._wait(fault.get("delay_ms", 0))
             return self._respond(call_id, tool, status, body, ms + fault.get("delay_ms", 0), reached)
         # malformed_response: the call happened, but the agent gets garbage back.
         return self._respond(call_id, tool, 200, '{"appointment_id": 4', ms, reached, ok=False)
+
+    def _wait(self, ms: float) -> None:
+        # Runs in the agent's own thread (tools are called synchronously), so sleeping is right here.
+        if self._real_delays and ms > 0:
+            time.sleep(ms / 1000)
 
     def _respond(self, call_id: str, tool: str, status: int, body: Any, ms: int, reached: bool,
                  ok: bool | None = None) -> dict[str, Any]:
