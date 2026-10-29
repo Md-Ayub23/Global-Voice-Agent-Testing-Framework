@@ -16,6 +16,7 @@ connection.target is the ws:// URL. For an agent written in Python that should
 be started by vatf for each call, connection.launch names "module:function";
 it is called as launch(tools=<tool proxy>, options=connection.options) and
 returns an object with .url and async close(). The clinic zoo agent works this way.
+connection.options.headers are sent when connecting (e.g. Authorization: "Bearer ${AGENT_TOKEN}").
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ import numpy as np
 from ..audio.pcm import from_pcm16, to_pcm16
 from ..audio.recorder import Recorder
 from ..contracts.models import CallContext
+from ..util import expand_env
 from . import ConnectError
 
 CONNECT_TIMEOUT_S = 15
@@ -148,7 +150,9 @@ class WebSocketAudioConnector:
         if "session_metadata" in self._profile.get("test_id", {}).get("propagation", []):
             meta["test_id"] = ctx.test_id
         try:
-            ws = await asyncio.wait_for(websockets.connect(url, max_size=None, ping_interval=None),
+            headers = {str(k): str(v) for k, v in expand_env(conn.get("options", {}).get("headers") or {}).items()}
+            ws = await asyncio.wait_for(websockets.connect(url, max_size=None, ping_interval=None,
+                                                           additional_headers=headers or None),
                                         CONNECT_TIMEOUT_S)
             await ws.send(json.dumps({"type": "start", "sample_rate": self.sample_rate, "encoding": "pcm16",
                                       "metadata": meta}))

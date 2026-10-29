@@ -203,6 +203,8 @@ $defs:
           - entity_fidelity   # entities: caller fact names to compare across speech, tool args and backend
           - readback          # tool, field: the agent must say the value the tool returned (probe?, column?)
           - max_turns         # n
+          - log_contains      # pattern (regex on the agent's own log lines for the call; needs profile logs)
+          - log_not_contains  # pattern
           - judge             # rubric (Phase 3) or intent (one-line judge question)
       severity:
         description: blocker failures stop the release on their own.
@@ -235,7 +237,7 @@ $defs:
         then: {required: [first, then]}
       - if: {properties: {type: {const: probe}}}
         then: {required: [probe]}
-      - if: {properties: {type: {enum: [said, not_said]}}}
+      - if: {properties: {type: {enum: [said, not_said, log_contains, log_not_contains]}}}
         then: {required: [pattern]}
       - if: {properties: {type: {const: handoff}}}
         then: {required: [to]}

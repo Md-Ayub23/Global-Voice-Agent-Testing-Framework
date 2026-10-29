@@ -11,10 +11,16 @@ dependencies = [
     "websockets>=17.3",
     "piper-tts>=1.8.0",
     "faster-whisper>=1.2.1",
+    "ruamel-yaml>=0.18",
 ]
 
 [project.scripts]
 vatf = "vatf.cli:main"
+
+[project.optional-dependencies]
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 
 [dependency-groups]
 dev = ["pytest>=8"]

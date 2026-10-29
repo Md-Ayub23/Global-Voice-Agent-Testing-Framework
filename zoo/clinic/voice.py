@@ -24,7 +24,7 @@ from typing import Any, Mapping
 
 from zoo.voice.gateway import VoiceGateway
 
-from .agent import build_agent, parse_bugs
+from .agent import BUG_HELP, BUGS, build_agent, parse_bugs  # noqa: F401 - BUG_HELP/BUGS for `vatf ui`
 
 ROOT = Path(__file__).resolve().parents[2]
 REFERENCE = re.compile(r"(?<![\d-])\d(?:[ -]?\d){5}(?![\d-])")

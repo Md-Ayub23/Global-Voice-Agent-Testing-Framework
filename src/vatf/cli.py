@@ -1,4 +1,4 @@
-"""Command line: vatf validate | run | exit-check.
+"""Command line: vatf validate | run | exit-check | ui.
 
 Exit codes for CI: 0 GO, 1 NO_GO, 2 NO_GO_INSUFFICIENT_EVIDENCE, 3 the framework itself failed.
 """
@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import signal
 import sys
 import traceback
 from pathlib import Path
@@ -16,6 +17,7 @@ from .llm import DEFAULT_MODEL, Budget, ClaudeClient
 from .loader import ProjectError, load_project
 from .orchestrator import Orchestrator, RunConfig
 from .speech import ENGINES, SpeechConfig
+from .util import write_json
 
 # Which scenario each clinic bug switch must be caught by (the Phase 1 exit criterion).
 EXIT_CHECK = {
@@ -117,7 +119,7 @@ def cmd_exit_check(args) -> int:
     base = _project(args)
     config = _config(args)
     llm = _llm(args, base)
-    rows, all_ok = [], True
+    rows, all_ok, summary = [], True, []
     voice = base.profile["connection"]["type"] == "websocket_audio"
     expected = EXIT_CHECK_VOICE if voice else EXIT_CHECK
     for bug in [None, *expected]:
@@ -137,15 +139,36 @@ def cmd_exit_check(args) -> int:
                       if r else f"scenario {expected[bug]} was not run")
         all_ok &= ok
         rows.append((label, "OK  " if ok else "MISS", detail, decision["_transcript"]))
+        summary.append({"label": label, "bug": bug, "scenario_id": expected.get(bug) if bug else None,
+                        "ok": ok, "detail": detail, "run_id": decision["run_id"],
+                        "decision": decision["decision"]})
+        if args.summary:  # rewritten after every run, so a stopped exit check still shows what finished
+            write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text",
+                                            "passed": all_ok, "finished": False, "rows": summary})
     print(f"\n{'Phase 2 (voice)' if voice else 'Phase 1 (text)'} exit check")
     for label, mark, detail, report in rows:
         print(f"  [{mark}] {label:<18} {detail}")
         print(f"         {report}")
     print("\nRESULT:", "PASSED" if all_ok else "NOT PASSED")
+    if args.summary:
+        write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text",
+                                        "passed": all_ok, "finished": True, "rows": summary})
     return 0 if all_ok else 1
 
 
+def cmd_ui(args) -> int:
+    from .web.server import serve
+
+    return serve(Path(args.root).resolve(), Path(args.runs_dir), port=args.port, open_browser=not args.no_browser)
+
+
 def main(argv: list[str] | None = None) -> int:
+    if os.environ.pop("VATF_UI_CHILD", None):
+        # Started by `vatf ui`: its Stop button sends Ctrl+C (Ctrl+Break on Windows). Make sure both
+        # stop the run the way Ctrl+C in a terminal does, even from a shell that ignores Ctrl+C.
+        signal.signal(signal.SIGINT, signal.default_int_handler)
+        if hasattr(signal, "SIGBREAK"):
+            signal.signal(signal.SIGBREAK, signal.default_int_handler)
     parser = argparse.ArgumentParser(prog="vatf", description="Voice Agent Testing Framework")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -184,7 +207,16 @@ def main(argv: list[str] | None = None) -> int:
         if name == "run":
             p.add_argument("--quiet", action="store_true",
                            help="don't print each call's conversation (it is still saved in transcript.txt)")
+        else:
+            p.add_argument("--summary", metavar="FILE", help="also write the exit check's result table as JSON")
         p.set_defaults(func=func)
+
+    p = sub.add_parser("ui", help="open the vatf dashboard in your browser (set up, run and read tests)")
+    p.add_argument("--port", type=int, default=8765, help="port on this computer (default 8765)")
+    p.add_argument("--root", default=".", help="project root (default: here)")
+    p.add_argument("--runs-dir", default="runs", help="where runs are written (default: runs)")
+    p.add_argument("--no-browser", action="store_true", help="don't open a browser window")
+    p.set_defaults(func=cmd_ui)
 
     args = parser.parse_args(argv)
     load_dotenv(Path(getattr(args, "root", ".")) / ".env")

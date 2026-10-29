@@ -11,7 +11,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from . import __version__
 from .contracts.models import AudioClip, CallContext, CallTrace, TraceEvent
@@ -19,7 +19,7 @@ from .util import mask_token, read_json, sha256_file, write_json
 
 # Free-text fields that may hold spoken personal data, per event type.
 TEXT_FIELDS = {"caller_turn": ("text",), "agent_turn": ("heard_text", "platform_transcript"),
-               "stt_text": ("text",)}
+               "stt_text": ("text",), "platform_event": ("text",)}
 
 
 def utc_now() -> str:
@@ -87,15 +87,7 @@ class LocalCallWriter:
         return name
 
     def lock(self, status: str, cost_usd: float = 0.0) -> Mapping[str, Any]:
-        # Personal values to find in free text: the caller's fact sheet, plus whatever personal
-        # values the agent actually sent to its tools (scripted scenarios have no fact sheet).
-        values: list[tuple[str, Any]] = list(self._facts.items())
-        keys = pii_keys(self._profile)
-        for e in self._events:
-            if e.type == "tool_request":
-                values += [(k, v) for k, v in e.data.get("args", {}).items() if k in keys]
-        patterns = fact_patterns(self._profile, values)
-        masked = ([_mask_event(e, self._profile, self.record["test_id"], patterns) for e in self._events]
+        masked = (mask_events(self._events, self._profile, self._facts, self.record["test_id"])
                   if self._mask else list(self._events))
         self._file.write_text("".join(_event_line(e) + "\n" for e in masked), encoding="utf-8")
         self._events = masked
@@ -171,6 +163,20 @@ def fact_patterns(profile: Mapping[str, Any], facts: Any) -> list[tuple[str, re.
     # ("Maria") would be masked first and leave "Lopez" of the real name in plain text.
     whole.sort(key=lambda w: -w[0])
     return out + [(n, p) for _, n, p in whole] + words_out
+
+
+def mask_events(events: Sequence[TraceEvent], profile: Mapping[str, Any], facts: Mapping[str, Any],
+                salt: str) -> list[TraceEvent]:
+    """The events with personal data masked, exactly as a call is sealed (also used by the live UI view)."""
+    # Personal values to find in free text: the caller's fact sheet, plus whatever personal
+    # values the agent actually sent to its tools (scripted scenarios have no fact sheet).
+    values: list[tuple[str, Any]] = list(facts.items())
+    keys = pii_keys(profile)
+    for e in events:
+        if e.type == "tool_request":
+            values += [(k, v) for k, v in e.data.get("args", {}).items() if k in keys]
+    patterns = fact_patterns(profile, values)
+    return [_mask_event(e, profile, salt, patterns) for e in events]
 
 
 def _mask_event(e: TraceEvent, profile: Mapping[str, Any], salt: str,

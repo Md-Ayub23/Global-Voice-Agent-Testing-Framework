@@ -6,7 +6,12 @@ the test id header, injects the scenario's faults, and forwards the request
 to the tool's upstream:
 
   python:package.module:function   in-process handler, returns (status, body)
-  http://... or https://...        JSON POST
+  http://... or https://...        JSON POST (or GET with the arguments as the query string when the
+                                   tool says method: GET), plus the tool's own headers
+                                   (secrets as ${NAME}, read from the .env file)
+
+Agents that run in-process call proxy.call() directly. Agents that run somewhere else send their
+tool calls to the tool gateway (gateway.py), which calls proxy.call() for them.
 
 In text mode the delays of "slow" and "timeout" faults are recorded, not
 waited out, because text-mode timing never gates the release anyway. In voice
@@ -20,11 +25,13 @@ import importlib
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any, Callable, Mapping, Sequence
 
 from .contracts.models import CallContext
 from .contracts.observers import EventSink
+from .util import expand_env
 
 DEFAULT_TIMEOUT_MS = 10_000
 
@@ -56,6 +63,11 @@ class InProcessToolProxy:
 
     # The agent-facing method.
     def call(self, tool: str, **args: Any) -> dict[str, Any]:
+        return self.call_with(tool, args)
+
+    def call_with(self, tool: str, args: Mapping[str, Any]) -> dict[str, Any]:
+        """call() with the arguments as one mapping (any names, even "tool"); the gateway uses it."""
+        args = dict(args)
         if self._sink is None:
             raise RuntimeError("tool proxy is not attached to a call")
         self._n += 1
@@ -120,7 +132,10 @@ class InProcessToolProxy:
             if upstream.startswith("python:"):
                 status, body = self._handler(upstream)(dict(args), self._headers())
             elif upstream.startswith(("http://", "https://")):
-                status, body = _http_post(upstream, args, self._headers())
+                spec = self._tools[tool]
+                headers = {**{str(k): str(v) for k, v in expand_env(spec.get("headers") or {}).items()},
+                           **self._headers()}
+                status, body = _http_call(spec.get("method", "POST"), upstream, args, headers)
             else:
                 status, body = 502, {"error": f"tool {tool} has no usable upstream ({upstream!r})"}
         except Exception as e:  # the upstream crashed: that is a 500 from the backend
@@ -134,16 +149,26 @@ class InProcessToolProxy:
         return self._handlers[upstream]
 
 
-def _http_post(url: str, args: Mapping[str, Any], headers: Mapping[str, str]) -> tuple[int, Any]:
-    req = urllib.request.Request(url, data=json.dumps(args).encode("utf-8"), method="POST",
-                                 headers={"Content-Type": "application/json", **headers})
+def _http_call(method: str, url: str, args: Mapping[str, Any], headers: Mapping[str, str]) -> tuple[int, Any]:
+    if method == "GET":
+        query = urllib.parse.urlencode({k: v if isinstance(v, str) else json.dumps(v) for k, v in args.items()})
+        req = urllib.request.Request(f"{url}{'&' if '?' in url else '?'}{query}" if query else url,
+                                     method="GET", headers=dict(headers))
+    else:
+        req = urllib.request.Request(url, data=json.dumps(args).encode("utf-8"), method=method,
+                                     headers={"Content-Type": "application/json", **headers})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read().decode("utf-8")
-            return resp.status, json.loads(raw) if raw else None
+            try:
+                return resp.status, json.loads(raw) if raw else None
+            except ValueError:
+                return resp.status, raw
     except urllib.error.HTTPError as e:
         raw = e.read().decode("utf-8", errors="replace")
         try:
             return e.code, json.loads(raw)
         except ValueError:
             return e.code, raw
+    except (urllib.error.URLError, OSError) as e:  # the API is down or unreachable: a 502, as a real gateway says
+        return 502, {"error": f"could not reach {url}: {getattr(e, 'reason', e)}"}

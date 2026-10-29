@@ -186,6 +186,9 @@ def evaluate_check(check: Mapping[str, Any], check_id: str, events: Events, all_
     if kind == "readback":
         return _readback(check, check_id, events, all_events)
 
+    if kind in ("log_contains", "log_not_contains"):
+        return _log_check(check, check_id, kind, all_events)
+
     if kind == "judge":
         return _result(check, check_id, Result.NOT_APPLICABLE,
                        "AI judges arrive in Phase 3; this item was skipped.", (), EvidenceLevel.AI_OPINION,
@@ -194,6 +197,32 @@ def evaluate_check(check: Mapping[str, Any], check_id: str, events: Events, all_
                               "applicable": False, "votes": []})
 
     return _result(check, check_id, Result.NOT_VERIFIED, f"Unknown check type {kind!r}.", (), EvidenceLevel.NONE)
+
+
+def _log_check(check, check_id, kind, all_events) -> CheckResult:
+    """The agent's own log lines for this call (profile logs section). A log line is what the agent
+    reported about itself (platform evidence), so it ranks below tool traffic and backend state."""
+    collected = [e for e in all_events if e.type == "platform_event" and e.data.get("kind") == "log_collected"]
+    if not collected or not collected[-1].data.get("ok"):
+        why = collected[-1].data.get("error", "") if collected else "no logs are set up for this agent"
+        return _result(check, check_id, Result.NOT_VERIFIED, f"The agent's logs could not be read ({why}).",
+                       _refs(collected[-1:]), EvidenceLevel.NONE)
+    pattern = re.compile(check["pattern"])
+    lines = [e for e in all_events if e.type == "platform_event" and e.data.get("kind") == "log"]
+    hits = [e for e in lines if pattern.search(e.data.get("text", ""))]
+    n = collected[-1].data.get("lines", len(lines))
+    if kind == "log_contains":
+        if hits:
+            return _result(check, check_id, Result.PASS, f"The agent's log has a line matching {check['pattern']}: "
+                           f"{_short(hits[0].data.get('text', ''))}", _refs(hits[:1]), EvidenceLevel.PLATFORM)
+        return _result(check, check_id, Result.FAIL, f"None of the {n} log line(s) of this call match {check['pattern']}.",
+                       _refs(collected[-1:]), EvidenceLevel.PLATFORM)
+    if hits:
+        return _result(check, check_id, Result.FAIL, f"The agent's log has {len(hits)} line(s) matching "
+                       f"{check['pattern']}, e.g. {_short(hits[0].data.get('text', ''))}", _refs(hits[:5]),
+                       EvidenceLevel.PLATFORM)
+    return _result(check, check_id, Result.PASS, f"None of the {n} log line(s) of this call match {check['pattern']}.",
+                   _refs(collected[-1:]), EvidenceLevel.PLATFORM)
 
 
 def _entity_fidelity(check, check_id, events, all_events, facts, salt) -> CheckResult:

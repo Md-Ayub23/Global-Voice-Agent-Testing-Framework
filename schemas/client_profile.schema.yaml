@@ -40,9 +40,9 @@ properties:
         enum: [text_python, text_http, websocket_audio, sip, webrtc, platform]
       target:
         description: >
-          What to connect to. text_python: "module:callable" that builds the agent.
-          text_http / websocket_audio: a URL. sip: a phone number or SIP URI.
-          platform: an agent id on the platform.
+          What to connect to. text_python: "module:callable" that builds the agent (agents in this repo).
+          text_http: the agent's http(s) URL (docs/text-http-protocol.md). websocket_audio: its ws(s)
+          URL (docs/voice-protocol.md). sip: a phone number or SIP URI. platform: an agent id on the platform.
         type: string
       launch:
         description: >
@@ -57,7 +57,13 @@ properties:
           sample_rate_hz: {type: integer, enum: [8000, 16000, 24000, 48000]}
           encoding: {enum: [pcm16, mulaw]}
       options:
-        description: Connector-specific settings. Secrets are given as ${ENV_VAR} names, never as values.
+        description: >
+          Connector-specific settings. Secrets are given as ${ENV_VAR} names, never as values.
+          text_http and websocket_audio: headers (sent with every request / when connecting).
+          text_http: reply_field, end_field, timeout_s.
+        type: object
+      offline_options:
+        description: Merged into options for --offline runs (agents in this repo only), so nothing calls an API.
         type: object
     allOf:
       - if: {properties: {type: {const: platform}}}
@@ -90,8 +96,19 @@ properties:
           description: read tools only look things up; write tools change backend state and are what the outcome check follows.
           enum: [read, write]
         upstream:
-          description: Where the proxy forwards the call. Omit for agents that call tools in-process (the connector then reports tool events).
+          description: >
+            Where the proxy forwards the call: the client's real (test) API URL, or python:module:function
+            for agents in this repo. Agents that run elsewhere send their tool calls to the tool gateway
+            (http://127.0.0.1:<tool_gateway.port>/tools/<name>), which forwards them here.
           type: string
+        method:
+          description: HTTP method for an http(s) upstream. GET sends the arguments as the query string.
+          enum: [POST, GET, PUT, PATCH, DELETE]
+          default: POST
+        headers:
+          description: 'Extra headers for the upstream, e.g. {Authorization: "Bearer ${ACME_API_TOKEN}"}.'
+          type: object
+          additionalProperties: {type: string}
         idempotency_key:
           description: Argument names that identify "the same action". Two successful write calls with the same values are a DUPLICATE_ACTION.
           type: array
@@ -100,6 +117,17 @@ properties:
           description: Argument names to mask in stored evidence.
           type: array
           items: {type: string}
+
+  tool_gateway:
+    description: >
+      Where vatf listens for the tool calls of an agent that runs outside vatf (text_http, or
+      websocket_audio without launch). Point the agent's tool calls at
+      http://<host>:<port>/tools/<tool name> for test runs.
+    type: object
+    additionalProperties: false
+    properties:
+      host: {type: string, default: 127.0.0.1}
+      port: {type: integer, minimum: 1, maximum: 65535, default: 8790}
 
   backend:
     description: How to read the real backend state after a call (backend probes, L5).
@@ -110,8 +138,14 @@ properties:
         description: none means outcome checks that need the backend are reported as NOT_VERIFIED, never PASS.
         enum: [sql, rest, none]
       connection:
-        description: For sql, a URL like sqlite:///path/to/db. For rest, a base URL.
+        description: >
+          sql: sqlite:///path/to/file.db or postgresql://user:${PG_PASSWORD}@host:5432/db (read-only use).
+          rest: the API's base URL. Secrets as ${NAME}.
         type: string
+      headers:
+        description: 'rest only. Headers for every probe, e.g. {Authorization: "Bearer ${ACME_API_TOKEN}"}.'
+        type: object
+        additionalProperties: {type: string}
       probes:
         type: array
         items:
@@ -130,6 +164,33 @@ properties:
                 probed by caller facts inside the call's time window.
               type: string
             returns: {enum: [rows, one, count], default: rows}
+            rows_field: {description: "rest: where the list of records is in the answer (dots for nesting, e.g. data.items).", type: string}
+            empty_on_404: {description: "rest: a 404 answer means 'no record' (otherwise it is a probe error).", type: boolean, default: false}
+
+  logs:
+    description: >
+      Where the agent's own logs are, so each call's log lines are kept with its evidence (platform
+      evidence: what the agent reported, below tool traffic and backend state). See src/vatf/logs.py.
+    type: object
+    additionalProperties: false
+    properties:
+      source: {enum: [none, file, http], default: none}
+      path: {description: "file: the log file (relative to the repo folder, or absolute).", type: string}
+      match:
+        description: "file: during_call keeps the lines written while the call ran; test_id keeps only lines containing the test id."
+        enum: [during_call, test_id]
+        default: during_call
+      url: {description: "http: log search URL with {test_id}, {started_at}, {ended_at} placeholders.", type: string}
+      headers: {type: object, additionalProperties: {type: string}}
+      lines_field: {description: "http JSON answers: where the list of lines is (dots for nesting).", type: string}
+      message_field: {description: "http JSON answers: the text of one line when lines are objects.", type: string, default: message}
+      settle_ms: {description: "Wait this long after the call before reading, so the last lines are flushed.", type: integer, minimum: 0, default: 500}
+      max_lines: {type: integer, minimum: 1, default: 300}
+    allOf:
+      - if: {properties: {source: {const: file}}, required: [source]}
+        then: {required: [path]}
+      - if: {properties: {source: {const: http}}, required: [source]}
+        then: {required: [url]}
 
   thresholds:
     description: Release gate settings (L8). Every field has a framework default.

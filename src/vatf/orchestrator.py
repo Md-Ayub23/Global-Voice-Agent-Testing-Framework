@@ -19,16 +19,22 @@ from .contracts.orchestrator import PlannedCall
 from .decision import LocalDecisionEngine
 from .evidence import LocalEvidenceStore, utc_now
 from .llm import DEFAULT_MODEL
-from .loader import Project
+from .gateway import GatewayError, ToolGateway, gateway_address, uses_gateway
+from .loader import Project, ProjectError
+from .logs import LogCollector
 from .outcome import evaluate_outcome
-from .probe import ProbeSetupError, SqlProbe, load_fixtures
+from .probe import BackendProbe, ProbeSetupError, load_fixtures
 from .proxy import InProcessToolProxy
 from .report import write_report
 from .speech import SpeechConfig
 from .speech.local import blocked_hint
 from .story import call_story_text, load_events, run_story_text
-from .util import write_json
+from .util import MissingSecret, expand_env, write_json
 from .verdict import LocalVerdictBuilder
+
+
+class RunSetupError(ProjectError):
+    """The run cannot start: a secret is missing, the tool gateway's port is taken... Nothing was called."""
 
 
 class HarnessError(Exception):
@@ -61,6 +67,7 @@ class Orchestrator:
         self.store = LocalEvidenceStore(config.root / config.runs_dir)
         self._counter = 0
         self._run_date = ""
+        self._gateway: ToolGateway | None = None
 
     @property
     def mode(self) -> str:
@@ -95,8 +102,70 @@ class Orchestrator:
         run_id = f"r-{now:%Y%m%d-%H%M%S}-{secrets.token_hex(2)}"
         self._run_date = f"{now:%Y%m%d}"
         plan = self.plan()
-        retries = self.profile.get("thresholds", {}).get("max_harness_retries", 2)
+        self.preflight()
+        run_dir = self.store.runs_dir / run_id
+        info = self._run_info(run_id, plan)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        write_json(run_dir / "run.json", info)
         self.log(f"run {run_id}: {len(plan)} planned call(s)")
+        try:
+            if uses_gateway(self.profile):
+                host, port = gateway_address(self.profile)
+                try:
+                    self._gateway = ToolGateway(host, port).start()
+                except GatewayError as e:
+                    raise RunSetupError(str(e)) from e
+                self.log(f"tool gateway: the agent's tools are at http://{host}:{self._gateway.port}/tools/<name>")
+            decision = await self._run_plan(run_id, plan, run_dir)
+        except BaseException as e:
+            stopped = isinstance(e, (KeyboardInterrupt, asyncio.CancelledError))
+            info.update(status="stopped" if stopped else "failed", finished_at=utc_now(),
+                        error="" if stopped else f"{type(e).__name__}: {e}")
+            write_json(run_dir / "run.json", info)
+            raise
+        finally:
+            if self._gateway:
+                self._gateway.stop()
+                self._gateway = None
+        info.update(status="finished", finished_at=utc_now(), decision=decision["decision"],
+                    exit_code=decision["exit_code"])
+        write_json(run_dir / "run.json", info)
+        return decision
+
+    def preflight(self) -> None:
+        """Problems that would make every call fail, found before the first call: secrets named as
+        ${NAME} in the profile must be set (in the .env file or the shell)."""
+        p = self.profile
+        named = [p["connection"].get("options", {}).get("headers"), p.get("backend", {}).get("connection"),
+                 p.get("backend", {}).get("headers"), (p.get("logs") or {}).get("url"), (p.get("logs") or {}).get("headers"),
+                 [t.get("headers") for t in p.get("tools", [])]]
+        try:
+            expand_env(named)
+        except MissingSecret as e:
+            raise RunSetupError(str(e)) from e
+
+    def _run_info(self, run_id: str, plan: list[PlannedCall]) -> dict[str, Any]:
+        """runs/<run_id>/run.json: how the run was started and what it will do (read by `vatf ui`)."""
+        from . import __version__
+
+        cfg = self.config
+        info: dict[str, Any] = {
+            "schema_version": "0.1", "kind": "run_info", "run_id": run_id, "status": "running",
+            "started_at": utc_now(), "framework_version": __version__,
+            "project": Path(self.project.folder).as_posix(), "profile_file": self.project.profile_file,
+            "profile_id": self.profile["id"], "profile_name": self.profile.get("name", self.profile["id"]),
+            "mode": self.mode, "offline": cfg.offline, "repeats": cfg.repeats,
+            "scenario_ids": list(cfg.scenario_ids), "agent_options": dict(self.profile["connection"].get("options", {})),
+            "caller_model": None if cfg.offline else cfg.caller_model, "pii_masked": cfg.mask_pii,
+            "plan": [{"scenario_id": pc.scenario_id, "persona_id": pc.persona_id, "repeat": pc.repeat} for pc in plan],
+        }
+        if self.mode == "voice":
+            info["speech"] = {"engine": cfg.speech.engine, "ears_model": cfg.speech.ears_model,
+                              "check_model": cfg.speech.check_model}
+        return info
+
+    async def _run_plan(self, run_id: str, plan: list[PlannedCall], run_dir: Path) -> dict[str, Any]:
+        retries = self.profile.get("thresholds", {}).get("max_harness_retries", 2)
         if self.mode == "voice":
             await self._warm_up_speech(plan)
         finals, error_attempts = [], []
@@ -111,7 +180,6 @@ class Orchestrator:
                 error_attempts.append(verdict)
 
         decision = LocalDecisionEngine().decide(run_id, finals, self.scenarios(), self.profile)
-        run_dir = self.store.runs_dir / run_id
         write_json(run_dir / "decision.json", decision)
         decision["_pii_masked"] = self.config.mask_pii
         decision["_mode"] = self.mode
@@ -177,6 +245,10 @@ class Orchestrator:
             proxy = InProcessToolProxy(self.profile, scenario.get("setup", {}).get("faults", []),
                                        real_delays=self.mode == "voice")
             await proxy.attach(ctx, writer)
+            if self._gateway:
+                self._gateway.attach(proxy)
+            logs = LogCollector(self.profile, self.config.root)
+            logs.begin()
             writer.emit("connector", "call_started", {"test_id": ctx.test_id, "mode": self.mode})
             caller = self._caller(scenario, meta)
             if self.mode == "voice":
@@ -186,8 +258,12 @@ class Orchestrator:
             writer.emit("connector", "call_ended", {"ended_by": ended_by, "reason": reason,
                                                     **live.pop("recording", {})}, turn=turn)
             ended = True
+            if self._gateway:
+                self._gateway.detach()
             if self.mode == "voice":
                 await self._listen_again(scenario, writer, live)
+            if logs.enabled:
+                await self._collect_logs(logs, ctx, writer)
 
             if scenario["style"] == "simulated" and not self.config.offline:
                 validator = LLMValidator(self.llm, model=self.config.validator_model, metadata=meta)
@@ -197,7 +273,7 @@ class Orchestrator:
                             {"on_script": res.on_script, "problems": list(res.problems)})
 
             for probe_id in self._probes_needed(scenario):
-                result = SqlProbe(self.profile, self.config.root).run(
+                result = BackendProbe(self.profile, self.config.root).run(
                     probe_id, ctx, (writer.record["started_at"], utc_now()))
                 data = {"probe": result.probe, "ok": result.ok}
                 if result.rows is not None:
@@ -217,6 +293,9 @@ class Orchestrator:
                                                         **live.pop("recording", {})})
             status = "harness_error"
             self.log(f"    harness error ({code}): {e}")
+        finally:
+            if self._gateway:
+                self._gateway.detach()
 
         writer.lock(status, cost_usd=self._spent() - cost_before)
         trace = self.store.read_call(run_id, ctx.test_id)
@@ -429,6 +508,17 @@ class Orchestrator:
             writer.emit("harness", "harness_event", {"level": "warning", "code": "stt_failed",
                                                      "message": f"second listen failed: {type(ex).__name__}: {ex}"})
 
+    async def _collect_logs(self, logs: LogCollector, ctx: CallContext, writer) -> None:
+        result = await asyncio.to_thread(logs.collect, ctx.test_id, writer.record["started_at"], utc_now())
+        summary = {"kind": "log_collected", "ok": result.ok, "from": result.source, "lines": len(result.lines)}
+        if result.truncated:
+            summary["truncated"] = True
+        if result.error:
+            summary["error"] = result.error
+        writer.emit("platform", "platform_event", summary)
+        for line in result.lines:
+            writer.emit("platform", "platform_event", {"kind": "log", "text": line})
+
     def _caller(self, scenario: Mapping[str, Any], meta: Mapping[str, str]):
         if scenario["style"] == "scripted":
             return ScriptedCaller([t["caller"] for t in scenario["turns"]])
@@ -442,7 +532,7 @@ class Orchestrator:
                          voice=self.mode == "voice")
 
     def _probes_needed(self, scenario: Mapping[str, Any]) -> list[str]:
-        if self.profile.get("backend", {}).get("access") != "sql":
+        if self.profile.get("backend", {}).get("access") not in ("sql", "rest"):
             return []
         ids = []
         if scenario.get("outcome", {}).get("record"):

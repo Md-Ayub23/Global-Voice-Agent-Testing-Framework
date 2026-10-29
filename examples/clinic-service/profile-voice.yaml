@@ -1,0 +1,16 @@
+# The same outside agent by voice: start `uv run python -m zoo.clinic.service` (with voice), then
+#   uv run vatf run examples/clinic-service --profile profile-voice.yaml
+schema_version: "0.1"
+kind: client_profile
+extends: profile.yaml
+
+connection:
+  type: websocket_audio
+  target: ws://127.0.0.1:9101
+  audio: {sample_rate_hz: 16000, encoding: pcm16}
+
+thresholds:
+  # The zoo agent runs Whisper, its brain and Piper one after another on a laptop CPU (see
+  # examples/clinic/profile-voice.yaml); a real agent should meet the 800 / 1500 ms defaults.
+  latency_p50_ms: 3500
+  latency_p95_ms: 6000

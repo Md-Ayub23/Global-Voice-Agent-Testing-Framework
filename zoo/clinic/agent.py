@@ -21,7 +21,14 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Mapping
 
-BUGS = {"lie_on_failure", "skip_confirmation", "double_booking", "misread_reference"}
+# Bug switches and what each one breaks (`vatf ui` lists them from BUG_HELP).
+BUG_HELP = {
+    "lie_on_failure": "A failed booking is reported to the brain as a success.",
+    "skip_confirmation": "Books as soon as the caller picks a time, without asking first.",
+    "double_booking": "Sends every booking request twice.",
+    "misread_reference": "Voice only: reads the booking reference out with two digits swapped.",
+}
+BUGS = set(BUG_HELP)
 GREETING = "Riverside Clinic, how can I help?"
 GOODBYE = "Thanks for calling Riverside Clinic. Goodbye."
 

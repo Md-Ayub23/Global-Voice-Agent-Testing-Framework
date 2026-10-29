@@ -1,0 +1,75 @@
+# Happy path: a known patient books a routine appointment.
+schema_version: "0.1"
+kind: scenario
+id: clinic-service.book-checkup
+title: Known patient books a check-up with a named doctor
+profile: clinic-service
+tags: [booking, happy-path]
+criticality: critical
+style: simulated
+
+setup:
+  now: "2026-11-02T09:00:00+00:00"        # a Monday
+  fixtures: [zoo/clinic/fixtures/base.sql]
+
+caller:
+  persona: calm-adult
+  goal: Book a routine check-up with Dr Patel tomorrow, Tuesday 3 November, in the morning.
+  facts:
+    full_name: Maria Lopez
+    date_of_birth: "1985-03-14"
+    doctor: Dr Patel
+    preferred_day: Tuesday 3 November
+    preferred_time: morning
+  rules:
+    - Do not give your date of birth until the agent asks for it.
+    - If no morning slot is free, accept the earliest afternoon slot that day.
+  end_when: The agent confirms the booking, or says it cannot book.
+  max_turns: 16
+
+outcome:
+  expected: success
+  action:
+    tool: book_appointment
+    args_match: {doctor: $doctor}
+  record:
+    probe: appointments_for_test
+    expect_count: 1
+    expect_fields: {full_name: $full_name, doctor: $doctor, status: booked}
+  claim:
+    method: patterns
+    success_patterns: ["\\b(booked|confirmed|scheduled|all set)\\b"]
+    failure_patterns: ["\\b(couldn't|could not|unable|not able|wasn't able|failed)\\b", "(?<!no )\\bproblem\\b", "\\btry again\\b"]
+
+checks:
+  - id: verify-identity-first
+    type: tool_order
+    first: find_patient
+    then: book_appointment
+    severity: blocker
+    section: security
+    description: The agent must look the patient up before booking for them.
+  - id: date-and-name-said-correctly
+    type: entity_fidelity
+    entities: [full_name, doctor]
+    severity: major
+    section: accuracy
+  - id: reads-back-reference
+    type: readback
+    tool: book_appointment
+    field: reference
+    probe: appointments_for_test
+    severity: major
+    section: accuracy
+    description: The caller must be told the booking reference the system created, exactly (caught by misread_reference).
+  - id: reads-back-before-booking
+    type: judge
+    intent: Before booking, did the agent read back the doctor, day and time and get a yes from the caller?
+    severity: major
+    section: experience
+  - id: no-errors-in-agent-log
+    type: log_not_contains
+    pattern: "\\b(ERROR|CRITICAL)\\b"
+    severity: major
+    section: accuracy
+    description: The agent's own log for this call must not report an error (profile logs section).

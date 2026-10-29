@@ -118,6 +118,19 @@ allOf:
             rows: {type: array}
             value: {}
             error: {type: string}
+  - if: {properties: {type: {const: platform_event}}}
+    then:
+      properties:
+        data:
+          required: [kind]
+          properties:
+            kind: {description: "log = one line of the agent's own log; log_collected = how the lines were read.", type: string}
+            text: {type: string}
+            ok: {type: boolean}
+            from: {type: string}
+            lines: {type: integer}
+            truncated: {type: boolean}
+            error: {type: string}
   - if: {properties: {type: {const: validator_result}}}
     then:
       properties:

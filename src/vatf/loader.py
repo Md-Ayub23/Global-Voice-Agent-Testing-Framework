@@ -39,6 +39,7 @@ class Project:
     personas: dict[str, dict[str, Any]]
     scenarios: list[dict[str, Any]]
     scenario_sha256: dict[str, str] = field(default_factory=dict)
+    profile_file: str = "profile.yaml"
 
     def scenario(self, scenario_id: str) -> dict[str, Any]:
         return next(s for s in self.scenarios if s["id"] == scenario_id)
@@ -113,7 +114,7 @@ def load_project(folder: str | Path, profile_file: str = "profile.yaml") -> Proj
         raise ProjectError("the project files have problems:\n  " + "\n  ".join(problems))
     if not scenarios:
         raise ProjectError(f"no scenarios found in {folder / 'scenarios'}")
-    return Project(folder, profile, profile_sha256, personas, scenarios, hashes)
+    return Project(folder, profile, profile_sha256, personas, scenarios, hashes, profile_file)
 
 
 def _reference_problems(sc, profile, personas, tools, probes) -> list[str]:

@@ -95,6 +95,12 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
                 found = d.get("rows")
                 count = f"{len(found)} row(s) found" if found is not None else _value(d.get("value"))
                 rows.append((n, "database check", f"{d.get('probe')}: {count}"))
+        elif t == "platform_event" and d.get("kind") == "log":
+            rows.append((n, "agent log", _short(d.get("text", ""), 160)))
+        elif t == "platform_event" and d.get("kind") == "log_collected":
+            text = (f"{d.get('lines', 0)} line(s) from {d.get('from', '')}" if d.get("ok")
+                    else f"could not read {d.get('from', '')}: {d.get('error', '')}")
+            rows.append((n, "logs", text + (" (only the last ones kept)" if d.get("truncated") else "")))
         elif t == "harness_event":
             rows.append((n, "vatf error", f"{d.get('code')}: {d.get('message')} (not blamed on the agent)"))
     return rows
