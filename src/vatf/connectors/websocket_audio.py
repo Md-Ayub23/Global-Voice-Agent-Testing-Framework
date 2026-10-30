@@ -163,16 +163,21 @@ class WebSocketAudioConnector:
         return WebSocketAudioSession(ws, recorder, launched)
 
     async def _launch(self, conn: Mapping[str, Any]) -> Any:
-        module_name, _, func_name = conn["launch"].partition(":")
-        if not module_name or not func_name:
-            raise ConnectError(f"connection.launch must look like module:function, got {conn['launch']!r}")
-        if str(self._root) not in sys.path:
-            sys.path.insert(0, str(self._root))
-        try:
-            fn = getattr(importlib.import_module(module_name), func_name)
-            launched = fn(tools=self._tools, options=dict(conn.get("options", {})))
-            if inspect.isawaitable(launched):
-                launched = await launched
-        except Exception as e:
-            raise ConnectError(f"could not launch agent {conn['launch']}: {type(e).__name__}: {e}") from e
-        return launched
+        return await launch_agent(conn, self._root, self._tools)
+
+
+async def launch_agent(conn: Mapping[str, Any], root: Path, tools: Any) -> Any:
+    """Starts an in-repo Python agent for one call: connection.launch is "module:function"."""
+    module_name, _, func_name = conn["launch"].partition(":")
+    if not module_name or not func_name:
+        raise ConnectError(f"connection.launch must look like module:function, got {conn['launch']!r}")
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    try:
+        fn = getattr(importlib.import_module(module_name), func_name)
+        launched = fn(tools=tools, options=dict(conn.get("options", {})))
+        if inspect.isawaitable(launched):
+            launched = await launched
+    except Exception as e:
+        raise ConnectError(f"could not launch agent {conn['launch']}: {type(e).__name__}: {e}") from e
+    return launched

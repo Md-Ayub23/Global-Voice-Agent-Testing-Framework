@@ -1,4 +1,5 @@
-# Scripted turn test: fixed caller lines, exact checks on each reply. Fast and cheap, no caller LLM.
+# Scripted turn test: fixed caller lines, exact checks on each reply. In a live run Claude then
+# finishes the call (limits.follow_up_turns); a dry run ends with the lines.
 schema_version: "0.1"
 kind: scenario
 id: clinic.confirm-before-booking

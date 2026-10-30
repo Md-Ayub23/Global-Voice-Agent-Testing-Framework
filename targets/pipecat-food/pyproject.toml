@@ -1,0 +1,15 @@
+# Pipecat's food ordering agent, run as a separate program (a client's agent is never part of Vocto).
+#   uv run --project targets/pipecat-food python targets/pipecat-food/bot.py
+[project]
+name = "vocto-target-pipecat-food"
+version = "0.1.0"
+description = "Pipecat Flows food ordering example as a local phone agent, for testing Vocto on a real agent."
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "pipecat-ai[websocket,silero,whisper,piper,anthropic,openai]==1.15.0",
+    "fastapi>=0.115.6",
+    "uvicorn>=0.30",
+]
+
+[tool.uv]
+package = false

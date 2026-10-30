@@ -11,8 +11,11 @@ import os
 import signal
 import sys
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
+from .agent_process import AgentProcess, AgentProcessError
+from .connectors import is_voice
 from .llm import DEFAULT_MODEL, Budget, ClaudeClient
 from .loader import ProjectError, load_project
 from .orchestrator import Orchestrator, RunConfig
@@ -106,11 +109,31 @@ def cmd_validate(args) -> int:
     return 0
 
 
+def _run(project, config: RunConfig, llm, planted_bug: str | None = None, start_agent: bool = False):
+    """One run; with start_agent, vatf starts the agent first (agent_process) and stops it after."""
+    if planted_bug:
+        project = project.with_agent_options({"bugs": planted_bug})   # recorded with the run, like a bug switch
+    if not (start_agent or planted_bug):
+        return asyncio.run(Orchestrator(project, config, llm=llm).run())
+    agent = AgentProcess(project.profile, config.root, config.runs_dir, planted_bug or None)
+    print(f"agent output: {agent.log_path}", flush=True)
+    with agent:
+        return asyncio.run(Orchestrator(project, config, llm=llm).run())
+
+
 def cmd_run(args) -> int:
     project = _project(args)
     llm = _llm(args, project)
-    orch = Orchestrator(project, _config(args), llm=llm)
-    decision = asyncio.run(orch.run())
+    if args.planted_bug and not args.start_agent:
+        raise SystemExit("--planted-bug needs --start-agent: vatf restarts the agent with the bug planted")
+    known = {b["id"] for b in project.profile.get("planted_bugs", [])}
+    if args.planted_bug and args.planted_bug not in known:
+        raise SystemExit(f"unknown planted bug {args.planted_bug!r}; the profile lists: {', '.join(sorted(known)) or 'none'}")
+    try:
+        decision = _run(project, _config(args), llm, args.planted_bug, args.start_agent)
+    except AgentProcessError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
     print()
     if args.quiet:
         print(f"DECISION: {decision['decision']}")
@@ -140,12 +163,15 @@ def _judge_results(config: RunConfig, decision, scenario_id: str, item: str) -> 
 def cmd_exit_check(args) -> int:
     """Runs the clean agent and each bug switch, and checks the exit criteria: every bug caught in every
     repeat, and no false alarms on the clean agent. With the AI judges on (a live run), the soft bugs
-    must be flagged by their judge item in every repeat (FAIL, or NEEDS_REVIEW: sent to a person)."""
+    must be flagged by their judge item in every repeat (FAIL, or NEEDS_REVIEW: sent to a person).
+    A profile with planted_bugs (a real agent vatf starts itself) uses those instead of the zoo's switches."""
     base = _project(args)
+    if base.profile.get("planted_bugs"):
+        return _planted_exit_check(args, base)
     config = _config(args)
     llm = _llm(args, base)
     rows, all_ok, summary = [], True, []
-    voice = base.profile["connection"]["type"] == "websocket_audio"
+    voice = is_voice(base.profile)
     expected = dict(EXIT_CHECK_VOICE if voice else EXIT_CHECK)
     judged = {} if args.offline or args.no_judges or not base.profile.get("judges", {}).get("enabled", True) \
         else {b: v for b, v in EXIT_CHECK_JUDGES.items() if b in _bug_names(base, config.root)}
@@ -153,6 +179,10 @@ def cmd_exit_check(args) -> int:
     ids = {s["id"] for s in Orchestrator(base, config).scenarios()}
     safety = {b: sc for b, sc in EXIT_CHECK_SAFETY.items() if args.safety and b in _bug_names(base, config.root) and sc in ids}
     expected.update(safety)
+    planned = ["clean", *expected]
+    if args.summary:  # the dashboard shows the steps before the first one finishes
+        write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text",
+                                        "passed": False, "finished": False, "rows": [], "planned": planned})
     for bug in [None, *expected]:
         label = bug or "clean"
         print(f"\n=== {label} ===")
@@ -188,7 +218,7 @@ def cmd_exit_check(args) -> int:
                         "decision": decision["decision"]})
         if args.summary:  # rewritten after every run, so a stopped exit check still shows what finished
             write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text",
-                                            "passed": all_ok, "finished": False, "rows": summary})
+                                            "passed": all_ok, "finished": False, "rows": summary, "planned": planned})
     print(f"\n{'Phase 2 (voice)' if voice else 'Phase 1 (text)'} exit check" + (" + Phase 3 (judges)" if judged else "")
           + (" + safety tests" if safety else ""))
     for label, mark, detail, report in rows:
@@ -197,7 +227,95 @@ def cmd_exit_check(args) -> int:
     print("\nRESULT:", "PASSED" if all_ok else "NOT PASSED")
     if args.summary:
         write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text",
-                                        "passed": all_ok, "finished": True, "rows": summary})
+                                        "passed": all_ok, "finished": True, "rows": summary, "planned": planned})
+    return 0 if all_ok else 1
+
+
+def _planted_exit_check(args, base) -> int:
+    """The exit check for a real agent: vatf restarts it clean and then once with each planted bug.
+
+    Clean: every scenario (and the safety tests with --safety) must give GO, and the judge items that
+    planted bugs rely on must not flag the clean agent. Each bug: only the scenario that should catch it
+    runs, and it must fail in every repeat (for a judge bug: the judge item flags every repeat)."""
+    config = _config(args)
+    llm = _llm(args, base)
+    voice = is_voice(base.profile)
+    judges_on = not (args.offline or args.no_judges) and base.profile.get("judges", {}).get("enabled", True)
+    ids = {s["id"] for s in Orchestrator(base, replace(config, safety=True)).scenarios()}
+    bugs, skipped = [], []
+    for bug in base.profile["planted_bugs"]:
+        caught = bug["caught_by"]
+        if caught["scenario"] not in ids:
+            skipped.append((bug["id"], f"its scenario {caught['scenario']} does not run in this profile"))
+        elif caught.get("judge") and not judges_on:
+            skipped.append((bug["id"], "only an AI judge can see it: turn the judges on (not a free dry run)"))
+        elif caught["scenario"].startswith("safety.") and not args.safety:
+            skipped.append((bug["id"], "it is caught by a safety test: add --safety"))
+        else:
+            bugs.append(bug)
+    judged = {(b["caught_by"]["scenario"], b["caught_by"]["judge"]) for b in bugs if b["caught_by"].get("judge")}
+    rows, all_ok, summary = [], True, []
+    planned = ["clean", *(b["id"] for b in bugs)]
+    if args.summary:
+        write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text", "planted": True,
+                                        "passed": False, "finished": False, "rows": [], "planned": planned,
+                                        "skipped": [{"bug": b, "why": w} for b, w in skipped]})
+    for bug in [None, *bugs]:
+        label = bug["id"] if bug else "clean"
+        print(f"\n=== {label} ===", flush=True)
+        run_config = config if bug is None else replace(config, scenario_ids=(bug["caught_by"]["scenario"],), safety=False)
+        try:
+            decision = _run(base, run_config, llm, planted_bug=bug["id"] if bug else None, start_agent=True)
+        except AgentProcessError as e:
+            print(f"error: {e}", file=sys.stderr)
+            if args.summary:
+                write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text",
+                                                "passed": False, "finished": True, "rows": summary, "planned": planned,
+                                                "error": str(e)})
+            return 3
+        rel = {r["scenario_id"]: r for r in decision["reliability"]}
+        if bug is None:
+            failed = [r["scenario_id"] for r in decision["reliability"] if r["failed"]]
+            false_alarms = [f"{item} ({r})" for sc, item in judged
+                            for r in _judge_results(config, decision, sc, item) if r in ("FAIL", "NEEDS_REVIEW")]
+            ok = decision["decision"] == "GO" and not false_alarms
+            detail = "GO, no false alarms" if ok else (
+                f"{decision['decision']}; failing: {', '.join(failed) or '-'}"
+                + (f"; judges flagged: {', '.join(false_alarms)}" if false_alarms else ""))
+        elif bug["caught_by"].get("judge"):
+            sc, item = bug["caught_by"]["scenario"], bug["caught_by"]["judge"]
+            results = _judge_results(config, decision, sc, item)
+            flagged = [r for r in results if r in ("FAIL", "NEEDS_REVIEW")]
+            ok = bool(results) and len(flagged) == len(results)
+            detail = (f"judge item {item} flagged {len(flagged)} of {len(results)} repeats of {sc} "
+                      f"({', '.join(results) or 'not judged'}); {decision['decision']}")
+        else:
+            sc = bug["caught_by"]["scenario"]
+            r = rel.get(sc)
+            ok = bool(r) and r["failed"] == r["k"]
+            detail = (f"caught in {r['failed']} of {r['k']} repeats of {sc}; {decision['decision']}"
+                      if r else f"scenario {sc} was not run")
+        all_ok &= ok
+        rows.append((label, "OK  " if ok else "MISS", detail, decision["_transcript"]))
+        summary.append({"label": label, "bug": bug["id"] if bug else None,
+                        "title": bug.get("title") if bug else "The agent as released, nothing planted",
+                        "scenario_id": bug["caught_by"]["scenario"] if bug else None,
+                        "ok": ok, "detail": detail, "run_id": decision["run_id"], "decision": decision["decision"]})
+        if args.summary:
+            write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text", "planted": True,
+                                            "passed": all_ok, "finished": False, "rows": summary, "planned": planned,
+                                            "skipped": [{"bug": b, "why": w} for b, w in skipped]})
+    print(f"\nExit check with planted bugs ({'voice' if voice else 'text'}): {base.profile['name']}")
+    for label, mark, detail, report in rows:
+        print(f"  [{mark}] {label:<22} {detail}")
+        print(f"         {report}")
+    for bug_id, why in skipped:
+        print(f"  [SKIP] {bug_id:<22} {why}")
+    print("\nRESULT:", "PASSED" if all_ok else "NOT PASSED")
+    if args.summary:
+        write_json(Path(args.summary), {"kind": "exit_check", "mode": "voice" if voice else "text", "planted": True,
+                                        "passed": all_ok, "finished": True, "rows": summary, "planned": planned,
+                                        "skipped": [{"bug": b, "why": w} for b, w in skipped]})
     return 0 if all_ok else 1
 
 
@@ -232,6 +350,37 @@ def cmd_calibrate(args) -> int:
               f"{'CAN BLOCK' if st['can_block'] else 'advisory'}: {st['status']}")
     print(f"\n{sum(s['can_block'] for s in status.values())} of {len(status)} item(s) calibrated. "
           "Label calls on the dashboard's Labels page (vatf ui).")
+    return 0
+
+
+def cmd_plan(args) -> int:
+    """Writes a draft test plan from the agent's instructions; --add saves the drafts that passed the checks."""
+    from . import planner
+
+    project = load_project(args.project, args.profile)
+    budget = Budget(project.profile.get("limits", {}).get("budget_usd", 5))
+    llm = ClaudeClient(budget, effort="medium")
+    try:
+        plan = asyncio.run(planner.write_plan(project, llm, count=args.count, focus=args.focus or "", model=args.model,
+                                              log_dir=project.folder / "plans" / "llm"))
+    except planner.PlanError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+    path = planner.save_plan(project.folder, plan)
+    a = plan["analysis"]
+    print(f"{a['summary']}\n{len(a['intents'])} job(s), {len(a['rules'])} rule(s), {len(a['unclear'])} open question(s).\n")
+    for t in plan["tests"]:
+        mark = "x" if t["selected"] else " "
+        flag = " DUPLICATE of " + t["duplicate_of"] if t["duplicate_of"] else ""
+        flag += " PROBLEMS: " + "; ".join(t["problems"]) if t["problems"] else ""
+        rules = ",".join(r["id"] for r in t["rules"]) or "-"
+        print(f"[{mark}] {planner.CATEGORY_TITLES[t['category']]:<24} {t['criticality']:<11} rules {rules:<8} {t['title']}{flag}")
+    print(f"\nplan saved: {path}\nmodel cost: ${llm.spent_usd:.4f}")
+    if args.add:
+        out = planner.accept(project.folder, plan, [t["id"] for t in plan["tests"] if t["selected"]], profile_file=args.profile)
+        print(f"added {len(out['added'])} test(s); personas added: {', '.join(out['personas']) or 'none'}")
+    else:
+        print("Review it in the dashboard (Set up > Test plan), or run again with --add to save the ticked ones.")
     return 0
 
 
@@ -290,6 +439,10 @@ def main(argv: list[str] | None = None) -> int:
         if name == "run":
             p.add_argument("--quiet", action="store_true",
                            help="don't print each call's conversation (it is still saved in transcript.txt)")
+            p.add_argument("--start-agent", action="store_true",
+                           help="start the agent first and stop it after the run (the profile's agent_process)")
+            p.add_argument("--planted-bug", metavar="ID",
+                           help="with --start-agent: start it with one of the profile's planted_bugs switched on")
         else:
             p.add_argument("--summary", metavar="FILE", help="also write the exit check's result table as JSON")
         p.set_defaults(func=func)
@@ -298,6 +451,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("project", help="project folder, e.g. examples/clinic")
     profile_arg(p)
     p.set_defaults(func=cmd_calibrate)
+
+    p = sub.add_parser("plan", help="write a draft test plan from the agent's instructions (needs Claude)")
+    p.add_argument("project", help="project folder, e.g. examples/pipecat-food")
+    profile_arg(p)
+    p.add_argument("--count", type=int, default=20, help="how many tests to write (default 20, at most 60)")
+    p.add_argument("--focus", help="what to concentrate on, in plain words")
+    p.add_argument("--model", default="claude-opus-5-5", help="model that writes the plan (default claude-opus-5-5)")
+    p.add_argument("--add", action="store_true", help="save the drafts that passed the checks as scenario files")
+    p.set_defaults(func=cmd_plan)
 
     p = sub.add_parser("ui", help="open the vatf dashboard in your browser (set up, run and read tests)")
     p.add_argument("--port", type=int, default=8765, help="port on this computer (default 8765)")

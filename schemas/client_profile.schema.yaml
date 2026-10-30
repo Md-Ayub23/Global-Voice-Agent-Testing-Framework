@@ -22,6 +22,11 @@ properties:
     pattern: "^[a-z0-9][a-z0-9._-]*$"
   name: {type: string}
   description: {type: string}
+  agent_prompt:
+    description: >
+      The agent's own instructions (its system prompt), pasted as written. Used by the test plan writer
+      (vatf plan, Set up > Test plan > Write tests for me) to work out the agent's jobs and rules.
+    type: string
   domain:
     description: Free text such as healthcare, trading, support. Used to pick rubrics and scenario packs.
     type: string
@@ -37,16 +42,18 @@ properties:
     required: [type]
     properties:
       type:
-        enum: [text_python, text_http, websocket_audio, sip, webrtc, platform]
+        enum: [text_python, text_http, websocket_audio, twilio_media_stream, sip, webrtc, platform]
       target:
         description: >
           What to connect to. text_python: "module:callable" that builds the agent (agents in this repo).
           text_http: the agent's http(s) URL (docs/text-http-protocol.md). websocket_audio: its ws(s)
-          URL (docs/voice-protocol.md). sip: a phone number or SIP URI. platform: an agent id on the platform.
+          URL (docs/voice-protocol.md). twilio_media_stream: the ws(s) URL of the agent's Twilio Media Streams
+          server, the one a TwiML <Stream url> would point at (docs/twilio-protocol.md).
+          sip: a phone number or SIP URI. platform: an agent id on the platform.
         type: string
       launch:
         description: >
-          websocket_audio only: "module:function" that starts a Python agent for each call.
+          websocket_audio and twilio_media_stream: "module:function" that starts a Python agent for each call.
           It is called as launch(tools=<tool proxy>, options=<options>) and returns an object
           with .url and async close(). Without it, vatf dials target.
         type: string
@@ -59,8 +66,11 @@ properties:
       options:
         description: >
           Connector-specific settings. Secrets are given as ${ENV_VAR} names, never as values.
-          text_http and websocket_audio: headers (sent with every request / when connecting).
+          text_http, websocket_audio and twilio_media_stream: headers (sent with every request / when connecting).
           text_http: reply_field, end_field, timeout_s.
+          twilio_media_stream: custom_parameters (what TwiML <Parameter> would pass in the start message),
+          account_sid (sent in the start message; a made-up one when not given), jitter_buffer_ms (default 60:
+          agent audio that arrives up to this late plays on without a gap, like a phone line's playout buffer).
         type: object
       offline_options:
         description: Merged into options for --offline runs (agents in this repo only), so nothing calls an API.
@@ -120,8 +130,8 @@ properties:
 
   tool_gateway:
     description: >
-      Where vatf listens for the tool calls of an agent that runs outside vatf (text_http, or
-      websocket_audio without launch). Point the agent's tool calls at
+      Where vatf listens for the tool calls of an agent that runs outside vatf (text_http,
+      twilio_media_stream, or websocket_audio without launch). Point the agent's tool calls at
       http://<host>:<port>/tools/<tool name> for test runs.
     type: object
     additionalProperties: false
@@ -191,6 +201,62 @@ properties:
         then: {required: [path]}
       - if: {properties: {source: {const: http}}, required: [source]}
         then: {required: [url]}
+
+  agent_process:
+    description: >
+      How vatf starts the agent on this computer, for agents that run locally (an open-source agent,
+      or a client's agent on a test machine). Used by `vatf run --start-agent`, the dashboard's
+      "Start the agent for me", and the exit check, which restarts it once for each planted bug.
+      Without it, vatf calls an agent that is already running.
+    type: object
+    additionalProperties: false
+    required: [command]
+    properties:
+      command:
+        description: The program and its arguments, e.g. [uv, run, --project, my-agent, python, my-agent/bot.py].
+        type: array
+        minItems: 1
+        items: {type: string}
+      cwd: {description: "Folder to start it in, relative to the Vocto folder (default: the Vocto folder).", type: string}
+      env:
+        description: 'Extra environment variables. Secrets as ${NAME} (from the .env file).'
+        type: object
+        additionalProperties: {type: string}
+      ready_url:
+        description: >
+          An http(s) or ws(s) address that answers once the agent is ready (default connection.target).
+          vatf waits until it can connect.
+        type: string
+      ready_timeout_s: {type: integer, minimum: 1, default: 120}
+      planted_bug_env:
+        description: The environment variable that tells the agent which planted bug to switch on (empty for the clean agent).
+        type: string
+
+  planted_bugs:
+    description: >
+      Known bugs that can be planted into the agent (a changed prompt line, a handler that drops an
+      error...), so the exit check can prove vatf catches each one: the clean agent must get GO and
+      each planted bug's scenario must fail in every repeat. The agent is restarted with
+      agent_process.planted_bug_env set to the bug's id.
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [id, caught_by]
+      properties:
+        id: {type: string, pattern: "^[a-z0-9][a-z0-9_.-]*$"}
+        title: {type: string}
+        caught_by:
+          type: object
+          additionalProperties: false
+          required: [scenario]
+          properties:
+            scenario: {description: The scenario that must fail in every repeat while this bug is planted., type: string}
+            judge:
+              description: >
+                Optional: an AI judge item that must flag it (FAIL or NEEDS_REVIEW) in that scenario, for bugs
+                no hard check can see (tone, made-up facts). Needs the AI judges on.
+              type: string
 
   judges:
     description: >
@@ -346,6 +412,13 @@ properties:
     additionalProperties: false
     properties:
       max_turns: {type: integer, default: 30}
+      follow_up_turns:
+        description: >
+          Live runs. Caller turns Claude adds after a scripted call's fixed lines, listening to the agent
+          (pushing on in a safety test, finishing the call in an order script). 0 ends calls with their fixed lines.
+        type: integer
+        minimum: 0
+        default: 6
       max_call_seconds: {type: integer, default: 300}
       max_reply_tokens: {type: integer, default: 400}
       budget_usd: {type: number, default: 5}

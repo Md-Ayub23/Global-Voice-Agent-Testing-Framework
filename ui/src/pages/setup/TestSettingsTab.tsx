@@ -20,6 +20,7 @@ const GATE: Row[] = [
 ];
 const LIMITS: Row[] = [
   ["max_turns", "Most caller turns per call", "Stops a conversation that goes round in circles."],
+  ["follow_up_turns", "Turns Claude adds after a script's fixed lines", "Live runs: Claude listens to the agent and carries on the call (pushes on in a safety test, finishes an order). 0: calls end with their fixed lines."],
   ["max_call_seconds", "Longest call (seconds)", ""],
   ["max_reply_tokens", "Longest simulated-caller reply (tokens)", "Keeps the simulated caller's turns short and cheap."],
   ["budget_usd", "Budget per run (USD)", "Claude spend for the simulated caller and checks; the run stops when it is reached.", 0.5],

@@ -37,6 +37,9 @@ const SOFT_BUGS = ["rude_tone", "made_up_facts", "refuses_human"];
 const SAFETY_BUGS = ["answers_off_topic", "leaks_secrets", "obeys_injection"];
 const exitBugsOf = (p: Profile, judges: boolean, safety: boolean) => [...EXIT_BUGS[p.mode],
   ...[...(judges ? SOFT_BUGS : []), ...(safety ? SAFETY_BUGS : [])].filter((b) => p.bugs?.some((x) => x.name === b))];
+// A real agent's planted bugs that this exit check can catch (the same rules as `vatf exit-check`).
+const plantedOf = (p: Profile, judges: boolean, safety: boolean) => (p.planted_bugs || []).filter((b) =>
+  (!b.judge || judges) && (!b.scenario.startsWith("safety.") || safety) && (b.scenario.startsWith("safety.") || p.scenarios.some((s) => s.id === b.scenario && s.in_mode)));
 const splitBugs = (s: string | undefined | null) => String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
 
 interface Form {
@@ -55,6 +58,8 @@ interface Form {
   show_pii: boolean;
   judges: boolean;
   safety: boolean;
+  start_agent: boolean;    // Vocto starts the agent itself (agent_process)
+  planted_bug: string;
 }
 
 export function NewRun({ project, query }: { project: Project; query: URLSearchParams }) {
@@ -112,7 +117,10 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
 
   const judgesOn = f.judges && !f.offline && profile.judges !== false;
   const safetyOn = f.safety && !!profile.safety?.enabled && !!profile.safety.attacks;
-  const exitBugs = exitBugsOf(profile, judgesOn, safetyOn);
+  const planted = !!profile.planted_bugs?.length;
+  const plantedOn = plantedOf(profile, judgesOn, safetyOn);
+  const exitBugs = planted ? plantedOn.map((b) => b.id) : exitBugsOf(profile, judgesOn, safetyOn);
+  const startAgent = !!profile.agent_process && f.start_agent;
   const safetyCalls = !safetyOn ? 0 : f.repeats ? (Number(f.repeats) || 1) * profile.safety!.attacks : profile.safety!.calls;
   const request = useMemo(() => {
     const agent_options: Options = {};
@@ -126,14 +134,22 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
       scenarios: chosen.length === ids.length ? [] : chosen,
       repeats: f.repeats || null, agent_options, offline: f.offline, model: f.model, judges: f.judges, safety: safetyOn,
       speech: f.speech, stt_model: f.stt_model, stt_check_model: f.stt_check_model, show_pii: f.show_pii,
+      start_agent: f.command === "run" && startAgent, planted_bug: f.command === "run" && startAgent ? f.planted_bug : "",
     };
-  }, [f, profile, d, inMode, safetyOn]);
+  }, [f, profile, d, inMode, safetyOn, startAgent]);
 
   const planned = useMemo(() => {
     const sc = inMode.filter((x) => exit || f.scenarios.has(x.id));
-    const per = sc.reduce((a, x) => a + (Number(f.repeats) || x.repeats || 3), 0) + safetyCalls;
+    const reps = (x: { repeats?: number }) => Number(f.repeats) || x.repeats || 3;
+    const per = sc.reduce((a, x) => a + reps(x), 0) + safetyCalls;
+    if (exit && planted) {  // the clean agent runs everything; each planted bug only its own scenario
+      return per + plantedOn.reduce((a, b) => {
+        const x = inMode.find((s) => s.id === b.scenario);
+        return a + (x ? reps(x) : Number(f.repeats) || 1);
+      }, 0);
+    }
     return exit ? per * (1 + exitBugs.length) : per;
-  }, [inMode, exit, f.scenarios, f.repeats, exitBugs.length, safetyCalls]);
+  }, [inMode, exit, f.scenarios, f.repeats, exitBugs.length, safetyCalls, planted, plantedOn]);
 
   const [starting, setStarting] = useState(false);
   const start = async () => {
@@ -154,12 +170,23 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
   return (
     <>
       <PageHead title="New run" sub={<>Test <b className="text-ink">{project.name}</b>: Vocto calls the agent, checks every call and gives a release decision.</>}>
-        {(profile.bugs || exit) && (
+        {(profile.bugs || planted || exit) && (
           <Seg id="cmd" value={f.command} onChange={(v) => set({ command: v })}
             options={[{ value: "run", label: "Test run", icon: "play" }, { value: "exit-check", label: "Exit check", icon: "shield" }]} />
         )}
       </PageHead>
-      {exit && (
+      {exit && planted && (
+        <Notice className="mb-4">
+          <b>Exit check</b> starts the real agent clean and runs every scenario, then restarts it once with each planted bug and runs the scenario that should catch it. It passes when the clean agent gets GO and every planted bug is caught in every repeat.
+          {exitBugs.length ? ` Planted bugs: ${exitBugs.join(", ")}.` : " No planted bug can run with these settings."}
+          {(profile.planted_bugs || []).length > plantedOn.length && (
+            <> Left out: {(profile.planted_bugs || []).filter((b) => !plantedOn.includes(b)).map((b) => b.id).join(", ")}
+              {" "}({!judgesOn ? "some need the AI judges, which a free dry run doesn't have" : ""}{!judgesOn && !safetyOn ? "; " : ""}{!safetyOn ? "some are caught by the safety tests: switch them on" : ""}).</>
+          )}
+          {" "}Agent output goes to its own log in the runs folder.
+        </Notice>
+      )}
+      {exit && !planted && (
         <Notice className="mb-4">
           <b>Exit check</b> runs the clean agent, then once with each bug switch ({exitBugs.join(", ")}). It passes when the clean agent gets GO and every bug is caught in every repeat. It uses all scenarios.
           {judgesOn ? " With the AI judges on it also checks that they catch the soft bugs (rudeness, made-up facts, refusing a person)."
@@ -219,6 +246,26 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
           <Card>
             <CardHead level={2} title={`${n(3)} · Agent under test`} sub={profile.connection.target.includes("://") ? <span className="font-mono">{profile.connection.target}</span> : "started by Vocto"} />
             <div className="flex flex-col gap-3">
+              {!exit && profile.agent_process && (
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+                  <div className="grid gap-1.5 font-semibold text-[13px]">
+                    Start the agent
+                    <Switch id="start-agent" checked={f.start_agent} onChange={(v) => set({ start_agent: v, planted_bug: v ? f.planted_bug : "" })} label="Start the agent for me" />
+                    <span className="font-normal text-xs text-muted">
+                      {f.start_agent ? "Vocto starts the agent on this computer before the first call and stops it after the last. Stop it first if it is already running."
+                        : "Off: the agent must already be running at its address."}
+                    </span>
+                  </div>
+                  {planted && (
+                    <Field label="Planted bug" hint={f.start_agent ? "Start the agent with one known bug in its own code or prompts: Vocto should catch it." : "Needs “Start the agent for me”."}>
+                      <select id="planted-bug" className={inputCls} disabled={!f.start_agent} value={f.planted_bug} onChange={(e) => set({ planted_bug: e.target.value })}>
+                        <option value="">None: the agent as released</option>
+                        {profile.planted_bugs!.map((b) => <option key={b.id} value={b.id}>{b.id}: {b.title}</option>)}
+                      </select>
+                    </Field>
+                  )}
+                </div>
+              )}
               {!exit && profile.bugs && (
                 <div>
                   <div className="flex flex-wrap items-center gap-2.5 mb-2"><b className="text-[12.5px]">Bug switches</b><span className="text-muted text-[12.5px]">{OPTION_HELP.bugs}</span></div>
@@ -283,6 +330,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
                 <div className="text-ink-2 text-[12.5px]">
                   Rule-based caller, no validator, no API calls
                   {Object.keys(profile.offline_options || {}).length > 0 && " (the practice agent answers by rules too)"}. A smoke test.
+                  {profile.agent_process && !Object.keys(profile.offline_options || {}).length && " The agent still thinks with its own brain."}
                 </div>
               </Choice>
             </div>
@@ -371,6 +419,10 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
               <Row label="Caller"><b>{f.offline ? "rules (free)" : "Claude"}</b></Row>
               <Row label="AI judges"><b>{judgesOn ? "on" : "off"}</b></Row>
               {profile.safety?.enabled && <Row label="Safety tests"><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
+              {!exit && startAgent && <Row label="Agent"><b>{f.planted_bug ? <Chip tone="bad">{f.planted_bug}</Chip> : "started by Vocto"}</b></Row>}
+              {!exit && startAgent && f.planted_bug && (
+                <Notice tone="warn" icon="info" className="text-[12.5px]">With a planted bug the right answer is <b>NO-GO</b> for the scenario that should catch it.</Notice>
+              )}
               {!exit && f.bugs.size > 0 && (
                 <>
                   <Row label="Bugs on"><div className="flex flex-wrap justify-end gap-1.5">{[...f.bugs].map((b) => <Chip key={b} tone="bad">{b}</Chip>)}</div></Row>
@@ -409,6 +461,7 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     scenarios: new Set(profile.scenarios.filter((s) => s.in_mode).map((s) => s.id)),
     options: {}, bugs: new Set(splitBugs(defaultsOf(profile, offline).bugs)),
     offline, model, speech: "local", stt_model: "base.en", stt_check_model: "small.en", repeats: "", show_pii: false, judges: true, safety: true,
+    start_agent: true, planted_bug: "",
   };
   if (prefill) {
     f.offline = !!prefill.offline;
@@ -422,7 +475,8 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     const d = defaultsOf(profile, f.offline);
     f.bugs = new Set(splitBugs(d.bugs));
     for (const [k, v] of Object.entries(prefill.agent_options || {})) {
-      if (k === "bugs") f.bugs = new Set(splitBugs(v));
+      if (k === "bugs" && profile.planted_bugs?.some((b) => b.id === v)) f.planted_bug = String(v);
+      else if (k === "bugs") f.bugs = new Set(splitBugs(v));
       else if (String(v) !== String(d[k] ?? "")) f.options[k] = String(v);
     }
   }

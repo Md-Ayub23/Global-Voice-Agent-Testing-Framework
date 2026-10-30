@@ -6,7 +6,9 @@ Turn taking, the way a person on the phone does it:
     (up to the persona's silence limit, then say so to the caller as "(silence)");
   * the agent's turn is over when nothing more is heard for end_of_turn_ms and
     none of its audio is still queued to play;
-  * then transcribe what was heard and let the caller answer.
+  * then transcribe what was heard and let the caller answer;
+  * if the agent starts talking again while the caller is still thinking of an answer,
+    the caller holds back and listens to the rest first, as a person would (went_on).
 
 Barge-in (scenario audio.barge_in): when the agent's n-th turn has been audible
 for offset_ms, the caller starts saying the given line over it. The agent should
@@ -39,6 +41,7 @@ class Heard:
     interrupted: bool = False
     stopped_after_ms: int | None = None
     barge: tuple[int, int, str] | None = None   # (start, end, words) of the caller's barge-in
+    went_on: bool = False             # more of the same turn: the agent spoke again before the caller answered
 
 
 @dataclass
@@ -59,6 +62,7 @@ class VoiceConversation:
         self.writer, self.proxy = writer, proxy
         self.agent_turns = 0
         self._transcripts_used = 0
+        self._heard_to = 0                # agent audio up to this sample has been listened to
         self.ms = recorder.ms
 
     # ---- the caller's mouth -------------------------------------------------
@@ -92,10 +96,27 @@ class VoiceConversation:
     def _done(self) -> bool:
         return self.session.closed.is_set() and not self.rec.agent_playing()
 
-    async def listen(self, since: int, caller_end: int | None, turn: int) -> Heard:
+    def agent_went_on(self) -> bool:
+        """Has the agent started talking again since the caller last listened?"""
+        now = self.rec.now_sample()
+        return bool(self.rec.agent_spans(self._heard_to + 1, now)) or self.rec.agent_playing(now)
+
+    async def hear_rest(self, turn: int) -> Heard:
+        """The agent went on talking before the caller answered: listen to the rest of its turn."""
+        heard = await self.listen(since=self._heard_to + 1, caller_end=None, turn=turn, more=True)
+        heard.went_on = True
+        return heard
+
+    async def listen(self, since: int, caller_end: int | None, turn: int, more: bool = False) -> Heard:
         """Wait for the agent's next turn, heard after sample `since`."""
-        self.agent_turns += 1
-        barges = [b for b in self.cfg.barge_in if b["agent_turn"] == self.agent_turns]
+        heard = await self._listen(since, caller_end, turn, more)
+        self._heard_to = max(self._heard_to, heard.end if heard.end is not None else self.rec.now_sample())
+        return heard
+
+    async def _listen(self, since: int, caller_end: int | None, turn: int, more: bool) -> Heard:
+        if not more:
+            self.agent_turns += 1
+        barges = [] if more else [b for b in self.cfg.barge_in if b["agent_turn"] == self.agent_turns]
         barge_clip = await self.synthesize(barges[0]["say"]) if barges else None
         wait_from = max(since, caller_end or since)
         heard = Heard()
@@ -167,6 +188,8 @@ class VoiceConversation:
             data["audio"] = {"file": RECORDING, "start_ms": self.ms(heard.start), "end_ms": self.ms(heard.end)}
             if caller_end is not None:
                 data["latency_ms"] = self.ms(heard.start) - self.ms(caller_end)
+        if heard.went_on:
+            data["went_on"] = True
         if heard.interrupted:
             data["interrupted"] = True
             data["stopped_after_ms"] = heard.stopped_after_ms

@@ -68,6 +68,21 @@ properties:
         type: string
       max_turns: {type: integer, minimum: 1}
 
+  follow_up:
+    description: >
+      Scripted style, live runs. After the fixed lines, Claude carries on the call for up to `turns` more
+      caller turns (default limits.follow_up_turns), listening to what the agent really says. Without a goal
+      it finishes the call politely. false: the call ends with the fixed lines.
+    oneOf:
+      - {const: false}
+      - type: object
+        additionalProperties: false
+        properties:
+          goal: {description: "What the caller tries to do next, in plain words.", type: string}
+          rules: {type: array, items: {type: string}}
+          end_when: {type: string}
+          turns: {type: integer, minimum: 0}
+
   turns:
     description: Required for scripted style. Each caller line is followed by checks on the agent's reply.
     type: array

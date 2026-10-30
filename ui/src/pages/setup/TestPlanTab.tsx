@@ -11,6 +11,7 @@ import { setupApi } from "../../lib/setup";
 import { pl } from "../../lib/links";
 import { str, type TabProps } from "./common";
 import { PersonaForm } from "./PersonaForm";
+import { PersonaLibrary, PlanWriterCard } from "./PlanWriterCard";
 import { SafetyCard } from "./SafetyCard";
 import { ScenarioForm } from "./ScenarioForm";
 
@@ -20,6 +21,7 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
   const toast = useToast();
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [library, setLibrary] = useState(false);
   const files = [...detail.scenarios, ...detail.persona_files].map((f) => f.file);
 
   useEffect(() => {
@@ -62,6 +64,7 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
 
   return (
     <div className="grid gap-4">
+      <PlanWriterCard detail={detail} reload={reload} projectKey={projectKey} />
       <Card>
         <CardHead level={2} title={`Scenarios (${scenarios.length})`} sub="each one is a situation the agent must handle">
           <Button id="new-scenario" variant="primary" size="sm" icon="plus" onClick={() => go("new-scenario")}>New scenario</Button>
@@ -93,8 +96,12 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
       <SafetyCard detail={detail} reload={reload} projectKey={projectKey} />
       <Card>
         <CardHead level={2} title={`Personas (${personas.length})`} sub="who calls">
-          <Button id="new-persona" size="sm" icon="plus" onClick={() => go("new-persona")}>New persona</Button>
+          <div className="flex gap-2">
+            <Button id="persona-library-toggle" size="sm" icon="layers" onClick={() => setLibrary(!library)}>{library ? "Close the library" : "Add from library"}</Button>
+            <Button id="new-persona" size="sm" icon="plus" onClick={() => go("new-persona")}>New persona</Button>
+          </div>
         </CardHead>
+        {library && <div className="mb-4"><PersonaLibrary projectKey={projectKey} detail={detail} onAdded={() => { setLibrary(false); reload(); }} /></div>}
         <div className="grid gap-2 sm:grid-cols-2">
           {personas.map(({ file, doc }) => (
             <div key={file} data-persona={str(doc.id)} className="flex items-start gap-3 p-3 border border-line rounded-xl">

@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import data, judging, safety, setup
+from . import data, judging, plans, safety, setup
 from ..loader import ProjectError
 from .jobs import JobError, JobManager
 
@@ -148,6 +148,22 @@ def make_handler(app: App):
     @route("GET", r"/api/project/([\w.\-]+)/safety")
     def get_safety(h, q, key):
         return safety.safety_page(app.root, app.runs, key, q.get("file", "profile.yaml"), app.active_runs())
+
+    @route("GET", r"/api/project/([\w.\-]+)/plan")
+    def get_plan(h, q, key):
+        return plans.plan_page(app.root, key, q.get("file", "profile.yaml"))
+
+    @route("POST", r"/api/project/([\w.\-]+)/plan/write")
+    def post_plan_write(h, q, key):
+        return plans.generate(app.root, key, h.body())
+
+    @route("POST", r"/api/project/([\w.\-]+)/plan/add")
+    def post_plan_add(h, q, key):
+        return plans.add_tests(app.root, key, h.body())
+
+    @route("POST", r"/api/project/([\w.\-]+)/personas/library")
+    def post_library_personas(h, q, key):
+        return plans.add_personas(app.root, key, h.body())
 
     @route("GET", r"/api/project/([\w.\-]+)/labels")
     def get_label_queue(h, q, key):

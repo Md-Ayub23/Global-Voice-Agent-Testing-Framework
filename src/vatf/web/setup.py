@@ -31,15 +31,15 @@ from . import data
 
 PROJECTS_DIR = "projects"
 ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
-SECTIONS = {"name", "description", "domain", "languages", "connection", "test_id", "tools", "tool_gateway",
-            "backend", "logs", "judges", "safety", "thresholds", "limits", "pii"}
+SECTIONS = {"name", "description", "agent_prompt", "domain", "languages", "connection", "test_id", "tools", "tool_gateway",
+            "backend", "logs", "judges", "safety", "thresholds", "limits", "pii", "agent_process", "planted_bugs"}
 
 # Framework defaults, shown in the forms as what an empty field means (client_profile.schema.yaml).
 DEFAULTS = {
     "thresholds": {"repeats": 3, "pass_k_required": None, "latency_p50_ms": 800, "latency_p95_ms": 1500,
                    "min_coverage": 0.9, "judge_min_labels": 20, "judge_min_fails": 5,
                    "judge_min_tpr": 0.9, "judge_min_tnr": 0.9, "max_harness_retries": 2},
-    "limits": {"max_turns": 30, "max_call_seconds": 300, "max_reply_tokens": 400, "budget_usd": 5,
+    "limits": {"max_turns": 30, "follow_up_turns": 6, "max_call_seconds": 300, "max_reply_tokens": 400, "budget_usd": 5,
                "parallel_calls": 1, "end_of_turn_ms": 1000, "no_reply_ms": 15000},
 }
 
@@ -130,9 +130,11 @@ def new_project(root: Path, body: Mapping[str, Any]) -> dict[str, Any]:
     if folder.exists():
         raise ValueError(f"there is already a project called {pid!r}; pick another name")
     channel = body.get("channel", "voice")
-    if channel == "voice":
-        connection: dict[str, Any] = {"type": "websocket_audio", "target": str(body.get("target", "")),
-                                      "audio": {"sample_rate_hz": 16000, "encoding": "pcm16"}}
+    if channel == "voice" and body.get("voice_format") == "twilio":
+        connection: dict[str, Any] = {"type": "twilio_media_stream", "target": str(body.get("target", ""))}
+    elif channel == "voice":
+        connection = {"type": "websocket_audio", "target": str(body.get("target", "")),
+                      "audio": {"sample_rate_hz": 16000, "encoding": "pcm16"}}
     elif channel == "text":
         connection = {"type": "text_http", "target": str(body.get("target", ""))}
     else:
@@ -214,7 +216,7 @@ def save_profile(root: Path, project: str, file: str, sections: Mapping[str, Any
     doc = _load_rt(path.read_text(encoding="utf-8"))
     for key, value in sections.items():
         value = _clean(value) if isinstance(value, (Mapping, list)) else value
-        if value is None or (isinstance(value, Mapping) and not value):
+        if value is None or (isinstance(value, (Mapping, list)) and not value):
             doc.pop(key, None)
         elif key in doc:
             doc[key] = deep_update(doc[key], value)
@@ -322,6 +324,8 @@ def test_connection(root: Path, project: str, file: str) -> dict[str, Any]:
             return asyncio.run(_test_text_http(profile))
         if kind == "websocket_audio":
             return asyncio.run(_test_websocket(profile))
+        if kind == "twilio_media_stream":
+            return asyncio.run(_test_twilio(profile))
         return {"ok": False, "message": f"connection type {kind!r} can't be tested yet"}
     except Exception as e:  # noqa: BLE001 - every failure is a plain answer for the form
         return {"ok": False, "message": str(e) or type(e).__name__}
@@ -395,6 +399,53 @@ async def _test_websocket(profile: Mapping[str, Any]) -> dict[str, Any]:
         return {"ok": False, "message": "Connected, but the agent sent no audio in 8 seconds (it should greet the caller).",
                 "details": details}
     return {"ok": True, "message": "Connected. The agent spoke first, as a phone agent should.", "details": details}
+
+
+async def _test_twilio(profile: Mapping[str, Any]) -> dict[str, Any]:
+    """A short silent call in the Twilio Media Streams format: does the agent answer and greet?"""
+    import numpy as np
+
+    from ..audio.recorder import Recorder, monotonic_clock
+    from ..connectors.twilio_stream import SAMPLE_RATE, TwilioStreamConnector
+    from ..contracts.models import CallContext
+
+    url = profile["connection"].get("target", "")
+    if not url.startswith(("ws://", "wss://")):
+        return {"ok": False, "message": f"the agent's stream address must start with ws:// or wss://, got {url!r}"}
+    ctx = CallContext(test_id="t-vocto-connection-test", run_id="r-test", profile=profile,
+                      scenario={"setup": {"now": datetime.now(timezone.utc).isoformat(timespec="seconds")}},
+                      repeat=1, attempt=1, mode="voice")
+    rec = Recorder(SAMPLE_RATE, monotonic_clock())
+    try:
+        session = await TwilioStreamConnector(profile).open(ctx, rec)
+    except Exception as e:  # noqa: BLE001 - ConnectError or a missing secret: a plain answer either way
+        return {"ok": False, "message": str(e)}
+    silence = np.zeros(SAMPLE_RATE // 50, dtype=np.float32)
+    first_ms, last_chunks, quiet_since = None, 0, None
+    start = rec.clock()
+    try:
+        while rec.clock() - start < 8 and not session.closed.is_set():
+            await session.send_frame(silence)
+            await asyncio.sleep(0.02)
+            if rec.chunks and first_ms is None:
+                first_ms = int((rec.clock() - start) * 1000)
+            if rec.chunks != last_chunks:
+                last_chunks, quiet_since = rec.chunks, rec.clock()
+            elif quiet_since and rec.clock() - quiet_since > 1.5 and not rec.agent_playing():
+                break
+    finally:
+        await session.close()
+    heard_s = sum(b - a for a, b in rec.agent_spans(0, rec.agent.length)) / SAMPLE_RATE
+    details = [f"Speech heard: {heard_s:.1f} s" + (f", first audio after {first_ms} ms" if first_ms is not None else "")]
+    details += [f"Problem: {e}" for e in session.protocol_errors[:5]]
+    if session.closed.is_set() and not rec.chunks:
+        return {"ok": False, "message": f"The agent ended the stream without speaking: {session.close_reason}.",
+                "details": details}
+    if not rec.chunks:
+        return {"ok": False, "message": "Connected, but the agent sent no audio in 8 seconds (it should greet the caller).",
+                "details": details}
+    return {"ok": True, "message": "Connected in the Twilio format. The agent spoke first, as a phone agent should.",
+            "details": details}
 
 
 def test_backend(root: Path, project: str, file: str, probe: str | None, binds: Mapping[str, Any]) -> dict[str, Any]:

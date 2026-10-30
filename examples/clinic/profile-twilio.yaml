@@ -1,0 +1,28 @@
+# The same clinic agent reached the way a phone number reaches it: Twilio Media Streams
+# (8 kHz mu-law in JSON messages, docs/twilio-protocol.md). Vocto plays the part of Twilio, so no
+# Twilio account is needed. Everything not listed here comes from profile.yaml.
+#   uv run vatf run examples/clinic --profile profile-twilio.yaml
+schema_version: "0.1"
+kind: client_profile
+extends: profile.yaml
+
+connection:
+  type: twilio_media_stream
+  # vatf starts the zoo agent's voice front-end for each call; it answers in the Twilio format.
+  # For an agent that is already running, drop launch and set target to its stream URL (wss://.../media).
+  launch: "zoo.clinic.voice:launch"
+  target: ""
+  options:
+    voice: en_US-amy-medium               # the agent's Piper voice
+    stt_model: base.en                    # what the agent listens with
+    speech: local                         # local (Piper + faster-whisper) or codec (framework tests only)
+
+thresholds:
+  # Same slow zoo pipeline as profile-voice.yaml; use the 800 / 1500 ms defaults for a real agent.
+  latency_p50_ms: 3500
+  latency_p95_ms: 6000
+
+limits:
+  max_call_seconds: 300
+  end_of_turn_ms: 1000
+  no_reply_ms: 15000

@@ -41,7 +41,7 @@ class AgentSession(Protocol):
 
 
 class Connector(Protocol):
-    """Implementations: text_python, text_http, websocket_audio; later sip, webrtc, platforms.
+    """Implementations: text_python, text_http, websocket_audio, twilio_media_stream; later sip, webrtc, platforms.
 
     The connector passes ctx.test_id to the agent when the profile says
     session_metadata. A failure to connect is a harness error, not an agent failure.

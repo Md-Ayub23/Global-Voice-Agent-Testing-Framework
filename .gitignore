@@ -9,3 +9,4 @@ __pycache__/
 logs/
 # client test projects (addresses of real agents): kept on this computer only
 /projects/
+plans/llm/

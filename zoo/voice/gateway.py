@@ -2,7 +2,10 @@
 
 This is agent code, not framework code: it plays the part of a real voice
 platform (like a small Pipecat or Vapi pipeline) so the framework has a voice
-agent to test. It speaks the protocol in docs/voice-protocol.md.
+agent to test. It answers in either of two formats, told apart by the first message:
+the protocol in docs/voice-protocol.md ({"type": "start"}), or Twilio Media Streams
+({"event": "connected"}, then "start"; 8 kHz mu-law, docs/twilio-protocol.md), the way an
+agent behind a real phone number is reached.
 
 Pipeline per call:
   caller audio -> endpointer (finds when the caller starts and stops talking)
@@ -18,6 +21,7 @@ The speech engines come from vatf.speech for convenience only; any engines would
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import re
 import time
@@ -26,6 +30,7 @@ from typing import Any, Callable
 
 import numpy as np
 
+from vatf.audio.g711 import pcm16_to_ulaw, ulaw_to_pcm16
 from vatf.audio.pcm import from_pcm16, resample, set_level, to_pcm16
 from vatf.contracts.models import AudioClip
 
@@ -118,16 +123,26 @@ class VoiceGateway:
 
     async def handle(self, ws: Any) -> None:
         start = json.loads(await ws.recv())
-        if start.get("type") != "start":
+        if start.get("event") == "connected":                    # Twilio Media Streams
+            start = json.loads(await ws.recv())
+            if start.get("event") != "start":
+                await ws.close(1002, "expected Twilio's start message")
+                return
+            info = start.get("start") or {}
+            call = _Call(self, ws, 8000, info.get("customParameters") or {}, stream_sid=info.get("streamSid", ""))
+        elif start.get("type") == "start":
+            call = _Call(self, ws, int(start.get("sample_rate", 16000)), start.get("metadata") or {})
+        else:
             await ws.close(1002, "expected a start message")
             return
-        call = _Call(self, ws, int(start.get("sample_rate", 16000)), start.get("metadata") or {})
         await call.run()
 
 
 class _Call:
-    def __init__(self, gw: VoiceGateway, ws: Any, sample_rate: int, metadata: dict):
+    def __init__(self, gw: VoiceGateway, ws: Any, sample_rate: int, metadata: dict, stream_sid: str | None = None):
         self.gw, self.ws, self.sr = gw, ws, sample_rate
+        self.twilio = stream_sid is not None    # Twilio format: JSON media messages, mu-law at 8 kHz
+        self.stream_sid = stream_sid or ""
         self.metadata = metadata
         self.endpointer = Endpointer(sample_rate, end_silence_ms=gw.end_silence_ms)
         self.play_end = 0.0               # monotonic time when the caller will have heard everything sent
@@ -147,9 +162,12 @@ class _Call:
         try:
             async for msg in self.ws:
                 if isinstance(msg, str):
-                    if json.loads(msg).get("type") == "stop":
+                    data = json.loads(msg)
+                    if data.get("type") == "stop" or data.get("event") == "stop":
                         break
-                    continue
+                    if not (self.twilio and data.get("event") == "media"):
+                        continue
+                    msg = ulaw_to_pcm16(base64.b64decode(data["media"]["payload"]))
                 event, audio = self.endpointer.feed(from_pcm16(msg))
                 if (self.endpointer.in_speech and self.playing()
                         and self.endpointer.speech_frames * FRAME_MS >= self.gw.barge_in_ms):
@@ -172,7 +190,8 @@ class _Call:
         if self.speaking and not self.speaking.done():
             self.speaking.cancel()
         self.play_end = 0.0
-        await self.ws.send(json.dumps({"type": "clear"}))
+        await self.ws.send(json.dumps({"event": "clear", "streamSid": self.stream_sid} if self.twilio
+                                      else {"type": "clear"}))
 
     async def answer_loop(self) -> None:
         while True:
@@ -193,13 +212,14 @@ class _Call:
                 except asyncio.CancelledError:
                     pass
                 await asyncio.sleep(max(0.0, self.play_end - time.monotonic()) + 0.3)
-                await self.ws.send(json.dumps({"type": "end"}))
+                if not self.twilio:                    # on a phone line, hanging up is closing the stream
+                    await self.ws.send(json.dumps({"type": "end"}))
                 self.hung_up = True
                 await self.ws.close()
                 return
 
     async def say(self, text: str) -> None:
-        if text.strip():
+        if text.strip() and not self.twilio:
             await self.ws.send(json.dumps({"type": "transcript", "text": text}))
         for sentence in split_sentences(self.gw.speak_text(text)):
             clip = await asyncio.to_thread(self.gw.tts.synthesize, sentence, self.gw.voice)
@@ -208,5 +228,10 @@ class _Call:
             step = self.sr * SEND_CHUNK_MS // 1000
             for i in range(0, len(x), step):
                 chunk = x[i:i + step]
-                await self.ws.send(to_pcm16(chunk))
+                if self.twilio:
+                    payload = base64.b64encode(pcm16_to_ulaw(to_pcm16(chunk))).decode("ascii")
+                    await self.ws.send(json.dumps({"event": "media", "streamSid": self.stream_sid,
+                                                   "media": {"payload": payload}}))
+                else:
+                    await self.ws.send(to_pcm16(chunk))
                 self.play_end = max(self.play_end, time.monotonic()) + len(chunk) / self.sr

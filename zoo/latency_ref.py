@@ -6,6 +6,9 @@ it waits for the caller to stop talking, then plays a 0.8 s tone exactly
 `delays_ms[i]` after the last sound of the caller's i-th utterance (cycling
 through the list). The greeting tone plays 300 ms after the call starts.
 
+Option went_on_ms: after its first answer, it says one more thing (another tone) that many ms
+after the answer ends, without the caller having spoken: an agent that goes on talking.
+
 It times everything on its own clock from the audio it receives: the frame
 holding samples [s, s + 320) arrives when its last sample was spoken, so the
 end of the caller's speech is known to the millisecond, independent of vatf.
@@ -37,6 +40,7 @@ async def launch(*, tools: Any, options: Mapping[str, Any]) -> Launched:
     import websockets
 
     delays = [int(d) for d in str(options.get("delays_ms", "500,900,1300")).split(",")]
+    went_on_ms = int(options.get("went_on_ms", 0) or 0)
     log: list[dict] = []
 
     async def handle(ws):
@@ -49,6 +53,7 @@ async def launch(*, tools: Any, options: Mapping[str, Any]) -> Launched:
         await ws.send(beep)
         last_sound: float | None = None   # monotonic time of the last caller sample above AMPLITUDE
         answered = 0
+        tasks: list[asyncio.Task] = []
         busy_until = time.monotonic() + len(beep) / 2 / sr
         async for msg in ws:
             if isinstance(msg, str):
@@ -73,6 +78,15 @@ async def launch(*, tools: Any, options: Mapping[str, Any]) -> Launched:
                             "actual_ms": round((sent - last_sound) * 1000)})
                 busy_until = sent + len(beep) / 2 / sr
                 last_sound = None
+                if went_on_ms and answered == 1:
+                    busy_until += went_on_ms / 1000 + len(beep) / 2 / sr
+
+                    async def go_on(at: float = busy_until - len(beep) / 2 / sr):
+                        await asyncio.sleep(at - time.monotonic())
+                        await ws.send(beep)
+                        log.append({"turn": answered, "went_on": True})
+
+                    tasks.append(asyncio.create_task(go_on()))
 
     server = await websockets.serve(handle, "127.0.0.1", 0, max_size=None, ping_interval=None)
     launched = Launched(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", server)

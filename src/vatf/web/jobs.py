@@ -169,6 +169,19 @@ class JobManager:
             if kind == "exit-check" and key == "bugs":
                 continue  # the exit check sets the bug switches itself
             args += ["--agent-opt", f"{key}={value}"]
+        if kind == "run" and req.get("start_agent"):
+            if not profile.get("agent_process"):
+                raise JobError(f"{profile_file} doesn't say how to start the agent (agent_process)")
+            args.append("--start-agent")
+            bug = req.get("planted_bug") or ""
+            if bug:
+                if bug not in {b["id"] for b in profile.get("planted_bugs") or []}:
+                    raise JobError(f"{profile_file} has no planted bug {bug!r}")
+                args += ["--planted-bug", bug]
+        elif req.get("planted_bug"):
+            raise JobError("a planted bug needs the agent to be started by Vocto")
+        if kind == "exit-check" and not (profile.get("bugs") or profile.get("planted_bugs")):
+            raise JobError(f"{profile_file} has no bug switches or planted bugs, so there is nothing for the exit check to catch")
         if req.get("offline"):
             args.append("--offline")
         elif req.get("judges") is False:
@@ -286,7 +299,8 @@ class JobManager:
         except OSError:
             proc.kill()
             return job
-        threading.Timer(5, lambda: proc.poll() is None and proc.kill()).start()  # it didn't stop in time
+        # Time to stop the agent it started too (a whole process tree); killed only if it doesn't stop by then.
+        threading.Timer(30, lambda: proc.poll() is None and proc.kill()).start()
         return job
 
     def stop_all(self) -> None:

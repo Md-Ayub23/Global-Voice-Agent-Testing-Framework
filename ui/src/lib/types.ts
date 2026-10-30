@@ -45,6 +45,8 @@ export interface Profile {
   options: Options;
   offline_options: Options;
   bugs: { name: string; help: string }[] | null;
+  agent_process?: boolean;  // Vocto can start and stop the agent itself (agent_process)
+  planted_bugs?: PlantedBug[];
   judges?: boolean;        // the AI judges are on for this profile
   safety?: SafetyBrief;    // the built-in safety tests, in short
   thresholds?: { repeats?: number; latency_p50_ms?: number; latency_p95_ms?: number };
@@ -55,6 +57,9 @@ export interface Profile {
   scenarios: Scenario[];
   personas?: { id: string; description: string }[];
 }
+
+// A bug planted in a real agent's own code or prompts, and the scenario (or judge item) that must catch it.
+export interface PlantedBug { id: string; title: string; scenario: string; judge?: string | null }
 
 export interface Project {
   path: string;          // where it lives; used in API calls only, never shown
@@ -311,8 +316,14 @@ export interface CallDetail {
   llm_logs: number;
 }
 
-export interface ExitRow { label: string; bug: string | null; scenario_id: string | null; ok: boolean; detail: string; run_id: string; decision: Decision | null }
-export interface ExitSummary { mode: Mode; passed: boolean; finished: boolean; rows: ExitRow[] }
+export interface ExitRow { label: string; bug: string | null; title?: string; scenario_id: string | null; ok: boolean; detail: string; run_id: string; decision: Decision | null }
+export interface ExitSummary {
+  mode: Mode; passed: boolean; finished: boolean; rows: ExitRow[];
+  planned?: string[];                        // clean, then each bug, in order
+  planted?: boolean;                         // a real agent restarted with each planted bug
+  skipped?: { bug: string; why: string }[];
+  error?: string;
+}
 
 export interface Job {
   id: string;

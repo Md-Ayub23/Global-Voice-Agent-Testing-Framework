@@ -221,6 +221,18 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
               </div>
             ))}
             <div><Button size="sm" icon="plus" onClick={() => put(["turns"], [...turns, { caller: "" }])}>Add line</Button></div>
+            <div className="grid gap-2.5 p-3 border border-dashed border-line-strong rounded-xl">
+              <Check checked={doc.follow_up !== false} onChange={(on) => put(["follow_up"], on ? undefined : false)}
+                label="Then Claude carries on the call"
+                hint="Live runs: after these lines, Claude listens to the agent and keeps going, the way a real caller would, for up to the turns set in Test settings. Dry runs always end with the lines." />
+              {doc.follow_up !== false && (
+                <Field label="What the caller does next (optional)" hint="Leave empty to just finish the call politely: answer the agent's questions and hang up when it's done.">
+                  <Area id="scenario-follow-up" rows={2} value={str(at("follow_up", "goal"))}
+                    onChange={(v) => put(["follow_up"], v.trim() ? { ...asObj(doc.follow_up), goal: v } : undefined)}
+                    placeholder="Keep asking for a discount, using a different reason each time." />
+                </Field>
+              )}
+            </div>
           </div>
         )}
       </Block>

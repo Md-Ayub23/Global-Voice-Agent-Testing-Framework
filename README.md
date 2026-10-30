@@ -18,6 +18,12 @@ block a release once a person's labels show they catch real failures (90% of fai
 tests** try to make the agent go wrong (off-topic questions, pushing for passwords, prompt tricks,
 other people's data, abuse and more), written for each agent from its industry, tools and policy.
 
+**Real agents:** besides its own practice agents, Vocto tests a real open-source agent it did not
+write: Pipecat's food ordering agent, run on this computer as a phone agent and called the way
+Twilio calls it (Twilio Media Streams). Vocto can start that agent itself, and its exit check
+restarts it with bugs planted in its own prompts and code to prove each one is caught. See
+[docs/real-agents-guide.md](docs/real-agents-guide.md).
+
 **Testing your own agent:** create a project for it in the dashboard (Projects > New project) and
 fill in its address, tools, backend and logs access, test plan and test settings with forms. See
 [docs/onboarding-guide.md](docs/onboarding-guide.md) for what to ask the agent's team.
@@ -25,9 +31,12 @@ fill in its address, tools, backend and logs access, test plan and test settings
 - [docs/onboarding-guide.md](docs/onboarding-guide.md): testing a new agent: what to ask its team, and the set-up screens
 - [docs/ui-guide.md](docs/ui-guide.md): the dashboard (`uv run vatf ui`): start runs, watch them live, read the reports
 - [docs/phase3-guide.md](docs/phase3-guide.md): AI judges, labelling calls and calibration
+- [docs/test-plan-guide.md](docs/test-plan-guide.md): writing tests automatically from the agent's instructions, the persona library
 - [docs/safety-guide.md](docs/safety-guide.md): safety tests: the attacks, planted secrets, how they affect the decision
 - [docs/phase1-guide.md](docs/phase1-guide.md): text mode, how to run it and what each part does
 - [docs/phase2-guide.md](docs/phase2-guide.md): voice mode, response times, barge-in, noise, read-back checks
+- [docs/real-agents-guide.md](docs/real-agents-guide.md): testing a real open-source agent (Pipecat food ordering), planted bugs, agents Vocto starts itself
+- [docs/twilio-protocol.md](docs/twilio-protocol.md): calling a phone agent the way Twilio Media Streams does
 - [docs/voice-protocol.md](docs/voice-protocol.md): how vatf talks to a voice agent over a WebSocket
 - [docs/text-http-protocol.md](docs/text-http-protocol.md): how vatf talks to an agent in text over HTTP
 - [docs/phase0-contracts.md](docs/phase0-contracts.md): the file formats and interfaces
@@ -44,6 +53,8 @@ examples/clinic/         clinic profiles (text, voice), personas, scenarios, a h
 examples/clinic-service/ the same agent tested only through its addresses, tool gateway, database and logs
 projects/                your agents' projects, made in the dashboard (git-ignored)
 examples/latency-ref/    timing check for vatf's own response-time numbers
+examples/pipecat-food/   project for the real Pipecat food ordering agent (with planted bugs)
+targets/pipecat-food/    that agent, as a phone server with its order API (its own uv environment)
 tests/                   framework tests (run offline, no API key needed)
 docs/                    plain-English guides
 ```
@@ -76,6 +87,11 @@ uv run vatf run examples/clinic --agent-opt bugs=lie_on_failure   # should be NO
 uv run vatf run examples/latency-ref                                # timing check, no API key
 uv run vatf run examples/clinic --profile profile-voice.yaml --offline
 uv run vatf run examples/clinic --profile profile-voice.yaml
+
+# A real open-source agent (Pipecat food ordering): Vocto starts it, calls it like Twilio, stops it.
+# The first start installs its own environment and takes a few minutes.
+uv run vatf run examples/pipecat-food --start-agent
+uv run vatf exit-check examples/pipecat-food                      # clean, then each planted bug
 ```
 
 Each run prints every call (conversation, tool calls, database result, judgement) and writes the same to `runs/<run_id>/transcript.txt` and `runs/<run_id>/report.html`. Voice calls also save `audio/call.wav` (left caller, right agent). Exit codes: 0 GO, 1 NO_GO,

@@ -21,6 +21,7 @@ from typing import Any, Mapping
 import yaml
 
 from .. import __version__, attacks
+from ..connectors import is_voice
 from ..contracts.models import TraceEvent
 from ..evidence import TEXT_FIELDS, mask_events
 from ..llm import DEFAULT_MODEL
@@ -98,12 +99,11 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
     except ProjectError as e:
         doc = _yaml(folder / file) or {}
         info.update(ok=False, problems=str(e).splitlines()[1:] or [str(e)], id=doc.get("id"),
-                    name=doc.get("name", file), mode="voice" if doc.get("connection", {}).get("type")
-                    == "websocket_audio" else "text", scenarios=[], personas=[])
+                    name=doc.get("name", file), mode="voice" if is_voice(doc) else "text", scenarios=[], personas=[])
         return info
     p = project.profile
     conn = p["connection"]
-    mode = "voice" if conn["type"] == "websocket_audio" else "text"
+    mode = "voice" if is_voice(p) else "text"
     files = {}
     for path in sorted((folder / "scenarios").glob("*.yaml")):
         doc = _yaml(path)
@@ -117,6 +117,9 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
         "options": {k: "" if v is None else str(v) for k, v in conn.get("options", {}).items()},
         "offline_options": {k: str(v) for k, v in conn.get("offline_options", {}).items()},
         "bugs": bug_switches(root, conn),
+        "agent_process": bool(p.get("agent_process")),
+        "planted_bugs": [{"id": b["id"], "title": b.get("title", b["id"]), "scenario": b["caught_by"]["scenario"],
+                          "judge": b["caught_by"].get("judge")} for b in p.get("planted_bugs", [])],
         "thresholds": th, "limits": p.get("limits", {}),
         "judges": (p.get("judges") or {}).get("enabled", True) is not False,
         "safety": _safety_info(p, project),

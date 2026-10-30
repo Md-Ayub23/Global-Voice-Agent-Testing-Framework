@@ -408,3 +408,60 @@ def test_said_check_uses_the_second_listen():
     assert evaluate_check(said, "c", [turn], [turn], {}, "", "voice").result.value == "FAIL"
     not_said = {"type": "not_said", "pattern": r"(?i)\bbook\b"}
     assert evaluate_check(not_said, "c", [turn], [turn, careful], {}, "", "voice").result.value == "PASS"
+
+
+def test_caller_listens_when_the_agent_goes_on_talking(tmp_path, monkeypatch):
+    """The agent says one more thing while the caller is still getting its answer ready (a real
+    caller thinks and synthesizes for a second or two). The caller must hear it out, not talk over it."""
+    from vatf.voice_call import VoiceConversation
+
+    synthesize = VoiceConversation.synthesize
+
+    async def slow(self, text):           # a caller that takes 0.8 s to get each answer ready
+        await asyncio.sleep(0.8)
+        return await synthesize(self, text)
+
+    monkeypatch.setattr(VoiceConversation, "synthesize", slow)
+    proj = load_project(ROOT / "examples" / "latency-ref").with_agent_options({"went_on_ms": "1300"})
+    orch, decision = run(tmp_path, proj)
+    verdict, events, _ = calls_of(orch, decision)["latency-ref.three-answers"]
+    agent = [e for e in events if e["type"] == "agent_turn"]
+    went_on = [e for e in agent if e["data"].get("went_on")]
+    assert len(went_on) == 1, [e["data"] for e in agent]
+    # It belongs to the agent's first answer (turn 2), and the caller's next line comes after it.
+    assert went_on[0]["turn"] == 2 and "latency_ms" not in went_on[0]["data"]
+    nxt = next(e for e in events if e["type"] == "caller_turn" and e["seq"] > went_on[0]["seq"])
+    assert nxt["data"]["audio"]["start_ms"] > went_on[0]["data"]["audio"]["end_ms"]
+    measured = [r["ms"] for r in verdict["metrics"]["latency_turns"]]
+    assert len(measured) == 3 and min(measured) > 0, measured
+    for got, want in zip(measured, [500, 900, 1300]):
+        assert abs(got - want) <= 50, measured
+
+
+def test_a_claude_caller_answers_all_the_agent_said_when_it_went_on():
+    from vatf.caller import LLMCaller
+    from vatf.llm import ScriptedLLM
+
+    llm = ScriptedLLM(["Yes, a pizza.", "A large one, please."])
+    caller = LLMCaller({"caller": {"goal": "order a pizza"}}, {}, llm, model="m", agent_name="Food bot")
+    asyncio.run(caller.next_turn("Pizza or sushi?"))
+    action = asyncio.run(caller.redo("What size would you like?"))
+    assert action.say == "A large one, please."
+    history = [(m.role, m.content) for m in caller._history]
+    assert history == [("user", "Pizza or sushi? What size would you like?"), ("assistant", "A large one, please.")]
+
+
+def test_script_then_claude_keeps_fixed_lines_and_stops_after_its_turns():
+    from vatf.caller import LLMCaller, ScriptThenLLM
+    from vatf.llm import ScriptedLLM
+
+    llm = ScriptedLLM(["Can I get it delivered?", "And by six?"])
+    claude = LLMCaller({"caller": {"goal": "finish"}}, {}, llm, model="m", agent_name="Food bot")
+    caller = ScriptThenLLM(["Two spicy tuna rolls."], claude, turns=1)
+    assert asyncio.run(caller.next_turn("Pizza or sushi?")).say == "Two spicy tuna rolls."
+    # The agent went on talking before the fixed line was said: the line stays, Claude's history grows.
+    assert asyncio.run(caller.redo("How many?")).say == "Two spicy tuna rolls."
+    assert claude._history[0].content == "Pizza or sushi? How many?"
+    assert asyncio.run(caller.next_turn("Two rolls, is that right?")).say == "Can I get it delivered?"
+    end = asyncio.run(caller.next_turn("Yes."))
+    assert end.say is None and end.hang_up and len(llm.requests) == 1

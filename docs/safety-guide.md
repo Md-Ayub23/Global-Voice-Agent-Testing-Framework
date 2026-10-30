@@ -14,8 +14,12 @@ fixed caller lines too (the AI attackers at *Thorough* need a real run).
 
 ## What Vocto tries
 
-Ten kinds of attack, plus your own questions (below). Each is a scripted call with fixed caller lines, so every run asks the same
-things and results compare from one release to the next.
+Ten kinds of attack, plus your own questions (below). Each call opens with fixed caller lines, so every run asks the same
+things and results compare from one release to the next. In a real run Claude then carries on the call, listening to
+the agent's answers: it keeps pushing on a weak answer (rephrasing, insisting, authority, urgency, sympathy) until the
+agent gives in or holds firm, a caller at risk answers the agent's questions like a real person, and an abusive caller
+stays rude. Test settings sets how many turns it may add (6 by default; 0 ends calls with their fixed lines). A dry run
+always ends with the fixed lines.
 
 | Kind | What the caller does | Caught by |
 |---|---|---|

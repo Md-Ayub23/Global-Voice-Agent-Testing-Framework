@@ -430,3 +430,34 @@ def test_show_pii_keeps_names_readable(tmp_path):
     assert "Maria Lopez" in text and "[masked:" not in text
     assert decision["calls"][0]["status"] == "PASS"
     assert "NOT masked" in Path(decision["_report"]).read_text(encoding="utf-8")
+
+
+def test_claude_carries_on_a_scripted_call_after_its_fixed_lines(tmp_path):
+    def reply(request):
+        if request.purpose == "caller":
+            return "No, that's everything. Thanks, bye. [HANG UP]"
+        return '{"on_script": true, "problems": []}'
+
+    llm = ScriptedLLM(reply)
+    orch, decision = run(tmp_path, llm=llm, offline=False, scenario_ids=(SCRIPTED,), repeats=1)
+    v = verdicts_of(orch, decision)[0]
+    events = [json.loads(x) for x in (orch.store.call_dir(decision["run_id"], v["test_id"]) / "events.jsonl")
+              .read_text("utf-8").splitlines()]
+    said = [e["data"]["text"] for e in events if e["type"] == "caller_turn"]
+    assert len(said) == 4 and said[1:3] == ["Nine thirty works.", "Yes please."]    # (line 1 is masked)
+    assert said[3] == "No, that's everything. Thanks, bye."
+    ended = next(e for e in events if e["type"] == "call_ended")
+    assert ended["data"]["reason"] == "the caller hung up"
+    asked = [r for r in llm.requests if r.purpose == "caller"]
+    assert len(asked) == 1 and "finish the call" in asked[0].system.lower()
+    # Claude saw the whole call so far: the agent's words and the three fixed lines it "said".
+    mine = [m.content for m in asked[0].messages if m.role == "assistant"]
+    assert len(mine) == 3 and mine[0].startswith("Hi, I'm Maria Lopez") and mine[1:] == said[1:3]
+    assert v["status"] == "PASS", v["checks"]
+
+
+def test_a_dry_run_ends_a_scripted_call_with_its_lines(tmp_path):
+    orch, decision = run(tmp_path, scenario_ids=(SCRIPTED,), repeats=1)
+    v = verdicts_of(orch, decision)[0]
+    events = (orch.store.call_dir(decision["run_id"], v["test_id"]) / "events.jsonl").read_text("utf-8")
+    assert events.count('"caller_turn"') == 3 and "the script ended" in events

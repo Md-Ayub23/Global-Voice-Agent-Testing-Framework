@@ -13,9 +13,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 from .attacks import is_safety
 from .calibration import calibration
-from .caller import LLMCaller, LLMValidator, RuleCaller, ScriptedCaller
+from .caller import LLMCaller, LLMValidator, RuleCaller, ScriptedCaller, ScriptThenLLM, follow_up_scenario
 from .checks import scenario_checks
-from .connectors import ConnectError, build_connector
+from .connectors import ConnectError, build_connector, is_voice
 from .contracts.models import CallContext, CallTrace, CheckResult, EvidenceLevel, EvidenceRef, Result
 from .contracts.orchestrator import PlannedCall
 from .decision import LocalDecisionEngine
@@ -35,6 +35,9 @@ from .speech.local import blocked_hint
 from .story import call_story_text, load_events, run_story_text
 from .util import MissingSecret, expand_env, write_json
 from .verdict import LocalVerdictBuilder, merge_results
+
+FOLLOW_UP_TURNS = 6   # caller turns Claude adds after a scripted call's fixed lines (limits.follow_up_turns)
+MAX_WENT_ON = 3   # voice: times one agent turn may go on again before the caller answers anyway
 
 
 class RunSetupError(ProjectError):
@@ -80,7 +83,7 @@ class Orchestrator:
     @property
     def mode(self) -> str:
         """voice when the profile connects over audio, otherwise text."""
-        return "voice" if self.profile["connection"]["type"] == "websocket_audio" else "text"
+        return "voice" if is_voice(self.profile) else "text"
 
     # ---- planning -------------------------------------------------------
     def scenarios(self) -> list[Mapping[str, Any]]:
@@ -395,7 +398,8 @@ class Orchestrator:
                 writer.emit("caller", "caller_turn", {"text": action.say}, turn=turn)
             if action.hang_up or not action.say:
                 ended_by = "caller"
-                reason = "the script ended" if scenario["style"] == "scripted" else "the caller hung up"
+                reason = ("the script ended" if scenario["style"] == "scripted" and not getattr(caller, "following_up", False)
+                          else "the caller hung up")
                 break
             proxy.turn = turn
             try:
@@ -476,13 +480,26 @@ class Orchestrator:
                 ended_by, reason = "caller", "the agent stopped answering"
                 break
             action = await caller.next_turn(heard.text)
+            clip = await conv.synthesize(action.say) if action.say else None
+            # The agent may go on talking while the caller thinks of an answer (a second sentence, or
+            # what it says after a tool call). A person would stop and listen, then answer all of it.
+            for _ in range(MAX_WENT_ON):
+                if not conv.agent_went_on() or conv._done():
+                    break
+                heard = await conv.hear_rest(turn)
+                conv.emit_agent_turn(heard, turn, None)
+                redo = getattr(caller, "redo", None)       # a scripted caller keeps its next line
+                if redo is not None:
+                    action = await redo(heard.text)
+                    clip = await conv.synthesize(action.say) if action.say else None
             if not action.say:
                 ended_by = "caller"
-                reason = "the script ended" if scenario["style"] == "scripted" else "the caller hung up"
+                reason = ("the script ended" if scenario["style"] == "scripted" and not getattr(caller, "following_up", False)
+                          else "the caller hung up")
                 break
             turn += 1
             caller_turns += 1
-            start, end = await conv.say(action.say, turn)
+            start, end = await conv.say(action.say, turn, clip=clip)
             if action.hang_up:
                 await line.wait_until(end + sr // 5)
                 ended_by, reason = "caller", "the caller hung up"
@@ -585,7 +602,16 @@ class Orchestrator:
 
     def _caller(self, scenario: Mapping[str, Any], meta: Mapping[str, str]):
         if scenario["style"] == "scripted":
-            return ScriptedCaller([t["caller"] for t in scenario["turns"]])
+            lines = [t["caller"] for t in scenario["turns"]]
+            turns = self._follow_up_turns(scenario)
+            if not turns:
+                return ScriptedCaller(lines)
+            brief = follow_up_scenario(scenario)
+            persona_id = brief["caller"].get("persona") or next(iter(self.project.personas), None)
+            claude = LLMCaller(brief, self.project.personas.get(persona_id, {}), self.llm,
+                               model=self.config.caller_model, agent_name=self.profile.get("name", "the agent"),
+                               metadata=meta, voice=self.mode == "voice")
+            return ScriptThenLLM(lines, claude, turns)
         if self.config.offline:
             return RuleCaller(scenario, spoken=self.mode == "voice")
         if self.llm is None:
@@ -594,6 +620,14 @@ class Orchestrator:
         return LLMCaller(scenario, persona, self.llm, model=self.config.caller_model,
                          agent_name=self.profile.get("name", "the agent"), metadata=meta,
                          voice=self.mode == "voice")
+
+    def _follow_up_turns(self, scenario: Mapping[str, Any]) -> int:
+        """Caller turns Claude may add after a scripted call's fixed lines (0: the call ends with them).
+        Live runs only: a dry run has no Claude, and its calls stay exactly as scripted."""
+        if self.config.offline or self.llm is None or scenario.get("follow_up") is False:
+            return 0
+        f = scenario.get("follow_up") if isinstance(scenario.get("follow_up"), dict) else {}
+        return int(f.get("turns", self.profile.get("limits", {}).get("follow_up_turns", FOLLOW_UP_TURNS)))
 
     def _probes_needed(self, scenario: Mapping[str, Any]) -> list[str]:
         if self.profile.get("backend", {}).get("access") not in ("sql", "rest"):

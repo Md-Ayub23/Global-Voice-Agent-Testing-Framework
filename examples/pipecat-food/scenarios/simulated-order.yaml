@@ -1,0 +1,32 @@
+# A free-form call: Vocto's AI caller orders in its own words and may change its mind once.
+# Needs the Claude caller (not in a free dry run).
+schema_version: "0.1"
+kind: scenario
+id: pipecat-food.simulated-order
+title: Caller orders in their own words and changes the size once
+profile: pipecat-food
+tags: [ordering, simulated]
+criticality: normal
+style: simulated
+setup:
+  now: "2026-11-02T18:00:00+00:00"
+  fixtures: [targets/pipecat-food/fixtures/base.sql]
+caller:
+  persona: calm-adult
+  goal: >
+    Order a vegetarian pizza. Ask for a medium first; when the agent reads the order back, change it
+    to a large. Confirm once the agent reads back a large vegetarian pizza.
+  facts: {pizza: large vegetarian}
+  end_when: The agent says the order is placed, or says it can't take the order.
+  max_turns: 12
+outcome:
+  expected: success
+  action: {tool: place_order}
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields: {food: pizza, size: large, pizza_type: vegetarian, status: placed}
+  claim:
+    method: patterns
+    success_patterns: ["\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"]
+    failure_patterns: ["\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b", "\\btry again\\b"]

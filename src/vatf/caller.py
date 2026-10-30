@@ -2,6 +2,7 @@
 
   LLMCaller      - Claude plays the persona with the scenario's goal and fact sheet
   ScriptedCaller - fixed caller lines (scripted scenarios)
+  ScriptThenLLM  - the fixed lines first, then Claude carries on the call (scripted scenarios, live runs)
   RuleCaller     - offline stand-in that answers questions from the fact sheet by
                    keyword. For smoke tests and CI without an API key only.
   LLMValidator   - checks afterwards that the simulated caller kept to its script
@@ -77,10 +78,82 @@ class LLMCaller:
         self._history.append(LLMMessage("assistant", said or "(hangs up)"))
         return CallerAction(say=said or None, hang_up=hang_up)
 
+    async def redo(self, heard_text: str) -> CallerAction:
+        """Voice: the agent went on talking before the caller answered. Answer what it said in all,
+        instead of the answer to its first part."""
+        heard_before = self._history[-2].content
+        del self._history[-2:]
+        if heard_before == "(silence)":
+            heard_before = ""
+        return await self.next_turn(f"{heard_before} {heard_text.strip()}".strip())
+
+    def note_line(self, heard_text: str, said: str) -> None:
+        """A fixed line the caller said (ScriptThenLLM), kept in the history like its own answer."""
+        self._history.append(LLMMessage("user", heard_text.strip() or "(silence)"))
+        self._history.append(LLMMessage("assistant", said))
+
+    def extend_heard(self, heard_text: str) -> None:
+        """The agent went on talking before the caller's last line: what it heard grows."""
+        before = self._history[-2].content
+        before = "" if before == "(silence)" else before
+        self._history[-2] = LLMMessage("user", f"{before} {heard_text.strip()}".strip() or "(silence)")
+
+    def last_said(self) -> str:
+        return self._history[-1].content
+
     def note_barge_in(self, heard_before: str, said: str) -> None:
         """Voice: the scenario made the caller cut in with fixed words; keep the history true."""
         self._history.append(LLMMessage("user", (heard_before.strip() or "(silence)") + " ..."))
         self._history.append(LLMMessage("assistant", said))
+
+
+FINISH_GOAL = ("Your fixed lines are done. Finish the call the way a real caller would: answer the agent's "
+               "questions in line with what you already said, confirm only what you asked for, never add new "
+               "requests, and hang up once the agent has finished with you (for example after it confirms or "
+               "says goodbye).")
+
+
+def follow_up_scenario(scenario: Mapping[str, Any]) -> dict[str, Any]:
+    """The brief for the Claude caller that carries on a scripted call after its fixed lines."""
+    c = dict(scenario.get("caller") or {})
+    f = scenario.get("follow_up") or {}
+    rules = list(c.get("rules", [])) + list(f.get("rules", []))
+    rules.append("The first lines of this call were fixed, and you said them. Carry on from there; never repeat them.")
+    return {**scenario, "caller": {**c, "goal": f.get("goal") or FINISH_GOAL, "facts": c.get("facts", {}),
+                                   "rules": rules, "end_when": f.get("end_when") or c.get("end_when") or
+                                   "the agent has finished with you, or you have reached your goal or clearly can't"}}
+
+
+class ScriptThenLLM:
+    """A scripted call's fixed lines, then Claude carries on for up to `turns` more caller turns,
+    listening to what the agent really says. The fixed lines keep runs comparable; the rest is
+    what a real caller would do next (push on a weak answer, finish the order, hear the read-back)."""
+
+    def __init__(self, lines: Sequence[str], llm_caller: LLMCaller, turns: int):
+        self._lines = list(lines)
+        self._llm = llm_caller
+        self._left = turns
+        self.following_up = False
+
+    async def next_turn(self, heard_text: str) -> CallerAction:
+        if self._lines:
+            line = self._lines.pop(0)
+            self._llm.note_line(heard_text, line)      # so Claude knows the whole call when it takes over
+            return CallerAction(say=line)
+        if self._left <= 0:
+            return CallerAction(say=None, hang_up=True)
+        self.following_up = True
+        self._left -= 1
+        return await self._llm.next_turn(heard_text)
+
+    async def redo(self, heard_text: str) -> CallerAction:
+        if not self.following_up:                       # a fixed line stays as it is
+            self._llm.extend_heard(heard_text)
+            return CallerAction(say=self._llm.last_said())
+        return await self._llm.redo(heard_text)
+
+    def note_barge_in(self, heard_before: str, said: str) -> None:
+        self._llm.note_barge_in(heard_before, said)
 
 
 class ScriptedCaller:

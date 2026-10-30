@@ -55,6 +55,8 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
             if d.get("silent"):
                 text = "(said nothing)"
             notes = []
+            if d.get("went_on"):
+                notes.append("went on talking before the caller answered")
             if "latency_ms" in d:
                 notes.append(f"answered after {d['latency_ms']} ms")
             if d.get("interrupted"):

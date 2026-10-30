@@ -9,7 +9,7 @@ import { Icon, type IconName } from "./Icon";
 import { Chip, Spinner, Table } from "./ui";
 
 export interface TimelineHandle { flash: (seq: number) => boolean }
-export type Typing = "agent" | "caller" | "connecting" | "judging" | null;
+export type Typing = "agent" | "agent-voice" | "caller" | "connecting" | "judging" | null;
 
 type Item =
   | { kind: "sys"; seq: number; tone: "" | "good" | "bad"; icon: IconName; text: ReactNode }
@@ -99,11 +99,15 @@ export function whoIsNext(events: TraceEvent[]): Typing {
   if (!events.length) return "connecting";
   if (events.some((e) => e.type === "call_ended")) return "judging";
   const last = [...events].reverse().find((e) => ["caller_turn", "agent_turn", "call_ended", "tool_request"].includes(e.type));
-  if (!last || last.type === "caller_turn" || last.type === "tool_request") return "agent";
+  if (!last || last.type === "caller_turn" || last.type === "tool_request") {
+    return events.some((e) => e.type === "call_started" && e.data?.mode === "voice") ? "agent-voice" : "agent";
+  }
   return "caller";
 }
 
-const TYPING_TEXT = { agent: "Agent is answering", caller: "Caller is thinking", connecting: "Dialling the agent", judging: "Checking the database and judging the call" };
+// In voice mode the caller understands the agent the way a person does: by listening to the whole
+// turn, then transcribing it. So its words show a second or more after you hear them in Listen live.
+const TYPING_TEXT = { agent: "Agent is answering", "agent-voice": "Agent is answering · its words show once it stops talking and Vocto has transcribed them", caller: "Caller is thinking", connecting: "Dialling the agent", judging: "Checking the database and judging the call" };
 
 export function Timeline({ events, limits, onSeek, typing, ref }: {
   events: TraceEvent[]; limits?: Limits | null; onSeek?: (ms: number) => void; typing?: Typing; ref?: Ref<TimelineHandle>;
@@ -157,8 +161,9 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                     Agent <span className="text-muted font-medium inline-flex gap-1">turn {it.e.turn ?? ""} · {d.audio ? play(d.audio.start_ms) : fmtSecs(it.e.t_ms)}</span>
                   </div>
                   <div className="whitespace-pre-wrap break-words">{d.silent ? <span className="text-muted">(said nothing)</span> : d.heard_text || ""}</div>
-                  {(d.latency_ms != null || d.interrupted) && (
+                  {(d.latency_ms != null || d.interrupted || d.went_on) && (
                     <div className="flex gap-1.5 flex-wrap mt-[7px]">
+                      {d.went_on && <Chip icon="clock" title="The agent spoke again before the caller answered, so the caller listened to this too">went on talking</Chip>}
                       {d.latency_ms != null && (
                         <Chip tone={d.latency_ms < 0 ? "warn" : slow ? "bad" : "default"} icon="clock">
                           {d.latency_ms < 0 ? "talked over the caller" : `answered after ${fmtMs(d.latency_ms)}`}

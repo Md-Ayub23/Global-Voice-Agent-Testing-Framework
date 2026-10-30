@@ -9,7 +9,7 @@ with `profile.yaml`, `scenarios/` and `personas/` (git-ignored, since it holds c
 
 | # | Ask for | Why | Where it goes |
 |---|---|---|---|
-| 1 | A **test address** for the agent: a voice WebSocket (`wss://...`, [voice-protocol.md](voice-protocol.md)) and, if possible, a text endpoint ([text-http-protocol.md](text-http-protocol.md)) | Vocto calls the agent like a customer would. Text runs are cheap; voice runs measure speech, response times and barge-in. | Agent & connection |
+| 1 | A **test address** for the agent: the voice WebSocket its phone line uses (Twilio Media Streams, [twilio-protocol.md](twilio-protocol.md): most phone agents already have one; or [voice-protocol.md](voice-protocol.md)) and, if possible, a text endpoint ([text-http-protocol.md](text-http-protocol.md)) | Vocto calls the agent like a customer would. Text runs are cheap; voice runs measure speech, response times and barge-in. | Agent & connection |
 | 2 | A setting to point the agent's **tool calls** at Vocto during tests, and the real (test) API address of each tool | Vocto sees every tool call, adds the test id, can break a tool on purpose (timeouts, errors) and forwards the call to the real API. | Tools |
 | 3 | **Read-only access to the backend**: a database user (Postgres / SQLite) or a REST endpoint that shows records | After each call Vocto checks what was really stored. This is the strongest evidence: it beats what the agent says. | Backend |
 | 4 | **The agent's logs** for test calls: a log file or a log search URL | Kept next to each call; scenarios can check them ("no ERROR"). | Logs |
@@ -26,9 +26,13 @@ call if a named secret is missing.
 
 ## The steps in the dashboard
 
-1. **Projects > New project.** Name, domain, voice or text, and the agent's address.
-2. **Agent & connection.** Check the address, add headers if the agent needs a token, and press
-   **Test connection**: Vocto opens one short session and shows what came back (the greeting).
+1. **Projects > New project.** Name, domain, voice or text (for voice: a phone agent on Twilio
+   Media Streams, or Vocto's own protocol), and the agent's address.
+2. **Agent & connection.** Check the address, add headers if the agent needs a token (for a Twilio
+   agent, the custom parameters its TwiML passes), and press **Test connection**: Vocto opens one
+   short session and shows what came back (the greeting). If the agent runs on this computer,
+   **Starting the agent** lets Vocto start and stop it, and **Planted bugs** lists known bugs it can
+   be started with, for the exit check ([real-agents-guide.md](real-agents-guide.md)).
 3. **Tools.** One entry per API the agent can call: read (look-ups) or write (changes), the real API
    address, which arguments make two calls "the same action" (to catch duplicates), and which
    arguments are personal data (masked in the evidence). The page shows the gateway address to give
@@ -43,6 +47,10 @@ call if a named secret is missing.
      (a fault: the agent must not say it worked), then hard callers (vague, rushed, noisy line);
    - **What must happen** is the heart of a scenario: the expected result (success, honest failure,
      or no action), the write tool, and the record that must (or must not) be in the backend;
+   - a **scripted** scenario says fixed lines, so every release faces the same opening; in a real
+     run Claude then carries on the call (up to **Test settings > Turns Claude adds after a script's
+     fixed lines**, 6 by default), listening to the agent the way a person would: it finishes an
+     order, or keeps pushing in a safety test. A dry run ends with the fixed lines;
    - **Checks** add rules on the whole call: tool order (verify before acting), things the agent
      must or must never say, details kept exactly, read-backs, log lines, answer times;
    - **Safety tests** are written for you: off-topic questions, pushing for secrets, prompt tricks,
@@ -70,6 +78,9 @@ Voice: start the service without `--no-voice` (it loads the speech models) and r
 fill it in for this service: addresses `http://127.0.0.1:9102` (text) or `ws://127.0.0.1:9101`
 (voice), tool APIs `http://127.0.0.1:9103/tools/<name>`, database `sqlite:///zoo/clinic/clinic.db`,
 log file `logs/clinic-service.log`.
+
+A real open-source agent to practise on: Pipecat's food ordering agent, `examples/pipecat-food`
+([real-agents-guide.md](real-agents-guide.md)). Vocto starts it itself, so nothing needs a second window.
 
 ## Postgres
 

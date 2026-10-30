@@ -67,7 +67,7 @@ export function Projects() {
       {examples.length > 0 && (
         <>
           <h2 className="font-semibold mb-1">Practice agents</h2>
-          <p className="text-muted text-[12.5px] mb-2.5">Vocto's own agents with bugs you can switch on, used to prove that every bug gets caught.</p>
+          <p className="text-muted text-[12.5px] mb-2.5">Vocto's own agents, and a real open-source one (Pipecat food ordering), with bugs you can switch on or plant, used to prove that every bug gets caught.</p>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 stagger">{examples.map((p) => <ProjectCard key={p.key} p={p} />)}</div>
         </>
       )}
@@ -86,12 +86,13 @@ export function NewProject() {
   const [description, setDescription] = useState("");
   const [channel, setChannel] = useState<"voice" | "text">("voice");
   const [target, setTarget] = useState("");
+  const [voiceFormat, setVoiceFormat] = useState<"vocto" | "twilio">("twilio");
   const [busy, setBusy] = useState(false);
   const create = async () => {
     if (!name.trim()) { toast("Give the agent a name", "bad"); return; }
     setBusy(true);
     try {
-      const r = await setupApi.newProject({ name, id: slug(name), domain: domain.trim().toLowerCase(), description, channel, target });
+      const r = await setupApi.newProject({ name, id: slug(name), domain: domain.trim().toLowerCase(), description, channel, target, voice_format: voiceFormat });
       await reloadProjects();
       toast(`Created ${name}`);
       navigate(projectHref(r.key, "/setup/agent"));
@@ -135,6 +136,18 @@ export function NewProject() {
                   <div className="text-muted text-[12.5px] mt-0.5">Messages over HTTP. Fast and cheap; the same checks without speech. Voice can be added later.</div>
                 </Choice>
               </div>
+              {channel === "voice" && (
+                <div className="grid gap-2 sm:grid-cols-2 mt-3" id="np-format">
+                  <Choice radio on={voiceFormat === "twilio"} onClick={() => setVoiceFormat("twilio")} data-format="twilio">
+                    <b>Phone agent (Twilio Media Streams)</b>
+                    <div className="text-muted text-[12.5px] mt-0.5">The agent already takes phone calls from Twilio: Vocto calls the same WebSocket the way Twilio does. Pipecat, LiveKit, Vapi-style servers.</div>
+                  </Choice>
+                  <Choice radio on={voiceFormat === "vocto"} onClick={() => setVoiceFormat("vocto")} data-format="vocto">
+                    <b>Vocto voice protocol</b>
+                    <div className="text-muted text-[12.5px] mt-0.5">A small WebSocket protocol (PCM16 audio) for agents built to be tested by Vocto.</div>
+                  </Choice>
+                </div>
+              )}
               <Field label="Agent's address" hint="Optional now: you can add it on the next page." className="mt-4">
                 <Text id="np-target" mono value={target} onChange={setTarget} placeholder={channel === "voice" ? "wss://agent.example.com/call" : "https://agent.example.com/vocto"} />
               </Field>

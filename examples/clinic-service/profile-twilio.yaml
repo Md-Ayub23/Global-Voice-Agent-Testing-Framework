@@ -1,0 +1,15 @@
+# The outside clinic service by phone, in the Twilio Media Streams format: start
+#   uv run python -m zoo.clinic.service             (its voice port answers both formats)
+# then
+#   uv run vatf run examples/clinic-service --profile profile-twilio.yaml
+schema_version: "0.1"
+kind: client_profile
+extends: profile.yaml
+
+connection:
+  type: twilio_media_stream
+  target: ws://127.0.0.1:9101             # what a TwiML <Stream url="..."> would point at
+
+thresholds:
+  latency_p50_ms: 3500                    # the zoo agent's slow laptop pipeline, as in profile-voice.yaml
+  latency_p95_ms: 6000

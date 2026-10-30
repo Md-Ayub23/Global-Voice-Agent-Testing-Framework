@@ -1,0 +1,7 @@
+schema_version: "0.1"
+kind: persona
+id: calm-adult
+description: A  adult customer who answers questions clearly and waits for the agent to finish.
+traits: {patience: medium, verbosity: rambling, mood: frustrated, clarity: medium}
+speech: {tts_voice: en_GB-alba-medium, speaking_rate: 1.2}
+behaviour: {interrupts: false}

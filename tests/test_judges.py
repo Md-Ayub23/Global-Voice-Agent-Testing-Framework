@@ -56,6 +56,7 @@ def clinic(tmp_path):
 
 def run(tmp_path, folder, llm, scenarios=(SCRIPTED,), repeats=1, **agent_options):
     proj = load_project(folder).with_agent_options({"brain": "rules", "bugs": "", **agent_options})
+    proj.profile.setdefault("limits", {})["follow_up_turns"] = 0   # the scripted judge answers judges only
     cfg = RunConfig(root=ROOT, runs_dir=tmp_path / "runs", offline=False, repeats=repeats,
                     scenario_ids=tuple(scenarios))
     orch = Orchestrator(proj, cfg, llm=llm, log=lambda *_: None)
@@ -538,6 +539,7 @@ def test_judges_and_labels_api(tmp_path, monkeypatch):
     (root / "zoo").symlink_to(ROOT / "zoo")
     monkeypatch.chdir(root)          # as the dashboard runs it: project paths relative to the root
     proj = load_project("examples/clinic").with_agent_options({"brain": "rules"})
+    proj.profile.setdefault("limits", {})["follow_up_turns"] = 0   # the scripted judge answers judges only
     cfg = RunConfig(root=root, runs_dir=Path("runs"), offline=False, repeats=1, scenario_ids=(SCRIPTED, PERSON))
     llm = judge_llm({"polite-professional-tone": "FAIL"}, secondary={"grounded-facts": "FAIL"},
                     tiebreak={"grounded-facts": "NOT_APPLICABLE"})          # split three ways: a person decides

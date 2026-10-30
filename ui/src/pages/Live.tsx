@@ -142,7 +142,10 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
   };
   let doneAll = 0, planAll = 0;
   for (const r of job.run_ids) { const [d, n] = planDone(r); doneAll += d; planAll += n; }
-  if (exit && runMode) planAll = (runMode === "voice" ? 5 : 4) * (runs.get(job.run_ids[0])?.info?.plan?.length || 0);
+  const steps = job.summary?.planned || EXIT_LABELS(runMode);
+  if (exit && runMode && !job.summary?.planted) planAll = steps.length * (runs.get(job.run_ids[0])?.info?.plan?.length || 0);
+  // Planted bugs run only their own scenario: count the runs so far, and one more call for each step not started.
+  if (exit && job.summary?.planted) planAll += Math.max(0, steps.length - job.run_ids.length);
   const ratio = finished && job.status === "finished" ? 1 : planAll ? Math.min(1, doneAll / planAll) : 0;
 
   const run = currentRunId ? runs.get(currentRunId) : undefined;
@@ -368,7 +371,7 @@ function ExitSteps({ job, runMode, onPick }: { job: Job; runMode: string | null;
   const runFor = Object.fromEntries(Object.entries(job.labels).map(([r, l]) => [l, r]));
   return (
     <div className="flex gap-2 flex-wrap mb-3.5" id="steps">
-      {EXIT_LABELS(runMode).map((l, i) => {
+      {(job.summary?.planned || EXIT_LABELS(runMode)).map((l, i) => {
         const row = rows.find((r) => r.label === l);
         const run = runFor[l];
         const cur = !row && run && job.status === "running";
@@ -406,7 +409,9 @@ function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean 
             {sum.rows.map((r) => (
               <tr key={r.label}>
                 <td><Badge status={r.ok ? "PASS" : "FAIL"} label={r.ok ? "OK" : "MISS"} /></td>
-                <td><b>{r.label === "clean" ? "Clean agent" : r.label}</b>{r.scenario_id && <div className="text-muted text-[11.5px] font-mono">caught by {r.scenario_id}</div>}</td>
+                <td><b>{r.label === "clean" ? "Clean agent" : r.label}</b>
+                  {r.title && r.label !== "clean" && <div className="text-ink-2 text-[12px]">{r.title}</div>}
+                  {r.scenario_id && <div className="text-muted text-[11.5px] font-mono">caught by {r.scenario_id}</div>}</td>
                 <td>{r.detail}</td>
                 <td><a href={runHref({ run_id: r.run_id })}><Badge status={r.decision} /></a></td>
               </tr>
@@ -415,7 +420,12 @@ function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean 
         ) : undefined}
         title={job.status !== "finished" ? "Exit check did not finish" : passed ? "Exit check PASSED" : "Exit check NOT PASSED"}>
         <div className="text-ink-2">
-          {passed ? "The clean agent got GO, and every bug switch was caught in every repeat." : job.status !== "finished" ? "It was stopped or Vocto failed; the activity log below says why." : "At least one row below missed. Open its run to see why."}
+          {passed ? `The clean agent got GO, and every ${sum?.planted ? "planted bug" : "bug switch"} was caught in every repeat.`
+            : sum?.error ? `The agent could not be started: ${sum.error}`
+            : job.status !== "finished" ? "It was stopped or Vocto failed; the activity log below says why." : "At least one row below missed. Open its run to see why."}
+          {!!sum?.skipped?.length && (
+            <div className="mt-1.5 text-[12.5px]">Not checked this time: {sum.skipped.map((x) => `${x.bug} (${x.why})`).join("; ")}.</div>
+          )}
         </div>
       </Hero>
     );

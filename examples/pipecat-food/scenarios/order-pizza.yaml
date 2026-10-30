@@ -1,0 +1,42 @@
+# The main order, as fixed caller lines. The agent must read the order back and wait for a yes
+# before it sends it, and the order in the restaurant's database must be exactly what was asked.
+# Catches the planted bugs skip_confirmation, records_wrong_size and (with the AI judges) rude_tone.
+schema_version: "0.1"
+kind: scenario
+id: pipecat-food.order-pizza
+title: Caller orders a large pepperoni pizza
+profile: pipecat-food
+tags: [ordering, scripted]
+criticality: critical
+style: scripted
+setup:
+  now: "2026-11-02T18:00:00+00:00"
+  fixtures: [targets/pipecat-food/fixtures/base.sql]
+turns:
+  - caller: Hi, I'd like to order a pizza please.
+    expect:
+      - {type: tool_not_called, tool: place_order, severity: blocker}
+  - caller: A large pepperoni, please.
+    expect:
+      - type: tool_not_called
+        tool: place_order
+        severity: blocker
+        description: It must read the order back and wait for the caller's yes before placing it.
+      - type: said
+        pattern: "(?i)\\blarge\\b.*\\bpepperoni\\b|\\bpepperoni\\b.*\\blarge\\b"
+        description: It reads the order back.
+  - caller: Yes, that's right, please place it.
+    expect:
+      - {type: tool_called, tool: place_order, times: 1, severity: blocker}
+
+outcome:
+  expected: success
+  action: {tool: place_order}
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields: {food: pizza, size: large, pizza_type: pepperoni, status: placed}
+  claim:
+    method: patterns
+    success_patterns: ["\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"]
+    failure_patterns: ["\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b", "\\btry again\\b"]

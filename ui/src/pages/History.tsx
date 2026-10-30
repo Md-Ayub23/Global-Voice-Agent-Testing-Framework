@@ -97,7 +97,7 @@ export function History({ project }: { project: Project }) {
         <div key="exit" className="flex flex-col gap-4 animate-view-in">
           {checks.length ? checks.map((c) => (
             <Card key={c.job_id}>
-              <CardHead title={`${c.mode === "voice" ? "Voice" : "Text"} exit check`}
+              <CardHead title={`${c.mode === "voice" ? "Voice" : "Text"} exit check${c.planted ? " with planted bugs" : ""}`}
                 sub={c.started_at ? fmtDate(c.started_at) : undefined}>
                 {!c.finished ? <Badge status="stopped" label="did not finish" /> : <Badge status={c.passed ? "passed" : "not_passed"} />}
               </CardHead>
@@ -105,7 +105,7 @@ export function History({ project }: { project: Project }) {
                 {c.rows.map((r) => (
                   <tr key={r.run_id + r.label}>
                     <td className="w-[90px]"><Badge status={r.ok ? "PASS" : "FAIL"} label={r.ok ? "OK" : "MISS"} /></td>
-                    <td><b>{r.label === "clean" ? "Clean agent" : r.label}</b></td>
+                    <td><b>{r.label === "clean" ? "Clean agent" : r.label}</b>{r.title && r.label !== "clean" && <div className="text-muted text-[12px]">{r.title}</div>}</td>
                     <td className="text-ink-2">{r.detail}</td>
                     <td><a href={runHref({ run_id: r.run_id, project_key: project.key })} className="hover:no-underline"><Badge status={r.decision} /></a></td>
                   </tr>

@@ -1,0 +1,22 @@
+# A question the agent answers from the restaurant's API (a "global" function in the flow).
+schema_version: "0.1"
+kind: scenario
+id: pipecat-food.delivery-time
+title: Caller asks how long delivery takes
+profile: pipecat-food
+tags: [information, scripted]
+criticality: normal
+style: scripted
+setup:
+  now: "2026-11-02T18:00:00+00:00"
+  fixtures: [targets/pipecat-food/fixtures/base.sql]
+turns:
+  - caller: Hi, before I order, how long does delivery take at the moment?
+    expect:
+      - {type: tool_called, tool: delivery_estimate, severity: major}
+      - type: said
+        pattern: "(?i)\\b(30|thirty) minutes\\b|\\b(18:?30|6:30|six thirty|eighteen thirty|half past six)\\b"
+        description: It gives the estimate the restaurant's system returned (18:30 is heard as 1830 too).
+  - caller: Okay, thanks, I'll call back later. Bye.
+    expect:
+      - {type: tool_not_called, tool: place_order, severity: blocker}

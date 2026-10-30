@@ -67,10 +67,10 @@ class ClaudeClient:
     repeat of a scenario replay the same conversation and defeat pass^k.
     """
 
-    def __init__(self, budget: Budget, cache_dir: Path | None = None, effort: str = "low"):
+    def __init__(self, budget: Budget, cache_dir: Path | None = None, effort: str = "low", api_key: str | None = None):
         import anthropic
 
-        self._client = anthropic.AsyncAnthropic()
+        self._client = anthropic.AsyncAnthropic(**({"api_key": api_key} if api_key else {}))
         self._budget = budget
         self._cache_dir = cache_dir
         self._effort = effort

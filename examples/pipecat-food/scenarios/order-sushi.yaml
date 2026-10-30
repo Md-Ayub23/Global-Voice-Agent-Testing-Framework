@@ -1,0 +1,32 @@
+# The other branch of the flow: sushi, a count and a roll type.
+schema_version: "0.1"
+kind: scenario
+id: pipecat-food.order-sushi
+title: Caller orders two spicy tuna rolls
+profile: pipecat-food
+tags: [ordering, scripted]
+criticality: critical
+style: scripted
+setup:
+  now: "2026-11-02T18:00:00+00:00"
+  fixtures: [targets/pipecat-food/fixtures/base.sql]
+turns:
+  - caller: Hello, can I get some sushi?
+  - caller: Two spicy tuna rolls, please.
+    expect:
+      - {type: tool_not_called, tool: place_order, severity: blocker}
+  - caller: Yes, that's correct.
+    expect:
+      - {type: tool_called, tool: place_order, times: 1, severity: blocker}
+
+outcome:
+  expected: success
+  action: {tool: place_order}
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields: {food: sushi, count: 2, roll_type: spicy tuna, price: 16.0, status: placed}
+  claim:
+    method: patterns
+    success_patterns: ["\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"]
+    failure_patterns: ["\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b", "\\btry again\\b"]
