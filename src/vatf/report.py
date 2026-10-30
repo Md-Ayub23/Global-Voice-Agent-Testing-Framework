@@ -113,6 +113,26 @@ def _judgement(v: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> str
     return f"<h3>How it was judged: said vs did vs stored</h3><div class='table-wrap'><table>{rows}</table></div>"
 
 
+def _judges(v: Mapping[str, Any]) -> str:
+    """The AI judges' results: both votes and their reasons. Advisory items cannot block yet."""
+    judged = [c for c in v["checks"] if c.get("origin") == "judge"]
+    if not judged:
+        return ""
+    rows = []
+    for c in judged:
+        j = c.get("judge") or {}
+        votes = "<br>".join(f"<span class='ev'>{escape(x['judge'])} ({escape(x.get('model', ''))}): "
+                            f"{escape(x['result'])}</span> {escape(x.get('reason', ''))}" for x in j.get("votes", []))
+        how = "labelled by a person" if j.get("human") else ("can block" if c.get("can_block") else "advisory")
+        rows.append(f"<tr><td>{escape(j.get('title', c['check_id']))}<br><span class='ev'>{escape(c['check_id'])}</span>"
+                    f"</td><td>{_badge(c['result'])}</td><td>{escape(c['severity'])}<br><span class='ev'>{how}</span></td>"
+                    f"<td>{escape(c['message'])}{('<br>' + votes) if votes else ''}</td></tr>")
+    notes = "".join(f"<p class='sub'>{escape(n)}</p>" for n in v.get("judge_notes", []))
+    return ("<h3>AI judges</h3><p class='sub'>Two models score the call. Advisory items are not calibrated against "
+            "a person's labels yet, so they cannot block the release.</p><div class='table-wrap'><table><tr>"
+            f"<th>Item</th><th>Result</th><th>Severity</th><th>Details</th></tr>{''.join(rows)}</table></div>{notes}")
+
+
 def _call_section(v: Mapping[str, Any], call_dir: Path, run_dir: Path, warning: bool = False) -> str:
     rel = call_dir.relative_to(run_dir).as_posix()
     events = load_events(call_dir)
@@ -130,9 +150,26 @@ def _call_section(v: Mapping[str, Any], call_dir: Path, run_dir: Path, warning: 
             f"<h3>Conversation and actions</h3>{_story_table(events)}"
             f"{_voice(v, events, rel)}{_database_tables(events)}{_judgement(v, events)}"
             f"<h3>Checks</h3><div class='table-wrap'><table><tr><th>Check</th><th>Result</th><th>Severity</th>"
-            f"<th>Details</th></tr>{checks}</table></div>"
+            f"<th>Details</th></tr>{checks}</table></div>{_judges(v)}"
             f"<p class='ev'><a href='{rel}/story.txt'>story.txt</a> · <a href='{rel}/events.jsonl'>events.jsonl</a>"
             f" · <a href='{rel}/verdict.json'>verdict.json</a> · <a href='{rel}/call.json'>call.json</a></p></details>")
+
+
+def _safety(safety: Mapping[str, Any] | None) -> str:
+    """The built-in safety tests: each kind of attack, then every finding with a link to its call."""
+    if not safety:
+        return ""
+    packs = " · ".join(f"{escape(k)} {p['calls'] - p['failed'] - p.get('to_review', 0)}/{p['calls']}"
+                       for k, p in safety["packs"].items())
+    rows = "".join(
+        f"<tr><td>{_badge(f['result'])}</td><td><a href='#{escape(f['test_id'])}'>{escape(f['title'])}</a></td>"
+        f"<td>{'advisory' if not f['can_block'] else escape(f['severity'])}</td><td>{escape(f['message'])}</td></tr>"
+        for f in safety["findings"])
+    table = (f"<div class='table-wrap'><table><tr><th>Result</th><th>Attack</th><th>Weight</th><th>Finding</th></tr>"
+             f"{rows}</table></div>") if rows else "<p>No findings: the agent held up against every attack.</p>"
+    review = f", {safety['to_review']} wait for your label" if safety.get("to_review") else ""
+    return (f"<h2>Safety tests</h2><p class='sub'>{safety['passed']} of {safety['calls']} attack call(s) handled "
+            f"safely, {safety['failed']} with a finding{review}. {packs}</p>{table}")
 
 
 def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, Any]],
@@ -165,6 +202,7 @@ def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, An
         f"<td>{r['failed']}</td><td>{r['unverified']}</td>"
         f"<td>{'yes' if r['pass_hat_k'] else ('no' if r['pass_hat_k'] is False else 'unknown')}</td></tr>"
         for r in d["reliability"])
+    safety = _safety(d.get("safety"))
     calls = "".join(_call_section(v, store.call_dir(v["run_id"], v["test_id"]), run_dir) for v in verdicts)
     errors = "".join(_call_section(v, store.call_dir(v["run_id"], v["test_id"]), run_dir, warning=True)
                      for v in error_attempts)
@@ -178,6 +216,7 @@ def write_report(decision: Mapping[str, Any], verdicts: Sequence[Mapping[str, An
 <div class="banner {BADGE[d['decision']]}">{escape(TITLE[d['decision']])}</div>
 <ul class="reasons">{reasons}</ul>
 <h2>Scorecard</h2><div class="grid">{''.join(cards)}</div>
+{safety}
 <h2>Reliability (pass^k)</h2>
 <div class="table-wrap"><table><tr><th>Scenario</th><th>Criticality</th><th>Passed</th><th>Failed</th>
 <th>Unverified</th><th>All repeats passed</th></tr>{rel_rows}</table></div>

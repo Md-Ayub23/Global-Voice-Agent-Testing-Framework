@@ -29,12 +29,14 @@ Inside a project:
 
 | Page | What it is for |
 |---|---|
-| **Overview** | The agent, its latest release decision, a setup checklist (connect the agent, tools, backend, logs, test plan, first run) with a link to each step, its numbers and recent runs. |
-| **New run** | Choose the channel (voice or text), scenarios, caller (Claude or a free dry run) and repeats, then *Start run*. Practice agents also offer bug switches and the exit check. |
-| **Live run** | A run as it happens: the conversation of the current call, tool calls, broken tools, response times and checks as each call is judged. |
+| **Overview** | The agent, its latest release decision, a setup checklist (connect the agent, tools, backend, logs, test plan, AI judges, safety tests, first run) with a link to each step, its numbers and recent runs. |
+| **New run** | Choose the channel (voice or text), scenarios, caller (Claude or a free dry run) and repeats, then *Start run*. *Include safety tests* adds the attack calls written for this agent. Practice agents also offer bug switches and the exit check. |
+| **Live run** | A run as it happens: the conversation of the current call, tool calls, broken tools, response times and checks as each call is judged. For voice runs, *Listen live* plays the call in your browser as it happens (see [phase2-guide.md](phase2-guide.md#listening-live)). |
 | **Run history** | Every run of this agent; filter by decision or channel. Practice agents also have an *Exit checks* tab. |
-| **Run report** and **Call** | The decision and why, scorecard, coverage, reliability, response times and every call; for one call the recording, conversation, said vs did vs stored, each check with its evidence, and the database after the call. |
-| **Set up** (6 pages) | **Agent & connection**, **Tools**, **Backend & database**, **Logs**, **Test plan** (scenarios and personas as forms) and **Test settings**. Each page has a *Next* button, so a new project can be set up in order. See [onboarding-guide.md](onboarding-guide.md). |
+| **AI judges** | What the AI judges score (items for every agent, the industry pack, the agent's own, scenario questions), whether each item is trusted to block yet, how many of your failures it caught and good calls it passed, *Teach the judges* examples, and recent results. *Label calls* opens the queue. See [phase3-guide.md](phase3-guide.md). |
+| **Label calls** | Calls waiting for your label, the most useful first (judges disagree, a judge failed it, bug tests). Pick Pass / Fail / Doesn't apply per item without seeing the judges' answers, with an optional why; after saving you see the judges' answers, and the run's decision is updated. |
+| **Run report** and **Call** | The decision and why, scorecard, coverage, safety tests (each kind of attack and every finding), reliability, response times and every call; for one call the recording, conversation, said vs did vs stored, each check with its evidence, and the database after the call. |
+| **Set up** (7 pages) | **Agent & connection**, **Tools**, **Backend & database**, **Logs**, **Test plan** (scenarios and personas as forms, and the safety tests: how hard to push, which attacks, planted secrets), **AI judges** (on/off, the agent's policy, items, custom items, models and the deciding judge) and **Test settings**. Each page has a *Next* button, so a new project can be set up in order. See [onboarding-guide.md](onboarding-guide.md). |
 
 The app never shows terminal commands or folder locations. Everything a run needs is set up in it.
 

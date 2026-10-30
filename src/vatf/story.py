@@ -22,7 +22,7 @@ STORED = {
     "duplicate": "more than one record for this call in the database",
     "unknown": "could not check the database",
 }
-MARK = {"PASS": "PASS", "FAIL": "FAIL", "ERROR": "ERROR", "NOT_VERIFIED": "UNSURE",
+MARK = {"PASS": "PASS", "FAIL": "FAIL", "ERROR": "ERROR", "NOT_VERIFIED": "NOT VERIFIED",
         "NEEDS_REVIEW": "REVIEW", "NOT_APPLICABLE": "skip"}
 
 
@@ -183,9 +183,22 @@ def call_story_text(verdict: Mapping[str, Any], events: Sequence[Mapping[str, An
                     f" seconds in the file = seconds on the timeline above)"]
     out += ["", "CHECKS"]
     for c in verdict["checks"]:
+        if c.get("origin") == "judge":
+            continue
         refs = ", ".join(f"#{r['event']}" for r in c["evidence"])
         out.append(f"  [{MARK.get(c['result'], c['result']):<6}] {c['check_id']} ({c['severity']}): {c['message']}"
                    + (f"  [events {refs}]" if refs else ""))
+    judged = [c for c in verdict["checks"] if c.get("origin") == "judge"]
+    if judged:
+        out += ["", "AI JUDGES (two models; 'advisory' = not calibrated against a person's labels yet, so it cannot block)"]
+        for c in judged:
+            refs = ", ".join(f"#{r['event']}" for r in c["evidence"]) if c["result"] != "NOT_APPLICABLE" else ""
+            j = c.get("judge") or {}
+            how = "labelled by a person" if j.get("human") else ("can block" if c.get("can_block") else "advisory")
+            out.append(f"  [{MARK.get(c['result'], c['result']):<6}] {c['check_id']} ({c['severity']}, {how}): "
+                       f"{c['message']}" + (f"  [events {refs}]" if refs else ""))
+    for note in verdict.get("judge_notes", []):
+        out.append(f"  note: {note}")
     out += ["", f"CALL RESULT: {verdict['status']}", ""]
     return "\n".join(out)
 
@@ -212,6 +225,23 @@ def run_story_text(decision: Mapping[str, Any], calls: Sequence[tuple[Mapping[st
         out += ["=" * 78, f"RESPONSE TIME over {lat.get('turns_measured', 0)} timed answers: "
                           f"p50 {lat.get('p50_ms')} ms (limit {lat.get('p50_limit_ms')}), "
                           f"p95 {lat.get('p95_ms')} ms (limit {lat.get('p95_limit_ms')})"]
+    judges = decision.get("judges") or []
+    if judges:
+        out += ["=" * 78, "AI JUDGES over this run (an item can block only once it is calibrated)"]
+        for j in judges:
+            kappa = "not calibrated" if j.get("kappa") is None else f"kappa {j['kappa']:.2f}"
+            out.append(f"  {j['rubric_item']:<28} {j['passed']} pass, {j['failed']} fail, {j['needs_review']} to review"
+                       f"  ({'can block' if j['can_block'] else 'advisory'}; {kappa}; {j.get('labelled_calls', 0)} labelled)")
+    safety = decision.get("safety")
+    if safety:
+        out += ["=" * 78, f"SAFETY TESTS: {safety['passed']} of {safety['calls']} attack call(s) handled safely"]
+        if safety.get("to_review"):
+            out.append(f"  {safety['failed']} with a finding, {safety['to_review']} waiting for a person's label")
+        out += [f"  {pack:<12} {p['calls'] - p['failed'] - p.get('to_review', 0)}/{p['calls']} safe"
+                + (f", {p['to_review']} to review" if p.get("to_review") else "") for pack, p in safety["packs"].items()]
+        for f in safety["findings"]:
+            weight = "advisory" if not f["can_block"] else f["severity"]
+            out.append(f"  [{f['result']:<6}] {f['scenario_id']} ({weight}): {f['message']}  [{f['test_id']}]")
     out += ["=" * 78, f"DECISION: {decision['decision']}"]
     out += [f"  - {r['message']}" for r in decision["reasons"]]
     out.append("")

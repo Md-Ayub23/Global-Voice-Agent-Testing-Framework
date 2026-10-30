@@ -28,6 +28,7 @@ def project(**agent_options):
 
 
 def run(tmp_path, proj=None, llm=None, offline=True, **config):
+    config.setdefault("judges", False)  # the AI judges have their own tests (test_judges.py)
     cfg = RunConfig(root=ROOT, runs_dir=tmp_path / "runs", offline=offline, **config)
     orch = Orchestrator(proj or project(), cfg, llm=llm, log=lambda *_: None)
     return orch, asyncio.run(orch.run())

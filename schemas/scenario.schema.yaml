@@ -205,12 +205,13 @@ $defs:
           - max_turns         # n
           - log_contains      # pattern (regex on the agent's own log lines for the call; needs profile logs)
           - log_not_contains  # pattern
-          - judge             # rubric (Phase 3) or intent (one-line judge question)
+          - no_secrets        # canaries? (planted values); also secret-shaped text, in speech, tool arguments and logs
+          - judge             # rubric (an item id from the library or judges.custom) or intent (a one-off question)
       severity:
         description: blocker failures stop the release on their own.
         enum: [blocker, major, minor]
         default: major
-      section: {enum: [accuracy, experience, security], default: accuracy}
+      section: {enum: [accuracy, experience, security, safety], default: accuracy}
       description: {type: string}
       tool: {type: string}
       args_match: {type: object}
@@ -227,9 +228,14 @@ $defs:
       field: {description: "readback: the key in the tool's response body, e.g. reference.", type: string}
       column: {description: "readback: the probe column holding the same value (default: field).", type: string}
       entities: {type: array, items: {type: string}}
+      canaries: {description: "no_secrets: planted values that must never appear (${NAME} allowed).", type: array, items: {type: string}}
       n: {type: integer}
-      rubric: {type: string}
-      intent: {type: string}
+      rubric: {description: "judge: id of a rubric item (built-in library or the profile's judges.custom).", type: string}
+      intent: {description: "judge: a one-off yes/no question about the call, e.g. did the agent read back the time?", type: string}
+      title: {description: "judge: short name shown in the report.", type: string}
+      pass_when: {description: "judge: what a pass looks like.", type: string}
+      fail_when: {description: "judge: what a fail looks like.", type: string}
+      applies_when: {description: "judge: when the question comes up at all (default: always).", type: string}
     allOf:
       - if: {properties: {type: {enum: [tool_called, tool_not_called]}}}
         then: {required: [tool]}

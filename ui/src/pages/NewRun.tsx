@@ -31,6 +31,12 @@ const OPTION_HELP: Record<string, string> = {
 };
 const STT = ["tiny.en", "base.en", "small.en", "medium.en"];
 const EXIT_BUGS = { text: ["lie_on_failure", "skip_confirmation", "double_booking"], voice: ["lie_on_failure", "skip_confirmation", "double_booking", "misread_reference"] };
+// The bug switches only the AI judges can catch (rudeness, made-up facts...): part of a live exit check.
+const SOFT_BUGS = ["rude_tone", "made_up_facts", "refuses_human"];
+// The bug switches the built-in safety tests catch (answering off-topic, leaking a secret, obeying an injection).
+const SAFETY_BUGS = ["answers_off_topic", "leaks_secrets", "obeys_injection"];
+const exitBugsOf = (p: Profile, judges: boolean, safety: boolean) => [...EXIT_BUGS[p.mode],
+  ...[...(judges ? SOFT_BUGS : []), ...(safety ? SAFETY_BUGS : [])].filter((b) => p.bugs?.some((x) => x.name === b))];
 const splitBugs = (s: string | undefined | null) => String(s || "").split(",").map((x) => x.trim()).filter(Boolean);
 
 interface Form {
@@ -47,6 +53,8 @@ interface Form {
   stt_check_model: string;
   repeats: string;
   show_pii: boolean;
+  judges: boolean;
+  safety: boolean;
 }
 
 export function NewRun({ project, query }: { project: Project; query: URLSearchParams }) {
@@ -102,6 +110,10 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
     }));
   };
 
+  const judgesOn = f.judges && !f.offline && profile.judges !== false;
+  const safetyOn = f.safety && !!profile.safety?.enabled && !!profile.safety.attacks;
+  const exitBugs = exitBugsOf(profile, judgesOn, safetyOn);
+  const safetyCalls = !safetyOn ? 0 : f.repeats ? (Number(f.repeats) || 1) * profile.safety!.attacks : profile.safety!.calls;
   const request = useMemo(() => {
     const agent_options: Options = {};
     for (const [k, v] of Object.entries(f.options)) if (String(v) !== String(d[k] ?? "")) agent_options[k] = v;
@@ -112,16 +124,16 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
     return {
       command: f.command, project: f.project, profile: profile.file,
       scenarios: chosen.length === ids.length ? [] : chosen,
-      repeats: f.repeats || null, agent_options, offline: f.offline, model: f.model,
+      repeats: f.repeats || null, agent_options, offline: f.offline, model: f.model, judges: f.judges, safety: safetyOn,
       speech: f.speech, stt_model: f.stt_model, stt_check_model: f.stt_check_model, show_pii: f.show_pii,
     };
-  }, [f, profile, d, inMode]);
+  }, [f, profile, d, inMode, safetyOn]);
 
   const planned = useMemo(() => {
     const sc = inMode.filter((x) => exit || f.scenarios.has(x.id));
-    const per = sc.reduce((a, x) => a + (Number(f.repeats) || x.repeats || 3), 0);
-    return exit ? per * (1 + EXIT_BUGS[profile.mode].length) : per;
-  }, [inMode, exit, f.scenarios, f.repeats, profile.mode]);
+    const per = sc.reduce((a, x) => a + (Number(f.repeats) || x.repeats || 3), 0) + safetyCalls;
+    return exit ? per * (1 + exitBugs.length) : per;
+  }, [inMode, exit, f.scenarios, f.repeats, exitBugs.length, safetyCalls]);
 
   const [starting, setStarting] = useState(false);
   const start = async () => {
@@ -149,7 +161,10 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
       </PageHead>
       {exit && (
         <Notice className="mb-4">
-          <b>Exit check</b> runs the clean agent, then once with each bug switch ({EXIT_BUGS[profile.mode].join(", ")}). It passes when the clean agent gets GO and every bug is caught in every repeat. It uses all scenarios.
+          <b>Exit check</b> runs the clean agent, then once with each bug switch ({exitBugs.join(", ")}). It passes when the clean agent gets GO and every bug is caught in every repeat. It uses all scenarios.
+          {judgesOn ? " With the AI judges on it also checks that they catch the soft bugs (rudeness, made-up facts, refusing a person)."
+            : !f.offline && profile.judges !== false ? " Turn the AI judges on to check the soft bugs too." : ""}
+          {safetyOn && exitBugs.some((b) => SAFETY_BUGS.includes(b)) ? " With safety tests on, the attack calls must catch the safety bugs too (answering off-topic, leaking a secret, obeying a prompt trick)." : ""}
         </Notice>
       )}
       <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -314,6 +329,26 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
                 <input id="repeats" className={inputCls} type="number" min={1} max={50} placeholder={`from test settings (${profile.thresholds?.repeats ?? 3})`}
                   value={f.repeats} onChange={(e) => set({ repeats: e.target.value })} />
               </Field>
+              {!f.offline && profile.judges !== false && (
+                <div className="grid gap-1.5 font-semibold text-[13px]">
+                  AI judges
+                  <Switch id="judges" checked={f.judges} onChange={(v) => set({ judges: v })} label="Judge tone, facts and scope" />
+                  <span className="font-normal text-xs text-muted">
+                    {f.judges ? <>Two judges read every call (a little extra cost). They advise until you <a href={projectHref(project.key, "/judges")}>calibrate them</a>.</>
+                      : "Off: only hard checks (tools, database, logs, timing)."}
+                  </span>
+                </div>
+              )}
+              {profile.safety?.enabled && (
+                <div className="grid gap-1.5 font-semibold text-[13px]">
+                  Safety tests
+                  <Switch id="safety" checked={f.safety} onChange={(v) => set({ safety: v })} label="Include safety tests" />
+                  <span className="font-normal text-xs text-muted">
+                    {f.safety ? <>{profile.safety.attacks} attack calls written for this agent: off-topic questions, pushing for secrets, prompt tricks and more. <a href={projectHref(project.key, "/setup/plan")}>Choose them in the test plan</a>.</>
+                      : "Off: only the scenarios above."}
+                  </span>
+                </div>
+              )}
               <div className="grid gap-1.5 font-semibold text-[13px]">
                 Personal data
                 <Switch id="pii" checked={f.show_pii} onChange={(v) => set({ show_pii: v })} label="Keep names and dates readable" />
@@ -331,9 +366,11 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
             <div className="flex flex-col gap-[9px]">
               <Row label="Agent"><b className="text-right">{project.name}</b></Row>
               <Row label="Channel"><Chip tone={voice ? "agent" : "caller"} icon={voice ? "mic" : "text"}>{voice ? "Voice" : "Text"}</Chip></Row>
-              <Row label={exit ? "Runs" : "Scenarios"}><b>{exit ? 1 + EXIT_BUGS[profile.mode].length : f.scenarios.size}</b></Row>
+              <Row label={exit ? "Runs" : "Scenarios"}><b>{exit ? 1 + exitBugs.length : f.scenarios.size}</b></Row>
               <Row label="Planned calls"><b className="tabular-nums">{planned}</b></Row>
               <Row label="Caller"><b>{f.offline ? "rules (free)" : "Claude"}</b></Row>
+              <Row label="AI judges"><b>{judgesOn ? "on" : "off"}</b></Row>
+              {profile.safety?.enabled && <Row label="Safety tests"><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
               {!exit && f.bugs.size > 0 && (
                 <>
                   <Row label="Bugs on"><div className="flex flex-wrap justify-end gap-1.5">{[...f.bugs].map((b) => <Chip key={b} tone="bad">{b}</Chip>)}</div></Row>
@@ -371,7 +408,7 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     command: "run", project: project.path, profile: profile.file,
     scenarios: new Set(profile.scenarios.filter((s) => s.in_mode).map((s) => s.id)),
     options: {}, bugs: new Set(splitBugs(defaultsOf(profile, offline).bugs)),
-    offline, model, speech: "local", stt_model: "base.en", stt_check_model: "small.en", repeats: "", show_pii: false,
+    offline, model, speech: "local", stt_model: "base.en", stt_check_model: "small.en", repeats: "", show_pii: false, judges: true, safety: true,
   };
   if (prefill) {
     f.offline = !!prefill.offline;
@@ -380,6 +417,8 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     if (prefill.caller_model) f.model = prefill.caller_model;
     if (prefill.speech) Object.assign(f, { speech: prefill.speech.engine, stt_model: prefill.speech.ears_model, stt_check_model: prefill.speech.check_model });
     f.show_pii = prefill.pii_masked === false;
+    f.judges = prefill.judges?.why !== "Judges were switched off for this run.";
+    f.safety = !!prefill.safety;
     const d = defaultsOf(profile, f.offline);
     f.bugs = new Set(splitBugs(d.bugs));
     for (const [k, v] of Object.entries(prefill.agent_options || {})) {

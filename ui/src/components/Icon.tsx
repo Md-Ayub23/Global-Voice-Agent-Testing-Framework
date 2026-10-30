@@ -3,7 +3,7 @@ import {
   ExternalLink, FileText, Flag, Folder, History, Info, KeyRound, Layers, LayoutDashboard, Menu, MessageCircle, Mic, Minus,
   Moon, Phone, PhoneOff, Play, Plus, RefreshCw, Save, Search, Settings, ShieldCheck, Square, Sun, Target, TriangleAlert,
   User, Wrench, X, Zap, ChevronsUpDown, Plug, ScrollText, ListChecks, SlidersHorizontal, House, LayoutGrid, TrendingUp,
-  Lock, CircleCheck, Circle, ChevronRight, type LucideIcon,
+  Lock, CircleCheck, Circle, ChevronRight, Scale, Tag, Sparkles, ThumbsUp, ThumbsDown, Eye, EyeOff, Volume2, VolumeX, type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
@@ -15,6 +15,8 @@ const ICONS = {
   shield: ShieldCheck, stop: Square, sun: Sun, target: Target, text: MessageCircle, tool: Wrench, user: User,
   wave: AudioLines, x: X, updown: ChevronsUpDown, plug: Plug, logs: ScrollText, plan: ListChecks, sliders: SlidersHorizontal,
   home: House, grid: LayoutGrid, trend: TrendingUp, lock: Lock, "check-circle": CircleCheck, circle: Circle, chevron: ChevronRight,
+  scale: Scale, tag: Tag, sparkles: Sparkles, "thumbs-up": ThumbsUp, "thumbs-down": ThumbsDown, eye: Eye, "eye-off": EyeOff,
+  speaker: Volume2, mute: VolumeX,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

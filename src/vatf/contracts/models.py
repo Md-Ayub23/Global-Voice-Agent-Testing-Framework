@@ -129,6 +129,7 @@ class LLMRequest:
     max_tokens: int
     temperature: float = 0.0
     metadata: Mapping[str, str] = field(default_factory=dict)  # e.g. test_id, for the LLM log
+    json_schema: Mapping[str, Any] | None = None   # the answer must be JSON matching this (structured output)
 
 
 @dataclass(frozen=True)

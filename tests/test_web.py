@@ -146,7 +146,7 @@ def test_exit_check_writes_summary_and_run_info(tmp_path):
         info = read_json(tmp_path / "runs" / row["run_id"] / "run.json")
         assert info["status"] == "finished" and info["decision"] == row["decision"]
         assert info["offline"] and info["caller_model"] is None
-        assert info["scenario_ids"] == [] and len(info["plan"]) == 3  # [] = every scenario of the profile
+        assert info["scenario_ids"] == [] and len(info["plan"]) == 4  # [] = every scenario of the profile
     runs = {r["run_id"]: r for r in data.list_runs(tmp_path / "runs")}
     assert {r["run_id"] for r in doc["rows"]} == set(runs)
     assert data.exit_checks(tmp_path / "runs") == []  # only the dashboard's own exit checks are listed

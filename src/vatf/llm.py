@@ -81,12 +81,16 @@ class ClaudeClient:
 
     def request_kwargs(self, request: LLMRequest) -> dict:
         # No temperature: current Claude models reject non-default sampling settings.
+        output: dict = {"effort": self._effort}
+        if request.json_schema:
+            # Structured output: the answer is always JSON of this shape, so no item can lose its result.
+            output["format"] = {"type": "json_schema", "schema": dict(request.json_schema)}
         return {
             "model": request.model,
             "max_tokens": request.max_tokens,
             "system": request.system,
             "messages": [{"role": m.role, "content": m.content} for m in request.messages],
-            "output_config": {"effort": self._effort},
+            "output_config": output,
         }
 
     async def complete(self, request: LLMRequest) -> LLMResponse:

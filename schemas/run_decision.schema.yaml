@@ -23,6 +23,7 @@ properties:
   run_id: {type: string}
   profile_id: {type: string}
   created_at: {type: string, format: date-time}
+  relabelled_at: {description: "When a person's judge labels last changed this decision.", type: string, format: date-time}
   decision: {enum: [GO, NO_GO, NO_GO_INSUFFICIENT_EVIDENCE]}
   exit_code:
     description: For CI. 0 = GO, 1 = NO_GO, 2 = NO_GO_INSUFFICIENT_EVIDENCE. A crash of the framework itself writes no decision and exits 3.
@@ -36,7 +37,7 @@ properties:
       additionalProperties: false
       required: [rule, message]
       properties:
-        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met]}
+        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings]}
         message: {type: string}
         refs:
           description: test_id or test_id/check_id pointing at the verdicts behind this reason.
@@ -52,6 +53,7 @@ properties:
       accuracy: {$ref: "#/$defs/section_score"}
       experience: {$ref: "#/$defs/section_score"}
       security: {$ref: "#/$defs/section_score"}
+      safety: {$ref: "#/$defs/section_score"}
 
   reliability:
     type: array
@@ -103,9 +105,77 @@ properties:
       required: [rubric_item, kappa, can_block]
       properties:
         rubric_item: {type: string}
+        title: {type: string}
         kappa: {type: [number, "null"]}
+        tpr: {type: [number, "null"]}
+        tnr: {type: [number, "null"]}
         labelled_calls: {type: integer}
         can_block: {type: boolean}
+        calibration: {type: string}
+        passed: {type: integer}
+        failed: {type: integer}
+        needs_review: {type: integer}
+        not_applicable: {type: integer}
+
+  basis:
+    description: What decided the run, in layers, and the AI judge opinions that were left out of it.
+    type: object
+    additionalProperties: false
+    required: [decided_by, judge_opinions]
+    properties:
+      decided_by:
+        type: array
+        items: {enum: [all_checks, hard_checks, trusted_judges, reliability, latency, evidence]}
+      judge_opinions: {description: "Judge findings from items not trusted yet: shown, never counted.", type: integer}
+      opinions_to_label: {description: "Of those, where the judges split and a person's label is wanted.", type: integer}
+      trusted_items: {type: integer}
+
+  heard_numbers:
+    description: Voice runs where the agent reports its own words. Numbers it said and how many the caller heard right.
+    type: object
+    additionalProperties: false
+    required: [numbers, heard_right, misheard]
+    properties:
+      numbers: {type: integer}
+      heard_right: {type: integer}
+      misheard:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [test_id, seq, said, heard]
+          properties: {test_id: {type: string}, seq: {type: integer}, said: {type: string}, heard: {type: string}}
+
+  safety:
+    description: The built-in safety tests in this run (attacks.py) and every finding, worst first.
+    type: object
+    additionalProperties: false
+    properties:
+      calls: {type: integer}
+      passed: {type: integer}
+      failed: {description: "Attack calls with at least one failed check (hard check or judge).", type: integer}
+      to_review: {description: "Attack calls with no failure but a judge disagreement for a person to label.", type: integer}
+      packs:
+        type: object
+        additionalProperties:
+          type: object
+          additionalProperties: false
+          properties: {calls: {type: integer}, failed: {type: integer}, to_review: {type: integer}}
+      findings:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            test_id: {type: string}
+            scenario_id: {type: string}
+            pack: {type: string}
+            title: {type: string}
+            check_id: {type: string}
+            severity: {type: string}
+            result: {type: string}
+            can_block: {type: boolean}
+            message: {type: string}
 
   calls:
     description: Pointers to every call verdict in the run.

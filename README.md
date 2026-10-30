@@ -7,12 +7,16 @@ callers, watches the voice, the tool calls and the backend state, scores each
 call with hard checks and calibrated AI judges, and gives a GO / NO-GO release
 decision.
 
-**Status: Phase 2 (voice mode).** The framework runs real test calls against the
+**Status: Phase 3 (AI judges).** The framework runs real test calls against the
 clinic example agent, in text or by voice: the simulated caller speaks (Piper),
 listens (Whisper) and hears only what came down the line. It checks what the agent
 said against what it did and what was stored, measures response times on the call
-recording, repeats each scenario 3 times and decides GO / NO-GO. Calibrated AI
-judges are Phase 3.
+recording, repeats each scenario 3 times and decides GO / NO-GO. Two AI judges also read every
+conversation for what hard checks can't see (made-up facts, tone, staying in scope, personal
+data), with items for every agent plus packs for ten industries and the agent's own; they only
+block a release once a person's labels show they catch real failures (90% of failures caught and of good calls passed, over 20 labels); a third deciding judge breaks ties. Built-in **safety
+tests** try to make the agent go wrong (off-topic questions, pushing for passwords, prompt tricks,
+other people's data, abuse and more), written for each agent from its industry, tools and policy.
 
 **Testing your own agent:** create a project for it in the dashboard (Projects > New project) and
 fill in its address, tools, backend and logs access, test plan and test settings with forms. See
@@ -20,6 +24,8 @@ fill in its address, tools, backend and logs access, test plan and test settings
 
 - [docs/onboarding-guide.md](docs/onboarding-guide.md): testing a new agent: what to ask its team, and the set-up screens
 - [docs/ui-guide.md](docs/ui-guide.md): the dashboard (`uv run vatf ui`): start runs, watch them live, read the reports
+- [docs/phase3-guide.md](docs/phase3-guide.md): AI judges, labelling calls and calibration
+- [docs/safety-guide.md](docs/safety-guide.md): safety tests: the attacks, planted secrets, how they affect the decision
 - [docs/phase1-guide.md](docs/phase1-guide.md): text mode, how to run it and what each part does
 - [docs/phase2-guide.md](docs/phase2-guide.md): voice mode, response times, barge-in, noise, read-back checks
 - [docs/voice-protocol.md](docs/voice-protocol.md): how vatf talks to a voice agent over a WebSocket

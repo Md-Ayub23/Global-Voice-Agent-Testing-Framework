@@ -159,6 +159,19 @@ gate but do not need all repeats to pass):
 masked. The text in events.jsonl and the transcripts is still masked as before. `runs/` is
 git-ignored; treat recordings as personal data.
 
+## Listening live
+
+On the dashboard's *Live run* page a voice run has a **Listen live** button. Click it to hear the
+call as it happens, the caller and the agent as the caller hears them, in your browser. It is off
+until you click it and stops when you leave the page or the run ends; afterwards each call's
+recording is on its call page.
+
+Listening never changes a call. The run sends a copy of the line's audio to the dashboard every
+100 ms, about 60 ms behind the call, over a local port on this computer. Nothing waits for it: if
+the dashboard or the browser falls behind, that audio is skipped, never queued against the call, so
+response times are the same whether anyone listens or not. Runs started from a terminal don't send
+it at all. Text runs have nothing to hear, so the button isn't shown.
+
 ## Known limits of Phase 2
 
 - Agents outside Python can be dialled (`connection.target: ws://...`) and are heard and timed, but

@@ -57,7 +57,7 @@ export function Dashboard() {
           <Kpi icon="layers" label="Test runs" value={<CountUp to={t.runs} />} foot={`${t.runs_7d} in the last 7 days · ${t.decided} with a decision`} />
           <Kpi icon="shield" label="Release GO rate" tone={t.go_rate == null ? "accent" : t.go_rate >= 0.8 ? "good" : t.go_rate >= 0.5 ? "warn" : "bad"}
             value={t.go_rate == null ? "—" : <CountUp to={t.go_rate * 100} suffix="%" />}
-            foot={t.decided ? `${t.go} GO · ${t.no_go} NO-GO${t.insufficient ? ` · ${t.insufficient} unsure` : ""}${t.bug_runs ? ` · ${t.bug_runs} bug test${t.bug_runs === 1 ? "" : "s"} not counted` : ""}` : "after your first run"} />
+            foot={t.decided ? `${t.go} GO · ${t.no_go} NO-GO${t.insufficient ? ` · ${t.insufficient} not enough evidence` : ""}${t.bug_runs ? ` · ${t.bug_runs} bug test${t.bug_runs === 1 ? "" : "s"} not counted` : ""}` : "after your first run"} />
           <Kpi icon="phone" label="Test calls" value={<CountUp to={t.calls} />} foot={`${t.scenarios} scenarios · ${money(t.cost_usd)} spent`} />
         </div>
 

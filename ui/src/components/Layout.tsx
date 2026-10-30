@@ -1,5 +1,5 @@
 // The app shell. The sidebar has the workspace (dashboard, projects, settings) and, inside a
-// project, that project's own pages: overview, new run, live run, run history and its setup.
+// project, that project's own pages: overview, new run, live run, run history, AI judges and its setup.
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useApp } from "../lib/app";
 import { cx } from "../lib/format";
@@ -20,6 +20,7 @@ const projectNav = (k: string): NavItem[] => [
   { href: projectHref(k, "/new"), key: "new", label: "New run", icon: "play-circle" },
   { href: projectHref(k, "/live"), key: "live", label: "Live run", icon: "activity" },
   { href: projectHref(k, "/runs"), key: "runs", label: "Run history", icon: "history" },
+  { href: projectHref(k, "/judges"), key: "judges", label: "AI judges", icon: "scale" },
 ];
 const setupNav = (k: string): NavItem[] => [
   { href: projectHref(k, "/setup/agent"), key: "setup:agent", label: "Agent & connection", icon: "plug" },
@@ -27,6 +28,7 @@ const setupNav = (k: string): NavItem[] => [
   { href: projectHref(k, "/setup/backend"), key: "setup:backend", label: "Backend & database", icon: "db" },
   { href: projectHref(k, "/setup/logs"), key: "setup:logs", label: "Logs", icon: "logs" },
   { href: projectHref(k, "/setup/plan"), key: "setup:plan", label: "Test plan", icon: "plan" },
+  { href: projectHref(k, "/setup/judges"), key: "setup:judges", label: "AI judges", icon: "sparkles" },
   { href: projectHref(k, "/setup/settings"), key: "setup:settings", label: "Test settings", icon: "sliders" },
 ];
 
@@ -170,8 +172,8 @@ export function Layout({ section, projectKey, children }: { section: string; pro
               i === crumbs.length - 1 ? (
                 <b key={i} className="text-ink font-semibold truncate">{c.label}</b>
               ) : (
-                <span key={i} className="flex items-center gap-2 flex-none">
-                  <a href={c.href} className="text-muted hover:text-ink">{c.label}</a><Icon name="chevron" size={13} />
+                <span key={i} className={cx("items-center gap-2 min-w-0", i < crumbs.length - 2 ? "hidden md:flex flex-none" : "flex flex-shrink")}>
+                  <a href={c.href} className="text-muted hover:text-ink truncate">{c.label}</a><Icon name="chevron" size={13} className="flex-none" />
                 </span>
               ),
             )}

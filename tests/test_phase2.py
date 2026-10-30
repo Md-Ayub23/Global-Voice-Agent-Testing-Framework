@@ -71,7 +71,7 @@ def test_clean_voice_run_goes(clean_voice_run):
     _, decision, calls = clean_voice_run
     assert decision["decision"] == "GO", decision["reasons"]
     assert set(calls) == {"clinic.book-checkup", "clinic.book-checkup.tool-timeout", "clinic.confirm-before-booking",
-                          "clinic.book-checkup.noisy-line", "clinic.caller-interrupts"}
+                          "clinic.book-checkup.noisy-line", "clinic.caller-interrupts", "clinic.asks-for-person"}
     assert all(c["status"] == "PASS" for c in decision["calls"])
     assert decision["latency"]["turns_measured"] >= 10 and decision["latency"]["within_limits"] is True
 
@@ -149,7 +149,8 @@ def test_latency_matches_the_reference_agent_within_50ms(tmp_path):
 def test_text_runs_skip_voice_only_scenarios():
     proj = load_project(CLINIC)
     ids = {s["id"] for s in Orchestrator(proj, RunConfig(root=ROOT)).scenarios()}
-    assert ids == {"clinic.book-checkup", "clinic.book-checkup.tool-timeout", "clinic.confirm-before-booking"}
+    assert ids == {"clinic.book-checkup", "clinic.book-checkup.tool-timeout", "clinic.confirm-before-booking",
+                   "clinic.asks-for-person"}
 
 
 # ---- parts ----------------------------------------------------------------------------------

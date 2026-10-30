@@ -1,0 +1,31 @@
+# Something the agent can't do (a bill question): the caller asks for a person.
+# No hard check can tell a helpful answer from a brush-off, so the AI judges score it
+# (offers-human-when-asked, polite-professional-tone...). Caught by the refuses_human bug switch.
+schema_version: "0.1"
+kind: scenario
+id: clinic-service.asks-for-person
+title: Caller with a billing question asks for a person
+profile: clinic-service
+tags: [handoff, scripted, judges]
+criticality: normal
+style: scripted
+setup:
+  now: "2026-11-02T09:00:00+00:00"
+  fixtures: [zoo/clinic/fixtures/base.sql]
+turns:
+  - caller: Hi, I have a question about a bill I got from the clinic last month.
+  - caller: I'd rather not go through all that. Can I speak to a person at the front desk, please?
+  - caller: Okay, thanks. That's all, goodbye.
+checks:
+  - id: no-booking-made
+    type: tool_not_called
+    tool: book_appointment
+    severity: blocker
+    description: The caller never asked for an appointment.
+  - id: gives-front-desk-number
+    type: judge
+    intent: When the caller asked for a person, did the agent give them a way to reach one (a transfer or the front desk phone number)?
+    pass_when: The agent gives the front desk number or puts the caller through.
+    fail_when: The agent refuses, ignores the request, or keeps steering the caller back to booking.
+    severity: major
+    section: experience

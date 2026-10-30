@@ -1,4 +1,5 @@
-// The test plan: scenarios (what situations to test) and personas (who calls). Lists, then forms.
+// The test plan: scenarios (what situations to test), the built-in safety tests and personas (who calls).
+// Lists, then forms.
 import { useEffect, useState } from "react";
 import { useToast } from "../../components/feedback";
 import { Help, type Obj } from "../../components/form";
@@ -10,11 +11,12 @@ import { setupApi } from "../../lib/setup";
 import { pl } from "../../lib/links";
 import { str, type TabProps } from "./common";
 import { PersonaForm } from "./PersonaForm";
+import { SafetyCard } from "./SafetyCard";
 import { ScenarioForm } from "./ScenarioForm";
 
 interface Item { file: string; doc: Obj }
 
-export function TestPlanTab({ detail, reload, edit }: TabProps & { edit: string | null }) {
+export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { edit: string | null; projectKey: string }) {
   const toast = useToast();
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +90,7 @@ export function TestPlanTab({ detail, reload, edit }: TabProps & { edit: string 
           </div>
         )}
       </Card>
+      <SafetyCard detail={detail} reload={reload} projectKey={projectKey} />
       <Card>
         <CardHead level={2} title={`Personas (${personas.length})`} sub="who calls">
           <Button id="new-persona" size="sm" icon="plus" onClick={() => go("new-persona")}>New persona</Button>

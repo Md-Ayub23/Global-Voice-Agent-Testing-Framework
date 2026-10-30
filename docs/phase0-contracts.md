@@ -124,7 +124,8 @@ One per call. It holds:
 Rules built into the shape:
 
 - A judge result is always `ai_opinion` evidence.
-- A judge item whose kappa is below 0.6 has `can_block: false` (advisory).
+- A judge item that isn't trusted yet has `can_block: false` (an opinion only). Since 29 Oct 2026
+  trust needs 20 labels with 5 failures, and 90% of failures caught and of passes cleared (was kappa 0.6).
 - "AI can raise but never clear" is enforced by the `VerdictBuilder`
   interface: judges can add FAIL or NEEDS_REVIEW, never remove a FAIL.
 

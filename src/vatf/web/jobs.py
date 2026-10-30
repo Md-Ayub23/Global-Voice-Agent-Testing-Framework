@@ -4,10 +4,12 @@ in its own process, so the dashboard and the terminal always do exactly the same
 from __future__ import annotations
 
 import os
+import queue
 import re
 import secrets
 import shlex
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -16,6 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..audio.tap import PORT_ENV, unpack
 from ..evidence import utc_now
 from ..speech import ENGINES
 from ..util import read_json, write_json
@@ -62,6 +65,58 @@ class Job:
         return out
 
 
+class LiveAudio:
+    """Listen live: receives the running call's audio from the run's process (see audio/tap.py) and
+    hands each datagram to every browser that is listening. A listener that falls behind loses
+    audio; nothing here ever slows the run, which doesn't know or care whether anyone listens."""
+
+    QUEUE = 50          # about 5 s of audio per listener; more than that behind and it is dropped
+
+    def __init__(self) -> None:
+        self.port: int | None = None
+        self._listeners: set[queue.Queue] = set()
+        self._lock = threading.Lock()
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.bind(("127.0.0.1", 0))
+            self.port = self.sock.getsockname()[1]
+        except OSError:
+            return          # no live listening on this computer; runs are unaffected
+        threading.Thread(target=self._receive, daemon=True).start()
+
+    def _receive(self) -> None:
+        while True:
+            try:
+                packet = self.sock.recv(65536)
+            except OSError:
+                if self.sock.fileno() < 0:
+                    return
+                continue    # Windows reports an earlier unreachable send this way; keep going
+            if unpack(packet) is None:
+                continue
+            with self._lock:
+                listeners = list(self._listeners)
+            for q in listeners:
+                try:
+                    q.put_nowait(packet)
+                except queue.Full:
+                    pass
+
+    def listen(self) -> queue.Queue:
+        q: queue.Queue = queue.Queue(maxsize=self.QUEUE)
+        with self._lock:
+            self._listeners.add(q)
+        return q
+
+    def leave(self, q: queue.Queue) -> None:
+        with self._lock:
+            self._listeners.discard(q)
+
+    @property
+    def listeners(self) -> int:
+        return len(self._listeners)
+
+
 def _arg(value: str) -> str:
     return value if re.fullmatch(r"[A-Za-z0-9_./:=,\-]+", value) else shlex.quote(value)
 
@@ -74,6 +129,7 @@ class JobManager:
         self.runs_dir = runs_dir
         self.jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
+        self.audio = LiveAudio()
 
     @property
     def active(self) -> Job | None:
@@ -115,6 +171,8 @@ class JobManager:
             args += ["--agent-opt", f"{key}={value}"]
         if req.get("offline"):
             args.append("--offline")
+        elif req.get("judges") is False:
+            args.append("--no-judges")
         model = req.get("model")
         if model and not req.get("offline"):
             if not MODEL.fullmatch(model):
@@ -131,6 +189,8 @@ class JobManager:
                     if not MODEL.fullmatch(req[key]):
                         raise JobError(f"{key} {req[key]!r} is not valid")
                     args += [flag, req[key]]
+        if req.get("safety"):
+            args.append("--safety")
         if req.get("show_pii"):
             args.append("--show-pii")
         if kind == "run":
@@ -153,6 +213,8 @@ class JobManager:
                 job.summary_path.parent.mkdir(parents=True, exist_ok=True)
                 job.argv = [*args, "--summary", str(job.summary_path)]
             env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "VATF_UI_CHILD": "1"}
+            if self.audio.port:
+                env[PORT_ENV] = str(self.audio.port)
             flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
             job.proc = subprocess.Popen(
                 [sys.executable, "-m", "vatf.cli", *job.argv, "--root", str(self.root)],

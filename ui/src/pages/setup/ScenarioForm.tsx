@@ -26,7 +26,7 @@ export const CHECKS: Record<string, { label: string; help: string; fields: strin
   latency: { label: "Answer time", help: "This call's slow answers (p95) stay under a limit. Voice only.", fields: ["p95_ms", "min_answers"] },
   max_turns: { label: "Conversation length", help: "The caller needs at most this many turns.", fields: ["n"] },
   handoff: { label: "Handed over", help: "Multi-agent platforms: the call was handed to this sub-agent.", fields: ["to"] },
-  judge: { label: "AI judge question", help: "A yes/no question for the AI judge (Phase 3; skipped until then, never blocks yet).", fields: ["intent"] },
+  judge: { label: "AI judge question", help: "A yes/no question the AI judges answer from the conversation. It is only an opinion until your labels show the judges get it right; then it can block.", fields: ["intent", "pass_when", "fail_when", "applies_when", "rubric"] },
 };
 
 interface Ctx { tools: string[]; writeTools: string[]; probes: string[]; facts: string[] }
@@ -52,6 +52,12 @@ function CheckFields({ check, set, ctx }: { check: Obj; set: (k: string, v: Json
         return <Field key={f} label="Pattern (regular expression)" hint="(?i) at the start ignores case."><Text mono value={str(check[f])} onChange={(v) => set(f, v)} /></Field>;
       case "intent":
         return <Field key={f} label="Question" className="sm:col-span-2"><Text value={str(check[f])} onChange={(v) => set(f, v)} placeholder="Did the agent read back the date and time before booking?" /></Field>;
+      case "pass_when": case "fail_when": case "applies_when":
+        return <Field key={f} label={{ pass_when: "Passes when", fail_when: "Fails when", applies_when: "Only applies when" }[f]}
+          hint={f === "applies_when" ? "Empty: always." : undefined}><Text value={str(check[f])} onChange={(v) => set(f, v || undefined)} /></Field>;
+      case "rubric":
+        return <Field key={f} label="Or reuse a judge item" hint="Instead of a question: a built-in or custom item id from the AI judges setup, e.g. grounded-facts.">
+          <Text mono value={str(check[f])} onChange={(v) => set(f, v || undefined)} placeholder="grounded-facts" /></Field>;
       default:
         return <Field key={f} label={f}><Text mono value={str(check[f])} onChange={(v) => set(f, v)} /></Field>;
     }

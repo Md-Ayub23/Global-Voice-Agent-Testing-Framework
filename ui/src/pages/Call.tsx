@@ -2,14 +2,14 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LatencyBars, Waveform } from "../components/charts";
 import { Icon } from "../components/Icon";
-import { ChecksList, OutcomeNotice } from "../components/runbits";
+import { ChecksList, JudgeList, OutcomeNotice } from "../components/runbits";
 import { RowsTable, Timeline, type TimelineHandle } from "../components/Timeline";
 import { Badge, Button, Card, CardHead, Chip, Legend, Notice, Seg, Skeleton, Table } from "../components/ui";
 import { api } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
 import { projectHref } from "../lib/links";
 import { fmtDate, fmtDuration, fmtMs, money, shortScenario } from "../lib/format";
-import type { CallDetail, Project, RunDetail } from "../lib/types";
+import type { CallDetail, Check, Project, RunDetail } from "../lib/types";
 
 function Kpi({ label, value, foot }: { label: string; value: ReactNode; foot?: ReactNode }) {
   return (
@@ -56,6 +56,9 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
   const next = idx >= 0 ? finals[idx + 1] : undefined;
   const final = run.calls.find((x) => x.test_id === testId)?.final;
   const running = run.summary.status === "running";
+  const own = (v?.checks || []).filter((x) => x.origin !== "judge");
+  const judged = (v?.checks || []).filter((x) => x.origin === "judge");
+  const judgedRan = judged.some((x) => x.judge?.votes?.length);
 
   const onEvidence = (seq: number) => {
     if (view === "chat") tl.current?.flash(seq);
@@ -97,7 +100,8 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
         <Kpi label="Call length" value={fmtDuration(m.duration_ms)} foot={fmtDate(r.started_at)} />
         <Kpi label={voice ? "Response time p50" : "Agent processing p50"} value={fmtMs(m.latency_p50_ms)}
           foot={voice ? `p95 ${fmtMs(m.latency_p95_ms)}${limits ? ` · limit ${fmtMs(limits.p95)}` : ""}` : "text mode: not gated"} />
-        <Kpi label="Framework cost" value={money(r.cost_usd)} foot={`caller + validator${c.llm_logs ? ` · ${c.llm_logs} LLM log(s)` : ""}`} />
+        <Kpi label="Framework cost" value={money((r.cost_usd || 0) + (m.judge_cost_usd || 0))}
+          foot={`caller + validator${m.judge_cost_usd ? ` + judges ${money(m.judge_cost_usd)}` : ""}${c.llm_logs ? ` · ${c.llm_logs} AI log(s)` : ""}`} />
       </div>
 
       <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_400px]">
@@ -152,13 +156,28 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
             </Card>
           )}
           <Card>
-            <CardHead title="Checks" sub={v ? `${v.checks.filter((x) => x.result === "PASS").length} of ${v.checks.length} passed` : undefined} />
+            <CardHead title="Checks" sub={v ? `${own.filter((x) => x.result === "PASS").length} of ${own.length} passed` : undefined} />
             <div id="checks">
               {v ? <ChecksList verdict={v} onEvidence={onEvidence} />
                 : <div className="text-muted text-[12.5px]">{running ? "This call has no verdict yet." : "The run was stopped during this call, so it was never judged."}</div>}
             </div>
             <div className="text-muted text-[11.5px] mt-2">Click an event number to see it in the conversation.</div>
           </Card>
+          {v && judged.length > 0 && (
+            <Card id="judges">
+              <CardHead title="AI judges" sub={judgedRan ? judgeSub(judged) : "not run"}>
+                <Button size="sm" variant="ghost" href={projectHref(project.key, "/judges")}>About</Button>
+              </CardHead>
+              {v.status === "PASS" && judged.some((x) => ["FAIL", "NEEDS_REVIEW"].includes(x.result) && !x.can_block) && (
+                <Notice className="mb-3 text-[12.5px]">
+                  <b>Why the call still passed:</b> hard checks decide a call (tools, database, what must and mustn't be said),
+                  plus judge items you have learned to trust. The items marked <i>not trusted yet</i> are the judges' opinion:
+                  shown, never counted. Label this call to tell them whether they were right; that is how an item earns trust.
+                </Notice>
+              )}
+              <JudgeList verdict={v} onEvidence={onEvidence} labelHref={judgedRan && final !== false ? projectHref(project.key, `/labels/${runId}/${testId}`) : undefined} />
+            </Card>
+          )}
           {m.latency_turns && m.latency_turns.length > 0 && (
             <Card>
               <CardHead title="Response times" sub="end of the caller's words → first sound of the answer" />
@@ -192,4 +211,11 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
       </div>
     </>
   );
+}
+
+function judgeSub(judged: Check[]): string {
+  const problems = judged.filter((x) => x.result === "FAIL" && (x.can_block || x.judge?.human)).length;
+  const opinions = judged.filter((x) => x.result === "FAIL" && !x.can_block && !x.judge?.human).length;
+  const you = judged.filter((x) => x.result === "NEEDS_REVIEW").length;
+  return [`${problems} problem(s)`, opinions ? `${opinions} opinion(s) not trusted yet` : "", you ? `${you} need you` : ""].filter(Boolean).join(" · ");
 }

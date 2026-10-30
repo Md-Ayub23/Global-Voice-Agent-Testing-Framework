@@ -27,6 +27,9 @@ tools: []
 backend:
   access: none
 
+judges:
+  enabled: false                          # a timing reference: nothing to judge
+
 thresholds:
   repeats: 1
   pass_k_required: 1
@@ -35,3 +38,6 @@ thresholds:
 
 limits:
   max_call_seconds: 60
+
+safety:
+  enabled: false   # a timing reference, not a real agent

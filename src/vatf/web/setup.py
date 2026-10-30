@@ -32,12 +32,13 @@ from . import data
 PROJECTS_DIR = "projects"
 ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SECTIONS = {"name", "description", "domain", "languages", "connection", "test_id", "tools", "tool_gateway",
-            "backend", "logs", "thresholds", "limits", "pii"}
+            "backend", "logs", "judges", "safety", "thresholds", "limits", "pii"}
 
 # Framework defaults, shown in the forms as what an empty field means (client_profile.schema.yaml).
 DEFAULTS = {
     "thresholds": {"repeats": 3, "pass_k_required": None, "latency_p50_ms": 800, "latency_p95_ms": 1500,
-                   "min_coverage": 0.9, "judge_min_kappa": 0.6, "max_harness_retries": 2},
+                   "min_coverage": 0.9, "judge_min_labels": 20, "judge_min_fails": 5,
+                   "judge_min_tpr": 0.9, "judge_min_tnr": 0.9, "max_harness_retries": 2},
     "limits": {"max_turns": 30, "max_call_seconds": 300, "max_reply_tokens": 400, "budget_usd": 5,
                "parallel_calls": 1, "end_of_turn_ms": 1000, "no_reply_ms": 15000},
 }

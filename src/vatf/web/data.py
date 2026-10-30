@@ -20,7 +20,7 @@ from typing import Any, Mapping
 
 import yaml
 
-from .. import __version__
+from .. import __version__, attacks
 from ..contracts.models import TraceEvent
 from ..evidence import TEXT_FIELDS, mask_events
 from ..llm import DEFAULT_MODEL
@@ -118,6 +118,8 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
         "offline_options": {k: str(v) for k, v in conn.get("offline_options", {}).items()},
         "bugs": bug_switches(root, conn),
         "thresholds": th, "limits": p.get("limits", {}),
+        "judges": (p.get("judges") or {}).get("enabled", True) is not False,
+        "safety": _safety_info(p, project),
         "tools": [{"name": t["name"], "effect": t.get("effect", "")} for t in p.get("tools", [])],
         "backend": p.get("backend", {}).get("access", "none"),
         "logs": p.get("logs", {}).get("source", "none"),
@@ -131,11 +133,19 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
             + (1 if s.get("outcome") else 0),
             "faults": [f"{f.get('tool')}: {f.get('type')}" for f in s.get("setup", {}).get("faults", [])],
             "audio": s.get("audio", {}),
-        } for s in project.scenarios],
+        } for s in project.scenarios if not attacks.is_safety(s)],
         "personas": [{"id": k, "description": v.get("description", ""),
                       "voice": v.get("speech", {}).get("tts_voice")} for k, v in project.personas.items()],
     })
     return info
+
+
+def _safety_info(profile: dict[str, Any], project) -> dict[str, Any]:
+    """The built-in safety tests in short (the Safety tests card has the full list)."""
+    c = attacks.catalog(profile, list(project.personas))
+    return {"enabled": c["settings"]["enabled"], "intensity": c["settings"]["intensity"],
+            "attacks": sum(a["on"] for a in c["attacks"]), "calls": c["calls"],
+            "packs": sum(p["count"] > 0 for p in c["packs"])}
 
 
 def project_keys(root: Path, folders: list[Path] | None = None) -> dict[str, str]:
@@ -320,7 +330,11 @@ def run_summary(runs: Path, run_id: str, active_runs: set[str] = frozenset()) ->
         "planned": len(info["plan"]) if info.get("plan") else (decision or {}).get("coverage", {}).get("planned_calls"),
         "calls_started": len(records), "counts": counts,
         "p50_ms": lat.get("p50_ms"), "p95_ms": lat.get("p95_ms"),
-        "cost_usd": round(sum(r.get("cost_usd") or 0 for r in records), 4),
+        "cost_usd": round(sum(r.get("cost_usd") or 0 for r in records) + (info.get("judge_cost_usd") or 0), 4),
+        "needs_review": (decision or {}).get("coverage", {}).get("needs_review_calls", 0),
+        "judge_fails": sum(j.get("failed", 0) for j in (decision or {}).get("judges", [])),
+        "safety": ({k: (decision or {})["safety"].get(k, 0) for k in ("calls", "passed", "failed", "to_review")}
+                   if (decision or {}).get("safety") else None),
         "has_report": (folder / "report.html").exists(),
     }
 
@@ -348,7 +362,12 @@ def _call_brief(folder: Path) -> dict[str, Any] | None:
             "headline": next((c["message"] for c in checks if c["check_id"] == "outcome"), ""),
             "outcome_class": (verdict.get("outcome") or {}).get("class"),
             "check_counts": {r: sum(c["result"] == r for c in checks) for r in {c["result"] for c in checks}},
-            "failed_checks": [c["check_id"] for c in checks if c["result"] in ("FAIL", "ERROR")],
+            # Failures that count for the call; advisory judge findings (not calibrated yet) are listed apart,
+            # so a PASS call doesn't show red chips that didn't change its result.
+            "failed_checks": [c["check_id"] for c in checks if c["result"] in ("FAIL", "ERROR")
+                              and c.get("can_block", True)],
+            "judge_flags": [c["check_id"] for c in checks if c["result"] == "FAIL" and not c.get("can_block", True)],
+            "needs_you": [c["check_id"] for c in checks if c["result"] == "NEEDS_REVIEW" and c.get("origin") == "judge"],
             "metrics": verdict.get("metrics", {}),
         })
     return out

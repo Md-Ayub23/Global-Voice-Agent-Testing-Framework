@@ -11,11 +11,11 @@ import { cx, fmtMs, money, pct } from "../lib/format";
 import { domainLabel, modeLabel, projectHref, projectOfJob, runHref } from "../lib/links";
 import { navigate } from "../lib/router";
 import { decisionTitle } from "../lib/status";
-import type { Project, ProjectOverview, ProjectStats } from "../lib/types";
+import type { JudgeSummary, Project, ProjectOverview, ProjectStats, RunSummary } from "../lib/types";
 
 interface Step { key: string; title: string; icon: IconName; done: boolean; need: "required" | "recommended" | "optional"; text: string; href: string; problem?: boolean }
 
-function stepsOf(p: Project, stats: ProjectStats): Step[] {
+function stepsOf(p: Project, stats: ProjectStats, judges?: JudgeSummary, safetyRun?: RunSummary): Step[] {
   const main = p.profiles.find((x) => x.file === "profile.yaml") || p.profiles[0];
   const k = p.key;
   const tools = main?.tools?.length ?? 0;
@@ -31,6 +31,15 @@ function stepsOf(p: Project, stats: ProjectStats): Step[] {
       text: main?.logs && main.logs !== "none" ? "Agent logs collected" : "Keep the agent's logs with each call" },
     { key: "plan", title: "Test plan", icon: "plan", need: "required", href: projectHref(k, "/setup/plan"), done: stats.scenarios > 0,
       text: stats.scenarios ? `${stats.scenarios} scenario${stats.scenarios === 1 ? "" : "s"} · ${stats.personas} persona${stats.personas === 1 ? "" : "s"}` : "Add scenarios and callers" },
+    { key: "judges", title: "AI judges", icon: "scale", need: "recommended", href: projectHref(k, judges?.labelled_calls ? "/judges" : "/setup/judges"),
+      done: !!judges && judges.items > 0 && main?.judges !== false && !!judges.labelled_calls,
+      text: main?.judges === false ? "Off: turn on to check tone and facts" : !judges ? "Check tone, facts and scope"
+        : judges.labelled_calls ? `${judges.calibrated} of ${judges.items} items trusted to block` : `${judges.items} items · label calls to trust them` },
+    { key: "safety", title: "Safety tests", icon: "shield", need: "recommended", href: projectHref(k, safetyRun ? `/runs/${safetyRun.run_id}` : "/setup/plan"),
+      done: !!safetyRun, problem: !!safetyRun?.safety?.failed,
+      text: main?.safety?.enabled === false ? "Off: turn on to try attacks on the agent"
+        : safetyRun?.safety ? `Last run: ${safetyRun.safety.passed} of ${safetyRun.safety.calls} attacks handled safely`
+        : `${main?.safety?.attacks ?? 0} attack calls ready · include them in a run` },
     { key: "run", title: "First run", icon: "play", need: "required", href: projectHref(k, "/new"), done: stats.runs > 0,
       text: stats.runs ? `${stats.runs} run${stats.runs === 1 ? "" : "s"} so far` : "Start a test run" },
   ];
@@ -79,7 +88,8 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton height={520} />;
   const s = data.stats;
-  const steps = stepsOf(data.project, s);
+  const steps = stepsOf(data.project, s, data.judges, data.recent_runs.find((r) => r.safety));
+  const j = data.judges;
   const last = s.last_decided;
   const running = activeJob && projectOfJob(activeJob, projects)?.key === project.key;
   const lat = s.latency, lim = s.latency_limits;
@@ -119,6 +129,13 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
             </div>
           </Hero>
         ) : null}
+
+        {j && j.to_review > 0 && (
+          <Notice tone="warn" icon="eye" className="flex-wrap">
+            <b>The AI judges disagree on {j.to_review} call(s).</b> Your label settles each one and teaches Vocto which judge to trust.{" "}
+            <a href={projectHref(project.key, "/labels")}>Label calls</a>
+          </Notice>
+        )}
 
         <SetupSteps steps={steps} />
 

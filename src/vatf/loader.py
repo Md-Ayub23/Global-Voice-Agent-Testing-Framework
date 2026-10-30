@@ -11,6 +11,8 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
+from . import attacks
+from .rubrics import library, unknown_items
 from .util import sha256_file
 
 # The schemas live at the repository root, next to src/.
@@ -21,9 +23,20 @@ class ProjectError(Exception):
     """The project files are invalid. Nothing has been run."""
 
 
+_validators: dict[str, tuple[float, Draft202012Validator]] = {}
+
+
 def schema_validator(name: str) -> Draft202012Validator:
-    data = yaml.safe_load((SCHEMA_DIR / f"{name}.schema.yaml").read_text(encoding="utf-8"))
-    return Draft202012Validator(data)
+    """The schema's validator, read once and again only when the file changes (a project with safety
+    tests checks dozens of generated scenarios, and the dashboard loads projects often)."""
+    path = SCHEMA_DIR / f"{name}.schema.yaml"
+    mtime = path.stat().st_mtime
+    cached = _validators.get(name)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    validator = Draft202012Validator(yaml.safe_load(path.read_text(encoding="utf-8")))
+    _validators[name] = (mtime, validator)
+    return validator
 
 
 def schema_errors(name: str, doc: Any) -> list[str]:
@@ -92,6 +105,7 @@ def load_project(folder: str | Path, profile_file: str = "profile.yaml") -> Proj
 
     profile, profile_sha256 = load_profile(folder, profile_file)
     problems += [f"{profile_file}: {e}" for e in schema_errors("client_profile", profile)]
+    problems += [f"{profile_file}: judges.items: unknown rubric item {i!r}" for i in unknown_items(profile)]
 
     personas = {}
     for path in sorted((folder / "personas").glob("*.yaml")):
@@ -110,9 +124,19 @@ def load_project(folder: str | Path, profile_file: str = "profile.yaml") -> Proj
         scenarios.append(doc)
         hashes[doc.get("id", path.stem)] = sha256_file(path)
 
+    has_files = bool(scenarios)
+    # The built-in safety tests (attacks.py), written from the profile. A file with the same id wins.
+    for doc in attacks.generate(profile, list(personas)):
+        if doc["id"] in hashes:
+            continue
+        problems += [f"safety test {doc['id']}: {e}" for e in schema_errors("scenario", doc)]
+        problems += [f"safety test {doc['id']}: {e}" for e in _reference_problems(doc, profile, personas, tools, probes)]
+        scenarios.append(doc)
+        hashes[doc["id"]] = attacks.digest(doc)
+
     if problems:
         raise ProjectError("the project files have problems:\n  " + "\n  ".join(problems))
-    if not scenarios:
+    if not has_files:
         raise ProjectError(f"no scenarios found in {folder / 'scenarios'}")
     return Project(folder, profile, profile_sha256, personas, scenarios, hashes, profile_file)
 
@@ -128,6 +152,7 @@ def _reference_problems(sc, profile, personas, tools, probes) -> list[str]:
         if fault.get("tool") not in tools:
             out.append(f"fault on unknown tool {fault.get('tool')!r}")
     checks = list(sc.get("checks", [])) + [c for t in sc.get("turns", []) for c in t.get("expect", [])]
+    known_items = set(library()) | {c["id"] for c in (profile.get("judges") or {}).get("custom", [])}
     for c in checks:
         for key in ("tool", "first", "then"):
             if key in c and c[key] not in tools:
@@ -137,6 +162,8 @@ def _reference_problems(sc, profile, personas, tools, probes) -> list[str]:
         for name in c.get("entities", []):
             if name not in facts:
                 out.append(f"entity {name!r} is not a caller fact")
+        if c.get("type") == "judge" and c.get("rubric") and not c.get("intent") and c["rubric"] not in known_items:
+            out.append(f"judge check uses unknown rubric item {c['rubric']!r} (give intent: for a one-off question)")
     out_block = sc.get("outcome")
     if out_block:
         action = out_block["action"]["tool"]

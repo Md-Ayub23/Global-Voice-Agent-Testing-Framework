@@ -11,7 +11,7 @@ const STATUS: Record<string, [Tone, StatusIcon, string]> = {
   PASS: ["good", "check", "Pass"],
   FAIL: ["bad", "x", "Fail"],
   ERROR: ["warn", "alert", "Vocto error"],
-  NOT_VERIFIED: ["warn", "help", "Unsure"],
+  NOT_VERIFIED: ["warn", "help", "Not verified"],
   NEEDS_REVIEW: ["warn", "help", "Needs review"],
   NOT_APPLICABLE: ["neutral", "minus", "N/A"],
   running: ["run", null, "Running"],

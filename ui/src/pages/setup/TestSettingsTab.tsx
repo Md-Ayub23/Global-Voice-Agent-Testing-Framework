@@ -12,7 +12,10 @@ const GATE: Row[] = [
   ["repeats", "Repeats per scenario", "Each scenario is run this many times: agents are not deterministic."],
   ["pass_k_required", "Repeats a critical scenario must pass", "Default: all of them (pass^k)."],
   ["min_coverage", "Minimum verified share (0 to 1)", "Calls that end PASS or FAIL (not error / not verified) out of all planned. Below it: NO-GO, not enough evidence.", 0.05],
-  ["judge_min_kappa", "Judge agreement needed to block (kappa)", "AI judges (Phase 3) below this agreement with human labels only advise.", 0.05],
+  ["judge_min_labels", "Labelled calls needed per judge item", "Calls you labelled for an item before the judges can be trusted on it. More labels, more trustworthy."],
+  ["judge_min_fails", "Of those, failures needed (and as many passes)", "So the judges are tested on real problems, not only on good calls. Bug-switch runs give you failures to label."],
+  ["judge_min_tpr", "Real failures the judges must catch (0 to 1)", "Of the calls you labelled Fail, the share the judges failed too. Below it, the item only gives an opinion.", 0.05],
+  ["judge_min_tnr", "Good calls the judges must pass (0 to 1)", "Of the calls you labelled Pass, the share the judges passed too. Below it, the item only gives an opinion.", 0.05],
   ["max_harness_retries", "Retries after a Vocto error", "A call that fails because of Vocto itself is run again (never blamed on the agent)."],
 ];
 const LIMITS: Row[] = [

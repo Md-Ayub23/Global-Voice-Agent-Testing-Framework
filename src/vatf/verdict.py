@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Mapping, Sequence
 
 from .contracts.models import CallTrace, CheckResult, Result
@@ -40,14 +41,48 @@ def merge_results(base: Sequence[CheckResult], judge_results: Sequence[CheckResu
 
 
 def rollup(results: Sequence[CheckResult], harness_error: bool) -> str:
+    return status_of([check_dict(r) for r in results], harness_error)
+
+
+def status_of(checks: Sequence[Mapping[str, Any]], harness_error: bool) -> str:
+    """A call's status from its check results (dicts as in verdict.json)."""
     if harness_error:
         return Result.ERROR.value
-    counted = [r.result for r in results if r.result != Result.NOT_APPLICABLE
-               and not (r.result == Result.FAIL and not r.can_block)]
+    # An advisory result (can_block false: an uncalibrated judge item) is shown but never sets the status,
+    # unless it passed.
+    counted = [c["result"] for c in checks if c["result"] != Result.NOT_APPLICABLE.value
+               and (c.get("can_block", True) or c["result"] == Result.PASS.value)]
     for level in ROLLUP:
-        if level in counted:
+        if level.value in counted:
             return level.value
     return Result.PASS.value if counted else Result.NOT_VERIFIED.value
+
+
+NUMBER = re.compile(r"\d(?:[\d -]*\d)?")   # "01632 960 000", "8", "1-800": digits with spaces or dashes
+
+
+def heard_numbers(events) -> dict[str, Any] | None:
+    """Voice calls where the agent reports its own words: were the numbers it said heard correctly by
+    the caller's speech recognition? A mishearing is not the agent's mistake, but it is worth knowing:
+    a real caller may mishear the same number (say it slower, or in groups). None without own words."""
+    said = 0
+    misheard = []
+    seen = False
+    for e in events:
+        d = e.data if hasattr(e, "data") else e["data"]
+        if (e.type if hasattr(e, "type") else e["type"]) != "agent_turn" or not d.get("platform_transcript"):
+            continue
+        seen = True
+        # Each number must come back whole: "960 000, 8am" heard as "960 0008 am" is two numbers run into one.
+        heard = {re.sub(r"\D", "", m.group(0)) for m in NUMBER.finditer(d.get("heard_text", ""))}
+        for m in NUMBER.finditer(d["platform_transcript"]):
+            said += 1
+            if re.sub(r"\D", "", m.group(0)) not in heard:
+                misheard.append({"seq": e.seq if hasattr(e, "seq") else e["seq"], "said": m.group(0),
+                                 "heard": d.get("heard_text", "")[:160]})
+    if not seen:
+        return None
+    return {"numbers": said, "heard_right": said - len(misheard), "misheard": misheard[:10]}
 
 
 def call_metrics(trace: CallTrace) -> dict[str, Any]:
@@ -63,6 +98,9 @@ def call_metrics(trace: CallTrace) -> dict[str, Any]:
         metrics["latency_turns"] = rows
         metrics["latency_p50_ms"] = percentile(counted, 50)
         metrics["latency_p95_ms"] = percentile(counted, 95)
+        heard = heard_numbers(events)
+        if heard:
+            metrics["heard_numbers"] = heard
     else:
         latencies, last_caller = [], None
         for e in events:

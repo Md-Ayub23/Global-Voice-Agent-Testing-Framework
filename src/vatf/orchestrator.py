@@ -9,8 +9,10 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
+from .attacks import is_safety
+from .calibration import calibration
 from .caller import LLMCaller, LLMValidator, RuleCaller, ScriptedCaller
 from .checks import scenario_checks
 from .connectors import ConnectError, build_connector
@@ -20,17 +22,19 @@ from .decision import LocalDecisionEngine
 from .evidence import LocalEvidenceStore, utc_now
 from .llm import DEFAULT_MODEL
 from .gateway import GatewayError, ToolGateway, gateway_address, uses_gateway
+from .judges import JudgePanel, judge_settings, skipped
 from .loader import Project, ProjectError
 from .logs import LogCollector
 from .outcome import evaluate_outcome
 from .probe import BackendProbe, ProbeSetupError, load_fixtures
 from .proxy import InProcessToolProxy
 from .report import write_report
+from .rubrics import items_for_call
 from .speech import SpeechConfig
 from .speech.local import blocked_hint
 from .story import call_story_text, load_events, run_story_text
 from .util import MissingSecret, expand_env, write_json
-from .verdict import LocalVerdictBuilder
+from .verdict import LocalVerdictBuilder, merge_results
 
 
 class RunSetupError(ProjectError):
@@ -54,6 +58,8 @@ class RunConfig:
     scenario_ids: tuple[str, ...] = ()            # empty = all scenarios
     mask_pii: bool = True                         # False (--show-pii) keeps names and dates readable
     speech: SpeechConfig = field(default_factory=SpeechConfig)  # voice mode: the caller's TTS and STT
+    judges: bool = True                           # False (--no-judges): skip the AI judges for this run
+    safety: bool = False                          # True (--safety): add the built-in safety tests (attacks.py)
 
 
 class Orchestrator:
@@ -68,6 +74,8 @@ class Orchestrator:
         self._counter = 0
         self._run_date = ""
         self._gateway: ToolGateway | None = None
+        self._calibration: dict[str, dict[str, Any]] | None = None
+        self._judge_cost = 0.0
 
     @property
     def mode(self) -> str:
@@ -78,12 +86,19 @@ class Orchestrator:
     def scenarios(self) -> list[Mapping[str, Any]]:
         # A scenario runs in the modes it lists (default: both); e.g. barge-in needs voice.
         chosen = [s for s in self.project.scenarios if self.mode in s.get("modes", ["text", "voice"])]
+        safety = [s for s in chosen if is_safety(s)
+                  # Adaptive attackers need the Claude caller: not in a free dry run.
+                  and not (self.config.offline and "adaptive" in s.get("tags", []))]
+        chosen = [s for s in chosen if not is_safety(s)]
         if self.config.scenario_ids:
-            unknown = set(self.config.scenario_ids) - {s["id"] for s in chosen}
+            known = {s["id"] for s in chosen} | {s["id"] for s in safety}
+            unknown = set(self.config.scenario_ids) - known
             if unknown:
                 raise KeyError(f"unknown scenario(s): {', '.join(sorted(unknown))}")
-            chosen = [s for s in chosen if s["id"] in self.config.scenario_ids]
-        return chosen
+            picked = [s for s in chosen + safety if s["id"] in self.config.scenario_ids]
+            # The safety tests come in whole with --safety, even when other scenarios are picked.
+            return picked + [s for s in safety if self.config.safety and s not in picked]
+        return chosen + (safety if self.config.safety else [])
 
     def repeats_for(self, scenario: Mapping[str, Any]) -> int:
         return self.config.repeats or scenario.get("repeats") or self.profile.get("thresholds", {}).get("repeats", 3)
@@ -128,7 +143,7 @@ class Orchestrator:
                 self._gateway.stop()
                 self._gateway = None
         info.update(status="finished", finished_at=utc_now(), decision=decision["decision"],
-                    exit_code=decision["exit_code"])
+                    exit_code=decision["exit_code"], judge_cost_usd=round(self._judge_cost, 6))
         write_json(run_dir / "run.json", info)
         return decision
 
@@ -155,8 +170,10 @@ class Orchestrator:
             "project": Path(self.project.folder).as_posix(), "profile_file": self.project.profile_file,
             "profile_id": self.profile["id"], "profile_name": self.profile.get("name", self.profile["id"]),
             "mode": self.mode, "offline": cfg.offline, "repeats": cfg.repeats,
-            "scenario_ids": list(cfg.scenario_ids), "agent_options": dict(self.profile["connection"].get("options", {})),
+            "scenario_ids": list(cfg.scenario_ids), "safety": cfg.safety, "agent_options": dict(self.profile["connection"].get("options", {})),
             "caller_model": None if cfg.offline else cfg.caller_model, "pii_masked": cfg.mask_pii,
+            "judges": ({"enabled": False, "why": self._judges_off()} if self._judges_off() else
+                       {k: v for k, v in judge_settings(self.profile).items() if k != "policy"}),
             "plan": [{"scenario_id": pc.scenario_id, "persona_id": pc.persona_id, "repeat": pc.repeat} for pc in plan],
         }
         if self.mode == "voice":
@@ -299,9 +316,51 @@ class Orchestrator:
 
         writer.lock(status, cost_usd=self._spent() - cost_before)
         trace = self.store.read_call(run_id, ctx.test_id)
-        verdict = self.evaluate(trace, scenario, validator_off_script)
+        judge_before = self._spent()
+        judged, notes = await self._judge(trace, scenario, status, meta)
+        verdict = self.evaluate(trace, scenario, validator_off_script, judged)
+        if notes:
+            verdict["judge_notes"] = notes
+        verdict["metrics"]["judge_cost_usd"] = round(self._spent() - judge_before, 6)
+        self._judge_cost += self._spent() - judge_before
         self.store.write_verdict(run_id, ctx.test_id, verdict)
         return verdict
+
+    # ---- AI judges ------------------------------------------------------
+    def _judges_off(self) -> str | None:
+        """Why the judges do not run for this run, or None when they do."""
+        if not judge_settings(self.profile)["enabled"]:
+            return "Judges are switched off for this agent."
+        if not self.config.judges:
+            return "Judges were switched off for this run."
+        if self.config.offline:
+            return "Judges do not run in offline runs (they need an AI model)."
+        if self.llm is None:
+            return "Judges need an AI model (set ANTHROPIC_API_KEY)."
+        return None
+
+    def calibration(self) -> dict[str, dict[str, Any]]:
+        """Each judge item's calibration, read once per run from the project's labels."""
+        if self._calibration is None:
+            items = {i.id: i for sc in self.scenarios() for i in items_for_call(self.profile, sc)}
+            self._calibration = calibration(self.project.folder, self.profile, list(items.values()))
+        return self._calibration
+
+    async def _judge(self, trace: CallTrace, scenario: Mapping[str, Any], status: str,
+                     meta: Mapping[str, str]) -> tuple[list[CheckResult], list[str]]:
+        items = items_for_call(self.profile, scenario)
+        off = self._judges_off()
+        if off or status == "harness_error":
+            return skipped(items, off or "Not judged: the call did not complete."), []
+        events = [{"seq": e.seq, "t_ms": e.t_ms, "source": e.source, "type": e.type, "data": e.data, "turn": e.turn}
+                  for e in trace.events]
+        panel = JudgePanel(self.llm, self.profile, self.calibration(), metadata=meta)
+        try:
+            return await panel.judge(events, scenario, items, self.mode)
+        except Exception as e:  # noqa: BLE001 - budget used up, or the API failed: judges are not the agent's fault
+            why = "the run's budget is used up" if type(e).__name__ == "BudgetExceeded" else f"{type(e).__name__}: {e}"
+            self.log(f"    judges could not run: {why}")
+            return skipped(items, f"Not judged: {why}."), [f"judges could not run: {why}"]
 
     # ---- one conversation, text or voice ------------------------------------
     def _limits(self, scenario: Mapping[str, Any]) -> tuple[int, float]:
@@ -359,6 +418,7 @@ class Orchestrator:
     async def _converse_voice(self, ctx, scenario, caller, proxy, writer, live) -> tuple[str, str, int]:
         from .audio.noise import load_noise
         from .audio.recorder import Line, Recorder
+        from .audio.tap import LiveTap
         from .speech import make_stt, make_tts
         from .voice_call import VoiceConversation, VoiceSettings
 
@@ -385,6 +445,7 @@ class Orchestrator:
         line = Line(rec, session.send_frame, noise)
         live.update(session=session, line=line, recorder=rec)
         line.start()
+        live["tap"] = LiveTap.from_env(rec, f"{ctx.test_id} {scenario['id']}")   # dashboard's "Listen live"
 
         behaviour = persona.get("behaviour", {})
         settings = VoiceSettings(
@@ -445,8 +506,11 @@ class Orchestrator:
     async def _hang_up(self, live: dict[str, Any], writer) -> None:
         """Close whatever is open; in voice mode save the recording (also after a harness error)."""
         line, session, rec = live.pop("line", None), live.pop("session", None), live.pop("recorder", None)
+        tap = live.pop("tap", None)
         if line is not None:
             await line.stop()
+        if tap is not None:
+            await tap.stop()
         if session is not None:
             try:
                 await session.close()
@@ -549,7 +613,7 @@ class Orchestrator:
 
     # ---- evaluation -----------------------------------------------------
     def evaluate(self, trace: CallTrace, scenario: Mapping[str, Any],
-                 validator_off_script: bool | None) -> dict[str, Any]:
+                 validator_off_script: bool | None, judged: Sequence[CheckResult] = ()) -> dict[str, Any]:
         facts = scenario.get("caller", {}).get("facts", {})
         salt = trace.record["test_id"]
         events = list(trace.events)
@@ -569,7 +633,7 @@ class Orchestrator:
                 message=("The simulated caller went off script: " + "; ".join(e.data.get("problems", []))
                          if off else "The simulated caller kept to its goal and facts."),
                 evidence=(EvidenceRef(e.seq),), evidence_level=EvidenceLevel.AI_OPINION))
-        return LocalVerdictBuilder().build(trace, results, block)
+        return LocalVerdictBuilder().build(trace, merge_results(results, judged), block)
 
 
 def _error_code(e: Exception) -> str:

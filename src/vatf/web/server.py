@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import queue
 import re
+import struct
 import sys
 import threading
 import time
@@ -19,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import data, setup
+from . import data, judging, safety, setup
 from ..loader import ProjectError
 from .jobs import JobError, JobManager
 
@@ -132,7 +134,34 @@ def make_handler(app: App):
 
     @route("GET", r"/api/project/([\w.\-]+)")
     def get_project(h, q, key):
-        return data.project_overview(app.root, app.runs, key, app.active_runs())
+        out = data.project_overview(app.root, app.runs, key, app.active_runs())
+        return {**out, "judges": judging.judges_page(app.root, app.runs, key, app.active_runs())["summary"]}
+
+    @route("GET", r"/api/project/([\w.\-]+)/judges")
+    def get_judges(h, q, key):
+        return judging.judges_page(app.root, app.runs, key, app.active_runs())
+
+    @route("POST", r"/api/project/([\w.\-]+)/judges/examples")
+    def post_judge_example(h, q, key):
+        return judging.teach(app.root, key, h.body())
+
+    @route("GET", r"/api/project/([\w.\-]+)/safety")
+    def get_safety(h, q, key):
+        return safety.safety_page(app.root, app.runs, key, q.get("file", "profile.yaml"), app.active_runs())
+
+    @route("GET", r"/api/project/([\w.\-]+)/labels")
+    def get_label_queue(h, q, key):
+        return judging.label_queue(app.root, app.runs, key, app.active_runs())
+
+    @route("GET", r"/api/runs/(r-[\w-]+)/calls/(t-[\w-]+)/labels")
+    def get_call_labels(h, q, run_id, test_id):
+        return judging.call_labels(app.root, app.runs, run_id, test_id)
+
+    @route("POST", r"/api/labels")
+    def post_labels(h, q):
+        if app.jobs.active and h.body().get("run_id") in app.active_runs():
+            raise ValueError("this run is still going; label it when it has finished")
+        return judging.save_labels(app.root, app.runs, h.body())
 
     @route("GET", r"/api/runs")
     def get_runs(h, q):
@@ -207,6 +236,10 @@ def make_handler(app: App):
     @route("GET", r"/api/jobs/(j-[\w-]+)/stream")
     def stream(h, q, job_id):
         h.stream_job(job_id)
+
+    @route("GET", r"/api/jobs/(j-[\w-]+)/listen")
+    def listen(h, q, job_id):
+        h.listen_job(job_id)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "vatf-ui"
@@ -396,6 +429,36 @@ def make_handler(app: App):
                     time.sleep(0.4)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 return
+
+        def listen_job(self, job_id: str) -> None:
+            """Listen live: the running call's audio as a stream of length-prefixed tap datagrams."""
+            job = app.jobs.jobs.get(job_id)
+            if job is None:
+                raise data.NotFound("no such run (the dashboard was restarted?)")
+            if job.status != "running":
+                raise ValueError("this run has finished; play the recording on the call page")
+            if not app.jobs.audio.port:
+                raise ValueError("live listening isn't available on this computer")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.close_connection = True
+            audio = app.jobs.audio
+            q = audio.listen()
+            try:
+                while job.status == "running":
+                    try:
+                        packet = q.get(timeout=1.0)
+                    except queue.Empty:
+                        packet = b""            # a heartbeat, so a closed tab is noticed
+                    self.wfile.write(struct.pack(">I", len(packet)) + packet)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                return
+            finally:
+                audio.leave(q)
 
     return Handler
 

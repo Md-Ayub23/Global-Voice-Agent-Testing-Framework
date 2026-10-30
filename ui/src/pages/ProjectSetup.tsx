@@ -1,5 +1,5 @@
 // One project's setup, one page per part: the agent and its connection, tools, backend, logs,
-// test plan and test settings. Every save is checked with the same rules a run uses.
+// test plan (with the safety tests), AI judges and test settings. Every save is checked with the same rules a run uses.
 import type { ReactNode } from "react";
 import { Icon, type IconName } from "../components/Icon";
 import { Button, Notice, Seg, Skeleton } from "../components/ui";
@@ -11,18 +11,20 @@ import { setupApi } from "../lib/setup";
 import type { Project } from "../lib/types";
 import { AgentTab } from "./setup/AgentTab";
 import { BackendTab } from "./setup/BackendTab";
+import { JudgesTab } from "./setup/JudgesTab";
 import { LogsTab } from "./setup/LogsTab";
 import { TestPlanTab } from "./setup/TestPlanTab";
 import { TestSettingsTab } from "./setup/TestSettingsTab";
 import { ToolsTab } from "./setup/ToolsTab";
 
-export type SetupTab = "agent" | "tools" | "backend" | "logs" | "plan" | "settings";
+export type SetupTab = "agent" | "tools" | "backend" | "logs" | "plan" | "judges" | "settings";
 export const SETUP_TABS: { value: SetupTab; label: string; icon: IconName; sub: string }[] = [
   { value: "agent", label: "Agent & connection", icon: "plug", sub: "Who the agent is and how Vocto reaches it." },
   { value: "tools", label: "Tools", icon: "tool", sub: "The APIs the agent calls. Vocto watches every call and can break one on purpose." },
   { value: "backend", label: "Backend & database", icon: "db", sub: "Read-only access, so Vocto checks what really got saved, not what the agent said." },
   { value: "logs", label: "Logs", icon: "logs", sub: "The agent's own log lines, kept next to each call and checked by scenarios." },
-  { value: "plan", label: "Test plan", icon: "plan", sub: "What to test: scenarios (situations) and personas (who calls)." },
+  { value: "plan", label: "Test plan", icon: "plan", sub: "What to test: scenarios (situations), safety tests (attack calls) and personas (who calls)." },
+  { value: "judges", label: "AI judges", icon: "scale", sub: "What the AI judges score in every conversation, and what the agent may say." },
   { value: "settings", label: "Test settings", icon: "sliders", sub: "This agent's limits: response times, repeats, coverage, budget." },
 ];
 
@@ -44,12 +46,13 @@ export function ProjectSetup({ project, tab, query }: { project: Project; tab: S
     tools: () => <ToolsTab key={`t${file}`} detail={detail} reload={reloadAll} />,
     backend: () => <BackendTab key={`b${file}`} detail={detail} reload={reloadAll} />,
     logs: () => <LogsTab key={`l${file}`} detail={detail} reload={reloadAll} />,
-    plan: () => <TestPlanTab detail={detail} reload={reloadAll} edit={edit} />,
+    plan: () => <TestPlanTab detail={detail} reload={reloadAll} edit={edit} projectKey={project.key} />,
+    judges: () => <JudgesTab key={`j${file}`} detail={detail} reload={reloadAll} projectKey={project.key} />,
     settings: () => <TestSettingsTab key={`s${file}`} detail={detail} reload={reloadAll} />,
   };
   const idx = SETUP_TABS.findIndex((t) => t.value === tab);
   const next = SETUP_TABS[idx + 1];
-  const shared = ["tools", "backend", "logs", "plan"].includes(tab);   // the same for every channel
+  const shared = ["tools", "backend", "logs", "plan", "judges"].includes(tab);   // the same for every channel
 
   return (
     <>

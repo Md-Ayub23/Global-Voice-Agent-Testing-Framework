@@ -192,6 +192,112 @@ properties:
       - if: {properties: {source: {const: http}}, required: [source]}
         then: {required: [url]}
 
+  judges:
+    description: >
+      AI judges (L7, Phase 3): two models score every call against rubric items for the soft qualities hard
+      checks cannot see (tone, made-up facts, staying in scope...); a third, stronger model settles items they
+      split on. Their findings are opinions until an item is trusted on a person's labels (thresholds
+      judge_min_labels, judge_min_fails, judge_min_tpr, judge_min_tnr).
+    type: object
+    additionalProperties: false
+    properties:
+      enabled: {type: boolean, default: true}
+      primary_model: {description: "The first judge (default claude-sonnet-5-5).", type: string}
+      secondary_model: {description: "The second, independent judge (default claude-haiku-5-5).", type: string}
+      tiebreak: {description: "Ask a deciding judge when the first two split (two of three decide; safety items still go to a person).", type: boolean, default: true}
+      tiebreak_model: {description: "The deciding judge (default claude-opus-5-5).", type: string}
+      examples:
+        description: >
+          Worked examples from your labels, shown to the judges under their item (at most 3 per item, latest
+          used). Adding one changes the item's wording, so its trust is measured again on new labels.
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [item, said, answer]
+          properties:
+            item: {description: "Rubric item id.", type: string}
+            said: {description: "What the agent said (or did) on that call.", type: string}
+            answer: {enum: [PASS, FAIL]}
+            why: {type: string}
+            from: {description: "The label it came from (<test id>:<item id>); left out of the trust measure.", type: string}
+      policy:
+        description: >
+          What the agent may and may not do, and what it knows (prices, opening hours, refund rules...).
+          The judges use it to tell a made-up answer from a correct one.
+        type: string
+      items:
+        description: >
+          Rubric item ids judged on every call: built-in ones (vatf/rubrics.py) and judges.custom ids.
+          Default: the universal items plus the pack for the profile's domain, plus every custom item.
+        type: array
+        items: {type: string}
+      custom:
+        description: This agent's own rubric items.
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [id, question]
+          properties:
+            id: {type: string, pattern: "^[a-z0-9][a-z0-9._-]*$"}
+            title: {type: string}
+            question: {type: string}
+            pass_when: {type: string}
+            fail_when: {type: string}
+            applies_when: {type: string}
+            section: {enum: [accuracy, experience, security, safety], default: experience}
+            severity: {enum: [blocker, major, minor], default: major}
+
+  safety:
+    description: >
+      Built-in safety tests (src/vatf/attacks.py): attack calls written for this agent from its industry,
+      tools and judge policy. They run when a run asks for them (dashboard: Include safety tests; CLI --safety).
+    type: object
+    additionalProperties: false
+    properties:
+      enabled: {type: boolean, default: true}
+      packs:
+        description: Which packs to run. Default all.
+        type: array
+        items: {enum: [off-topic, secrets, injection, made-up, others-data, harmful, abuse, policy, actions, messy, own]}
+      intensity:
+        description: quick (about 12 calls), standard (about 30, 2 repeats), thorough (all, 3 repeats, adaptive attackers).
+        enum: [quick, standard, thorough]
+        default: standard
+      off_topic:
+        description: strict - decline anything off-topic; friendly - brief small talk is fine (no small-talk attacks).
+        enum: [strict, friendly]
+        default: strict
+      canaries:
+        description: >
+          Planted fake secrets (put them in the agent's test setup or knowledge base). If one is ever said,
+          logged or sent to a tool, the call fails. Use ${NAME} to keep a value in the .env file.
+        type: array
+        items: {type: string, minLength: 4}
+      skip:
+        description: Safety scenario ids to leave out (e.g. safety.messy.other-language).
+        type: array
+        items: {type: string}
+      custom:
+        description: >
+          Your own safety questions, run at every intensity as safety.<pack>.custom-<title>. Put one in any
+          pack, or in "own" for risks only this agent has.
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [lines]
+          properties:
+            pack:
+              enum: [off-topic, secrets, injection, made-up, others-data, harmful, abuse, policy, actions, messy, own]
+              default: own
+            title: {description: "Short name shown in reports.", type: string}
+            lines: {description: "What the caller says, one line per turn. A question with no lines is left out.", type: array, maxItems: 10, items: {type: string}}
+            never_say: {description: "Words or phrases the agent must never say on this call (hard checks). Blank ones are ignored.", type: array, items: {type: string}}
+            safe_answer: {description: "What a safe answer looks like; the AI judges check it.", type: string}
+            blocks: {description: "A never_say hit or a failed safe answer blocks the release.", type: boolean, default: false}
+
   thresholds:
     description: Release gate settings (L8). Every field has a framework default.
     type: object
@@ -211,9 +317,27 @@ properties:
         maximum: 1
         default: 0.9
       judge_min_kappa:
-        description: A judge rubric item below this Cohen's kappa is advisory and cannot block.
+        description: Shown for information only (Cohen's kappa is unstable when nearly every call passes).
         type: number
         default: 0.6
+      judge_min_labels:
+        description: A judge rubric item needs at least this many calls labelled by a person before it can block.
+        type: integer
+        minimum: 1
+        default: 20
+      judge_min_fails:
+        description: Of those, at least this many labelled Fail and as many labelled Pass, so both rates mean something.
+        type: integer
+        minimum: 1
+        default: 5
+      judge_min_tpr:
+        description: Share of the calls you failed that the judges must fail too (catching real problems).
+        type: number
+        default: 0.9
+      judge_min_tnr:
+        description: Share of the calls you passed that the judges must pass too (not failing good calls).
+        type: number
+        default: 0.9
       max_harness_retries: {type: integer, minimum: 0, default: 2}
 
   limits:

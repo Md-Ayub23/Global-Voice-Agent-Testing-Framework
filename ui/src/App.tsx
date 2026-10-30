@@ -13,6 +13,8 @@ import type { Project, RunSummary } from "./lib/types";
 import { CallPage } from "./pages/Call";
 import { Dashboard } from "./pages/Dashboard";
 import { Files } from "./pages/Files";
+import { JudgesPageView } from "./pages/Judges";
+import { Labels } from "./pages/Labels";
 import { History } from "./pages/History";
 import { Live } from "./pages/Live";
 import { NewRun } from "./pages/NewRun";
@@ -40,6 +42,9 @@ const PROJECT_ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), Proje
   [new RegExp(`^/p/${K}/runs$`), "runs", (p) => <History project={p} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)$`), "runs", (p, m) => <RunReport project={p} runId={m[2]} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/calls/(t-[\\w-]+)$`), "runs", (p, m) => <CallPage project={p} runId={m[2]} testId={m[3]} />],
+  [new RegExp(`^/p/${K}/judges$`), "judges", (p) => <JudgesPageView project={p} />],
+  [new RegExp(`^/p/${K}/labels$`), "judges", (p) => <Labels project={p} />],
+  [new RegExp(`^/p/${K}/labels/(r-[\\w-]+)/(t-[\\w-]+)$`), "judges", (p, m) => <Labels project={p} runId={m[2]} testId={m[3]} />],
   [new RegExp(`^/p/${K}/setup/(\\w+)$`), (m) => `setup:${m[2]}`, (p, m, q) =>
     SETUP_TABS.some((t) => t.value === m[2]) ? <ProjectSetup project={p} tab={m[2] as SetupTab} query={q} /> : null],
   [new RegExp(`^/p/${K}/files$`), "setup:plan", (p, _m, q) => <Files project={p} query={q} />],

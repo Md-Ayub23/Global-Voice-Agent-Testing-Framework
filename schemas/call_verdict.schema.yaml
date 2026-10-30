@@ -59,6 +59,11 @@ properties:
     type: array
     items: {$ref: "#/$defs/check_result"}
 
+  judge_notes:
+    description: Problems the AI judges met on this call (e.g. a judge gave no usable answer).
+    type: array
+    items: {type: string}
+
   metrics:
     description: Measured numbers. Latency is from the call clock (end of caller speech to first agent audio).
     type: object
@@ -83,6 +88,24 @@ properties:
       latency_p50_ms: {type: [integer, "null"]}
       latency_p95_ms: {type: [integer, "null"]}
       cost_usd: {type: number}
+      judge_cost_usd: {description: "What the AI judges cost for this call (not part of cost_usd).", type: number}
+      heard_numbers:
+        description: >
+          Voice calls where the agent reports its own words: how many numbers it said, and how many the caller's
+          speech recognition heard correctly. Informational; never blamed on the agent's answers.
+        type: object
+        additionalProperties: false
+        required: [numbers, heard_right, misheard]
+        properties:
+          numbers: {type: integer}
+          heard_right: {type: integer}
+          misheard:
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [seq, said, heard]
+              properties: {seq: {type: integer}, said: {type: string}, heard: {type: string}}
 
 $defs:
   result:
@@ -106,7 +129,7 @@ $defs:
       origin: {enum: [hard_check, outcome, metric, judge, validator]}
       result: {$ref: "#/$defs/result"}
       severity: {enum: [blocker, major, minor]}
-      section: {enum: [accuracy, experience, security]}
+      section: {enum: [accuracy, experience, security, safety]}
       message: {description: "One plain sentence a person can read in the report.", type: string}
       evidence: {type: array, items: {$ref: "#/$defs/evidence_ref"}}
       evidence_level:
@@ -125,7 +148,13 @@ $defs:
         required: [rubric_item, applicable, votes]
         properties:
           rubric_item: {type: string}
+          title: {type: string}
+          question: {type: string}
+          item_hash: {description: "Hash of the item's wording; labels for another wording do not calibrate it.", type: string}
           applicable: {type: boolean}
+          calibration: {description: "Why the item can or cannot block yet, in plain words.", type: string}
+          labelled_calls: {type: integer}
+          human: {description: "A person's label for this call, which decides the result.", enum: [PASS, FAIL, NOT_APPLICABLE]}
           votes:
             type: array
             items:
@@ -133,12 +162,14 @@ $defs:
               additionalProperties: false
               required: [judge, model, result, reason]
               properties:
-                judge: {enum: [primary, secondary]}
+                judge: {description: "tiebreak: the deciding judge, asked only when the other two split.", enum: [primary, secondary, tiebreak]}
                 model: {type: string}
                 result: {enum: [PASS, FAIL, NOT_APPLICABLE]}
                 reason: {type: string}
                 cites: {type: array, items: {type: integer}}
-          kappa: {type: number}
+          kappa: {type: [number, "null"]}
+          tpr: {description: "Share of calls you labelled Fail that the judges failed too.", type: [number, "null"]}
+          tnr: {description: "Share of calls you labelled Pass that the judges passed too.", type: [number, "null"]}
     allOf:
       - if: {properties: {result: {enum: [PASS, FAIL]}}}
         then:

@@ -35,6 +35,8 @@ export function useHashLocation(): Location {
   return loc;
 }
 
-export const navigate = (hash: string) => {
-  location.hash = hash;
+// replace: swap the current history entry (a redirect), so Back doesn't land on it again.
+export const navigate = (hash: string, replace = false) => {
+  if (replace) location.replace(location.pathname + location.search + hash);
+  else location.hash = hash;
 };

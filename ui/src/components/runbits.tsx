@@ -2,10 +2,11 @@
 import type { ReactNode } from "react";
 import { cx } from "../lib/format";
 import { tone as toneOf } from "../lib/status";
+import { JUDGE_NAME, judgeState, modelName, VOTE_LABEL } from "../lib/judges";
 import type { Check, Options, Verdict } from "../lib/types";
 import { Tip } from "./feedback";
 import { Icon, type IconName } from "./Icon";
-import { Badge, Chip } from "./ui";
+import { Badge, Chip, Notice } from "./ui";
 
 export function OptionChips({ run }: { run: { mode?: string | null; offline?: boolean | null; agent_options?: Options | null } }) {
   const bugs = (run.agent_options?.bugs || "").split(",").filter(Boolean);
@@ -26,8 +27,9 @@ const LEVEL: Record<string, string> = {
 const ORDER: Record<string, number> = { FAIL: 0, ERROR: 1, NEEDS_REVIEW: 2, NOT_VERIFIED: 3, PASS: 4, NOT_APPLICABLE: 5 };
 
 export function ChecksList({ verdict, onEvidence }: { verdict: Verdict | null | undefined; onEvidence?: (seq: number) => void }) {
-  if (!verdict?.checks?.length) return <div className="text-muted text-[12.5px]">No checks.</div>;
-  const checks = [...verdict.checks].sort((a, b) => (ORDER[a.result] ?? 9) - (ORDER[b.result] ?? 9));
+  const own = (verdict?.checks || []).filter((c) => c.origin !== "judge");
+  if (!own.length) return <div className="text-muted text-[12.5px]">No checks.</div>;
+  const checks = [...own].sort((a, b) => (ORDER[a.result] ?? 9) - (ORDER[b.result] ?? 9));
   return (
     <div>
       {checks.map((c: Check) => (
@@ -51,6 +53,81 @@ export function ChecksList({ verdict, onEvidence }: { verdict: Verdict | null | 
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+/** How much a judge item counts: decided by a person, calibrated (can block), or advisory. */
+export function JudgeWeight({ c }: { c: Check }) {
+  if (c.judge?.human) return <Chip tone="accent" icon="user">labelled by you</Chip>;
+  if (c.can_block) return <Chip tone="good" icon="shield">trusted</Chip>;
+  return <Tip content={`An opinion until your labels show the judges get this item right${c.judge?.calibration ? ` (${c.judge.calibration})` : ""}. It doesn't change the call's result.`}>
+    <span><Chip icon="info">not trusted yet</Chip></span></Tip>;
+}
+
+/** A judge result as Pass / Problem / Needs you / Opinion: fail / No answer. */
+export function JudgeBadge({ c }: { c: Check }) {
+  const st = judgeState(c);
+  const chip = { good: "good", bad: "bad", warn: "warn", neutral: "default" } as const;
+  return <Chip tone={chip[st.tone]} icon={st.icon} className="font-bold">{st.label}</Chip>;
+}
+
+// The AI judges' results for one call: what each judge said and why.
+export function JudgeList({ verdict, onEvidence, labelHref }: { verdict: Verdict | null | undefined; onEvidence?: (seq: number) => void; labelHref?: string }) {
+  const judged = (verdict?.checks || []).filter((c) => c.origin === "judge");
+  if (!judged.length) return <div className="text-muted text-[12.5px]">This project has no judge items.</div>;
+  const ran = judged.some((c) => c.judge?.votes?.length);
+  if (!ran) return <div className="text-muted text-[12.5px]">{judged[0].message}</div>;
+  const shown = [...judged].sort((a, b) => (ORDER[a.result] ?? 9) - (ORDER[b.result] ?? 9));
+  const quiet = shown.filter((c) => c.result === "NOT_APPLICABLE");
+  const loud = shown.filter((c) => c.result !== "NOT_APPLICABLE");
+  const row = (c: Check) => (
+    <div key={c.check_id} data-judge={c.check_id} className="grid grid-cols-[minmax(74px,auto)_1fr] gap-x-2.5 gap-y-1 py-[11px] border-b border-line last:border-b-0">
+      <div><JudgeBadge c={c} /></div>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <b className="text-[13px]">{c.judge?.title || c.check_id}</b>
+          <Chip>{c.severity}</Chip>
+          <JudgeWeight c={c} />
+        </div>
+        <div className={cx("mt-1 text-[13px]", judgeState(c).kind.startsWith("opinion") && "text-ink-2")}>{c.message}</div>
+        {(c.judge?.votes?.length ?? 0) > 0 && (
+          <details className="mt-1.5 group">
+            <summary className="cursor-pointer text-[12px] text-muted list-none flex items-center gap-1 hover:text-ink">
+              <Icon name="chevron" size={13} className="transition-transform group-open:rotate-90" />What each judge said
+            </summary>
+            <div className="mt-1.5 grid gap-1.5">
+              {c.judge!.votes.map((v) => (
+                <div key={v.judge} className="text-[12.5px] rounded-lg bg-surface-2 px-2.5 py-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap"><b>{JUDGE_NAME[v.judge]}</b><span className="text-muted">{modelName(v.model)}</span>
+                    <Badge status={v.result} label={VOTE_LABEL[v.result]} /></div>
+                  {v.reason && <div className="mt-0.5 text-ink-2">{v.reason}</div>}
+                </div>
+              ))}
+            </div>
+          </details>
+        )}
+      </div>
+      {c.result !== "NOT_APPLICABLE" && (c.evidence || []).length > 0 && (
+        <div className="col-start-2 flex gap-1.5 flex-wrap items-center">
+          {(c.evidence || []).map((r) => <EvRef key={r.event} onClick={() => onEvidence?.(r.event)} data-ev={r.event}>#{r.event}</EvRef>)}
+        </div>
+      )}
+    </div>
+  );
+  return (
+    <div>
+      {loud.map(row)}
+      {quiet.length > 0 && (
+        <details className="py-2 group">
+          <summary className="cursor-pointer text-[12.5px] text-muted list-none flex items-center gap-1 hover:text-ink">
+            <Icon name="chevron" size={13} className="transition-transform group-open:rotate-90" />{quiet.length} item(s) didn't come up in this call
+          </summary>
+          <div className="mt-1">{quiet.map(row)}</div>
+        </details>
+      )}
+      {(verdict?.judge_notes || []).map((n, i) => <Notice key={i} tone="warn" className="mt-2 text-[12.5px]">{n}</Notice>)}
+      {labelHref && <div className="mt-2.5"><a href={labelHref} className="inline-flex items-center gap-1.5 text-[13px] font-semibold"><Icon name="tag" size={14} />Label this call</a></div>}
     </div>
   );
 }
@@ -115,7 +192,7 @@ export function Hero({ tone, icon, eyebrow, title, children, actions, reasons, f
 export function OutcomeNotice({ verdict }: { verdict: Verdict | null }) {
   if (!verdict) return null;
   const o = verdict.checks.find((x) => x.check_id === "outcome");
-  const others = verdict.checks.filter((x) => x.check_id !== "outcome" && ["FAIL", "ERROR"].includes(x.result));
+  const others = verdict.checks.filter((x) => x.check_id !== "outcome" && ["FAIL", "ERROR", "NEEDS_REVIEW"].includes(x.result) && x.can_block !== false);
   const t = verdict.status === "PASS" ? "good" : verdict.status === "FAIL" ? "bad" : "warn";
   const cls = { good: "bg-good-soft text-good", bad: "bg-bad-soft text-bad", warn: "bg-warn-soft text-warn" }[t];
   return (

@@ -10,6 +10,7 @@ import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx, fmtDuration, fmtMs, shortScenario } from "../lib/format";
 import { decisionTitle } from "../lib/status";
+import { LiveListener } from "../lib/listen";
 import { modeLabel, pl, projectHref, projectOfJob, runHref } from "../lib/links";
 import type { CallDetail, Job, Limits, Project, RunDetail } from "../lib/types";
 
@@ -178,6 +179,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
         </div>
         <div className="flex items-center gap-2.5">
           <span className="text-muted tabular-nums" id="elapsed">{fmtDuration(elapsed)}</span>
+          {job.status === "running" && runMode === "voice" && <ListenLive jobId={job.id} />}
           {job.status === "running" && <Button id="stop" variant="danger" icon="stop" disabled={stopping} onClick={stop}>Stop</Button>}
         </div>
       </div>
@@ -216,9 +218,42 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
   );
 }
 
-const statusText = (s: string) => ({ PASS: "passed", FAIL: "failed", ERROR: "Vocto error, rerun", NOT_VERIFIED: "unsure", NEEDS_REVIEW: "needs review" } as Record<string, string>)[s] || s;
+const statusText = (s: string) => ({ PASS: "passed", FAIL: "failed", ERROR: "Vocto error, rerun", NOT_VERIFIED: "not verified", NEEDS_REVIEW: "needs you" } as Record<string, string>)[s] || s;
 // A call with no verdict is still going while the job runs; once the job has ended it never will be.
 const callState = (c: CallDetail, live: boolean) => (c.verdict ? c.verdict.status : !live ? "interrupted" : c.record.locked ? "evaluating" : "running");
+
+// Off until clicked. The run sends its audio whether or not anyone listens, so listening changes nothing
+// about the call or its response times; the page unmounting or the run ending stops it.
+function ListenLive({ jobId }: { jobId: string }) {
+  const toast = useToast();
+  const [on, setOn] = useState(false);
+  const [hearing, setHearing] = useState("");
+  const ref = useRef<LiveListener | null>(null);
+  useEffect(() => () => ref.current?.stop(), []);
+  const toggle = () => {
+    if (ref.current) { ref.current.stop(); return; }
+    const l = new LiveListener((label) => setHearing(label.split(" ")[1] || ""), (error) => {
+      ref.current = null; setOn(false); setHearing("");
+      if (error) toast(error, "bad");
+    });
+    ref.current = l;
+    setOn(true);
+    void l.start(jobId);
+  };
+  return (
+    <>
+      {on && <span id="hearing" className="text-[12.5px] text-muted inline-flex items-center gap-1.5">
+        <span className="size-2 rounded-full bg-bad animate-pulse" aria-hidden="true" />
+        {hearing ? <>Hearing <b className="text-ink">{shortScenario(hearing)}</b></> : "Waiting for the call audio…"}
+      </span>}
+      <Tip content={on ? "Stop playing the call" : "Play this voice call as it happens: the caller and the agent, as the caller hears them. It doesn't affect the call or its timing."}>
+        <Button id="listen" icon={on ? "mute" : "speaker"} variant={on ? "primary" : undefined} onClick={toggle} aria-pressed={on}>
+          {on ? "Stop listening" : "Listen live"}
+        </Button>
+      </Tip>
+    </>
+  );
+}
 
 function CallRow({ p, c, attempts, selected, live, onClick }: { p: { scenario_id: string; repeat: number }; c: CallDetail | undefined; attempts: number; selected: boolean; live: boolean; onClick: () => void }) {
   const s = c ? callState(c, live) : "queued";
