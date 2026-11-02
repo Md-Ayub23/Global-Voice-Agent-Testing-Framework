@@ -1,49 +1,34 @@
-// Settings: each agent's test settings, the secrets projects use, the API key, speech models.
+// Settings: the API key, speech models, the secrets agents use, and links to each agent's pass rules.
 import { useState, type ReactNode } from "react";
 import { ProjectAvatar } from "../components/dash";
 import { useToast } from "../components/feedback";
 import { Icon } from "../components/Icon";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, Field, Notice, PageHead, Seg, Skeleton, inputCls } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, EmptyState, Field, Notice, PageHead, Skeleton, inputCls } from "../components/ui";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx } from "../lib/format";
-import { channelLabel, projectHref } from "../lib/links";
-import { setupApi } from "../lib/setup";
+import { projectHref } from "../lib/links";
 import type { Secret, System } from "../lib/types";
-import { TestSettingsTab } from "./setup/TestSettingsTab";
 
-// The test settings of one agent (p50 / p95, repeats, limits...), the same form as on its project page.
+// Each agent's pass rules (p50 / p95, repeats, budget...) now live on that agent's own Pass rules page; this links there.
 function AgentSettings() {
-  const { projects, reloadProjects } = useApp();
-  const [key, setKey] = useState<string | null>(null);
-  const [file, setFile] = useState("profile.yaml");
-  const chosen = projects?.find((p) => p.key === key) ?? projects?.find((p) => !p.example) ?? projects?.[0] ?? null;
-  const { data: detail, error, reload } = useLoad(() => (chosen ? setupApi.profile(chosen.path, file) : Promise.resolve(null)), [chosen?.path, file]);
-  if (!projects) return <Skeleton height={200} />;
-  if (!chosen) return <Card><EmptyState icon="bot" title="No projects yet" action={<Button variant="primary" icon="plus" href="#/projects/new">New project</Button>} /></Card>;
+  const { projects } = useApp();
+  if (!projects) return <Skeleton height={120} />;
   return (
-    <section className="grid gap-3" id="agent-settings">
-      <Card>
-        <CardHead level={2} title="Test settings per agent" sub="each agent has its own release gate: response times, repeats, coverage, budget" />
-        <div className="flex gap-3 flex-wrap items-center">
-          <div className="flex items-center gap-2.5">
-            <ProjectAvatar name={chosen.name} k={chosen.key} size={34} />
-            <select id="settings-project" className={cx(inputCls, "w-full sm:w-auto sm:min-w-[280px]")} value={chosen.key}
-              onChange={(e) => { setKey(e.target.value); setFile("profile.yaml"); }}>
-              {projects.map((p) => <option key={p.key} value={p.key}>{p.name}</option>)}
-            </select>
-          </div>
-          {chosen.profiles.length > 1 && (
-            <Seg id="settings-profile" value={file} onChange={setFile}
-              options={chosen.profiles.map((p) => ({ value: p.file, label: channelLabel(p, chosen.profiles), icon: p.mode === "voice" ? "mic" : "text" }))} />
-          )}
-          <span className="flex-1" />
-          <a href={projectHref(chosen.key)} className="text-[13px] inline-flex items-center gap-1">Open the project <Icon name="arrow" size={13} /></a>
+    <Card flush id="agent-settings">
+      <div className="px-5 pt-4 pb-2"><CardHead level={2} title="Pass rules per agent" sub="each agent has its own release gate, set on its Pass rules page" className="mb-0" /></div>
+      {projects.length ? (
+        <div className="divide-y divide-line border-t border-line">
+          {projects.map((p) => (
+            <a key={p.key} href={projectHref(p.key, "/setup/rules")} className="group flex items-center gap-3 px-5 py-2.5 hover:bg-surface-2/70 hover:no-underline text-ink transition-colors">
+              <ProjectAvatar name={p.name} k={p.key} size={28} />
+              <b className="text-[13.5px] flex-1 min-w-0 truncate">{p.name}</b>
+              <span className="text-accent-ink text-[12.5px] font-semibold inline-flex items-center gap-1">Pass rules <Icon name="arrow" size={13} className="transition-transform group-hover:translate-x-0.5" /></span>
+            </a>
+          ))}
         </div>
-      </Card>
-      {error && <Notice tone="bad">{error.message}</Notice>}
-      {detail && <TestSettingsTab key={`${detail.project}/${detail.file}`} detail={detail} reload={() => { reload(); void reloadProjects(); }} />}
-    </section>
+      ) : <EmptyState icon="bot" title="No agents yet" action={<Button variant="primary" icon="plus" href="#/projects/new">New agent</Button>} />}
+    </Card>
   );
 }
 
@@ -86,7 +71,7 @@ function Secrets() {
   const rows = list ?? data;
   return (
     <Card id="secrets">
-      <CardHead level={2} title="Secrets" sub="passwords and tokens your projects refer to">
+      <CardHead level={2} title="Secrets" sub="passwords and tokens your agents refer to">
         {rows && rows.length > 0 && (rows.every((s) => s.set) ? <Badge status="PASS" label="all set" /> : <Badge status="NOT_VERIFIED" label={`${rows.filter((s) => !s.set).length} missing`} />)}
       </CardHead>
       <p className="text-ink-2 mb-1">
@@ -94,7 +79,7 @@ function Secrets() {
       </p>
       {error && <Notice tone="bad">{error.message}</Notice>}
       {!rows ? <Skeleton height={80} /> : rows.length ? rows.map((s) => <SecretRow key={s.name} s={s} onSaved={setList} />)
-        : <div className="text-muted text-[12.5px] py-3">No project uses a secret yet.</div>}
+        : <div className="text-muted text-[12.5px] py-3">No agent uses a secret yet.</div>}
     </Card>
   );
 }
@@ -141,11 +126,9 @@ export function Settings() {
 
   return (
     <>
-      <PageHead title="Settings" sub="Each agent's test settings, your secrets, and what Vocto needs on this computer." />
+      <PageHead title="Settings" sub="What Vocto needs on this computer: your API key, speech models and secrets." />
       <div className="grid gap-4">
-        <AgentSettings />
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 items-start">
-          <Secrets />
           <Card>
             <CardHead level={2} title="Anthropic API key">{k.set ? <Badge status="PASS" label="set" /> : <Badge status="NOT_VERIFIED" label="not set" />}</CardHead>
             <p className="text-ink-2 mb-3">Real runs use Claude to play the caller and to check it stayed on script. Free dry runs need no key.</p>
@@ -189,6 +172,8 @@ export function Settings() {
               <Row label="System">Python {sys.python} · {sys.platform}</Row>
             </div>
           </Card>
+          <Secrets />
+          <AgentSettings />
         </div>
       </div>
     </>

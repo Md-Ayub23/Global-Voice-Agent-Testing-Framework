@@ -70,7 +70,7 @@ function CheckList({ checks, onChange, ctx, needId, prefix }: { checks: Obj[]; o
   return (
     <div className="grid gap-2.5">
       {checks.map((c, i) => (
-        <div key={i} data-check={str(c.id) || `${prefix}${i + 1}`} className="grid gap-2.5 p-3 border border-line rounded-xl bg-surface-2/40">
+        <div key={i} data-check={str(c.id) || `${prefix}${i + 1}`} className="grid gap-2.5 p-3 border border-line rounded-[10px] bg-surface-2/40">
           <div className="flex items-center gap-2 flex-wrap">
             <Select className="w-auto min-w-[200px]" value={str(c.type)} onChange={(v) => setAt(i, "type", v)}
               options={Object.entries(CHECKS).map(([k, s]) => [k, s.label] as [string, string])} />
@@ -207,7 +207,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
         {scripted && (
           <div className="grid gap-3">
             {turns.map((t, i) => (
-              <div key={i} className="grid gap-2.5 p-3 border border-line rounded-xl">
+              <div key={i} className="grid gap-2.5 p-3 border border-line rounded-[10px]">
                 <div className="flex items-center gap-2">
                   <Chip tone="caller">Line {i + 1}</Chip>
                   <span className="flex-1" />
@@ -221,7 +221,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
               </div>
             ))}
             <div><Button size="sm" icon="plus" onClick={() => put(["turns"], [...turns, { caller: "" }])}>Add line</Button></div>
-            <div className="grid gap-2.5 p-3 border border-dashed border-line-strong rounded-xl">
+            <div className="grid gap-2.5 p-3 border border-dashed border-line-strong rounded-[10px]">
               <Check checked={doc.follow_up !== false} onChange={(on) => put(["follow_up"], on ? undefined : false)}
                 label="Then Claude carries on the call"
                 hint="Live runs: after these lines, Claude listens to the agent and keeps going, the way a real caller would, for up to the turns set in Test settings. Dry runs always end with the lines." />
@@ -294,7 +294,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
         <Field label="Faults" hint="Honesty under failure: the tool breaks and the agent must not pretend it worked.">
           <div className="grid gap-2">
             {faults.map((f, i) => (
-              <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-xl">
+              <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[10px]">
                 <Field label="Tool"><Select value={str(f.tool)} options={ctx.tools} placeholder="Pick" onChange={(v) => setFault(i, "tool", v)} /></Field>
                 <Field label="Fault"><Select value={str(f.type)} onChange={(v) => setFault(i, "type", v)} options={[["timeout", "Times out"], ["http_error", "HTTP error"], ["slow", "Slow"], ["malformed_response", "Garbled answer"]]} /></Field>
                 <Field label="On call no." className="w-[110px]"><Num value={f.on_call as number} min={1} placeholder="every" onChange={(v) => setFault(i, "on_call", v)} /></Field>
@@ -318,7 +318,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
           <Field label="Caller cuts in">
             <div className="grid gap-2">
               {barge.map((b, i) => (
-                <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-xl">
+                <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[10px]">
                   <Field label="Agent's turn no." className="w-[120px]"><Num value={b.agent_turn as number} min={1} onChange={(v) => setBarge(i, "agent_turn", v)} /></Field>
                   <Field label="After (ms)" className="w-[110px]"><Num value={b.offset_ms as number} min={0} onChange={(v) => setBarge(i, "offset_ms", v)} /></Field>
                   <Field label="Caller says" className="flex-1 min-w-[180px]"><Text value={str(b.say)} onChange={(v) => setBarge(i, "say", v)} /></Field>

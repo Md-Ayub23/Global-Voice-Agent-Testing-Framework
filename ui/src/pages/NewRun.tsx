@@ -63,7 +63,7 @@ interface Form {
 }
 
 export function NewRun({ project, query }: { project: Project; query: URLSearchParams }) {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "New run" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Run tests" }]);
   const { system } = useApp();
   const from = query.get("from");
   const { data, error } = useLoad(async () => {
@@ -78,7 +78,7 @@ export function NewRun({ project, query }: { project: Project; query: URLSearchP
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data || !system) return <Skeleton />;   // the form's defaults depend on the API key being set
   if (!data.projects.length) {
-    return <EmptyState title="No test projects found" icon="folder" />;
+    return <EmptyState title="No agents found" icon="folder" />;
   }
   return <NewRunForm projects={data.projects} prefill={data.prefill} prefillError={data.prefillError} query={query} />;
 }
@@ -169,7 +169,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
 
   return (
     <>
-      <PageHead title="New run" sub={<>Test <b className="text-ink">{project.name}</b>: Vocto calls the agent, checks every call and gives a release decision.</>}>
+      <PageHead title="Run tests" sub={<>Test <b className="text-ink">{project.name}</b>: Vocto calls the agent, checks every call and gives a release decision.</>}>
         {(profile.bugs || planted || exit) && (
           <Seg id="cmd" value={f.command} onChange={(v) => set({ command: v })}
             options={[{ value: "run", label: "Test run", icon: "play" }, { value: "exit-check", label: "Exit check", icon: "shield" }]} />
@@ -211,7 +211,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
                 </Choice>
               ))}
             </div>
-            {!profile.ok && <Notice tone="bad" className="mt-3">{profile.problems.map((p) => <div key={p}>{p}</div>)}<a href={projectHref(project.key, "/setup/agent")}>Open the setup</a></Notice>}
+            {!profile.ok && <Notice tone="bad" className="mt-3">{profile.problems.map((p) => <div key={p}>{p}</div>)}<a href={projectHref(project.key, "/setup/connection")}>Open the setup</a></Notice>}
           </Card>
 
           {!exit && (
@@ -392,7 +392,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
                   Safety tests
                   <Switch id="safety" checked={f.safety} onChange={(v) => set({ safety: v })} label="Include safety tests" />
                   <span className="font-normal text-xs text-muted">
-                    {f.safety ? <>{profile.safety.attacks} attack calls written for this agent: off-topic questions, pushing for secrets, prompt tricks and more. <a href={projectHref(project.key, "/setup/plan")}>Choose them in the test plan</a>.</>
+                    {f.safety ? <>{profile.safety.attacks} attack calls written for this agent: off-topic questions, pushing for secrets, prompt tricks and more. <a href={projectHref(project.key, "/setup/safety")}>Choose them on Safety tests</a>.</>
                       : "Off: only the scenarios above."}
                   </span>
                 </div>

@@ -1,4 +1,4 @@
-// Routes. The workspace pages (dashboard, projects, settings) sit at the top; everything about one
+// Routes. The workspace pages (home, agents, settings) sit at the top; everything about one
 // agent lives under #/p/<project key>/... The page remounts (and animates in) when the address changes.
 import { Component, useEffect, type ReactNode } from "react";
 import { Layout } from "./components/Layout";
@@ -19,7 +19,9 @@ import { History } from "./pages/History";
 import { Live } from "./pages/Live";
 import { NewRun } from "./pages/NewRun";
 import { ProjectOverviewPage } from "./pages/ProjectOverview";
-import { ProjectSetup, SETUP_TABS, type SetupTab } from "./pages/ProjectSetup";
+import { ProjectSetup, SETUP_ALIASES, SETUP_TABS, setupSection, type SetupTab } from "./pages/ProjectSetup";
+import { navigate } from "./lib/router";
+import { projectHref } from "./lib/links";
 import { NewProject, Projects } from "./pages/Projects";
 import { RunReport } from "./pages/RunReport";
 import { Settings } from "./pages/Settings";
@@ -38,17 +40,28 @@ const ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), Page][] = [
 const PROJECT_ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), ProjectPage][] = [
   [new RegExp(`^/p/${K}/?$`), "overview", (p) => <ProjectOverviewPage project={p} />],
   [new RegExp(`^/p/${K}/new$`), "new", (p, _m, q) => <NewRun project={p} query={q} />],
-  [new RegExp(`^/p/${K}/live(?:/(j-[\\w-]+))?$`), "live", (p, m) => <Live project={p} jobId={m[2] || null} />],
-  [new RegExp(`^/p/${K}/runs$`), "runs", (p) => <History project={p} />],
-  [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)$`), "runs", (p, m) => <RunReport project={p} runId={m[2]} />],
-  [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/calls/(t-[\\w-]+)$`), "runs", (p, m) => <CallPage project={p} runId={m[2]} testId={m[3]} />],
+  [new RegExp(`^/p/${K}/live(?:/(j-[\\w-]+))?$`), "results", (p, m) => <Live project={p} jobId={m[2] || null} />],
+  [new RegExp(`^/p/${K}/runs$`), "results", (p) => <History project={p} />],
+  [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)$`), "results", (p, m) => <RunReport project={p} runId={m[2]} />],
+  [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/calls/(t-[\\w-]+)$`), "results", (p, m) => <CallPage project={p} runId={m[2]} testId={m[3]} />],
   [new RegExp(`^/p/${K}/judges$`), "judges", (p) => <JudgesPageView project={p} />],
   [new RegExp(`^/p/${K}/labels$`), "judges", (p) => <Labels project={p} />],
   [new RegExp(`^/p/${K}/labels/(r-[\\w-]+)/(t-[\\w-]+)$`), "judges", (p, m) => <Labels project={p} runId={m[2]} testId={m[3]} />],
-  [new RegExp(`^/p/${K}/setup/(\\w+)$`), (m) => `setup:${m[2]}`, (p, m, q) =>
-    SETUP_TABS.some((t) => t.value === m[2]) ? <ProjectSetup project={p} tab={m[2] as SetupTab} query={q} /> : null],
-  [new RegExp(`^/p/${K}/files$`), "setup:plan", (p, _m, q) => <Files project={p} query={q} />],
+  [new RegExp(`^/p/${K}/setup/(\\w+)$`), (m) => setupSection(SETUP_ALIASES[m[2]] || m[2]), (p, m, q) =>
+    m[2] in SETUP_ALIASES ? <SetupRedirect to={projectHref(p.key, `/setup/${oldPlanTarget(m[2], q)}`)} query={q} />
+      : SETUP_TABS.some((t) => t.value === m[2]) ? <ProjectSetup project={p} tab={m[2] as SetupTab} query={q} /> : null],
+  [new RegExp(`^/p/${K}/files$`), "setup:cases", (p, _m, q) => <Files project={p} query={q} />],
 ];
+
+// Set-up addresses from before the redesign go to their new page (a persona being edited goes to Callers).
+const oldPlanTarget = (old: string, q: URLSearchParams) => {
+  const edit = q.get("edit") || "";
+  return old === "plan" && (edit === "new-persona" || edit.startsWith("personas/")) ? "callers" : SETUP_ALIASES[old];
+};
+function SetupRedirect({ to, query }: { to: string; query: URLSearchParams }) {
+  useEffect(() => { navigate(query.toString() ? `${to}?${query}` : to, true); }, [to, query]);
+  return <Skeleton />;
+}
 
 // Old links (#/runs/<id>) go to the run inside its project.
 function RunRedirect({ runId, rest }: { runId: string; rest: string }) {
@@ -66,8 +79,8 @@ function ProjectGate({ projectKey, render }: { projectKey: string; render: (p: P
   if (!projects) return <Skeleton />;
   const p = projectByKey(projects, projectKey);
   if (!p) {
-    return <EmptyState title="Project not found" icon="help" text="It may have been renamed or removed."
-      action={<a href="#/projects"><Icon name="back" size={14} /> All projects</a>} />;
+    return <EmptyState title="Agent not found" icon="help" text="It may have been renamed or removed."
+      action={<a href="#/projects" className="inline-flex items-center gap-1.5"><Icon name="back" size={14} />All agents</a>} />;
   }
   return render(p);
 }

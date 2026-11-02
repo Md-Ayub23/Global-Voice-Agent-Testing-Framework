@@ -1,5 +1,5 @@
-// The test plan: scenarios (what situations to test), the built-in safety tests and personas (who calls).
-// Lists, then forms.
+// The test plan, as two set-up pages: test cases (scenarios: the situations to test, plus "Write tests for me")
+// and callers (personas: who calls). Lists, then forms.
 import { useEffect, useState } from "react";
 import { useToast } from "../../components/feedback";
 import { Help, type Obj } from "../../components/form";
@@ -12,12 +12,11 @@ import { pl } from "../../lib/links";
 import { str, type TabProps } from "./common";
 import { PersonaForm } from "./PersonaForm";
 import { PersonaLibrary, PlanWriterCard } from "./PlanWriterCard";
-import { SafetyCard } from "./SafetyCard";
 import { ScenarioForm } from "./ScenarioForm";
 
 interface Item { file: string; doc: Obj }
 
-export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { edit: string | null; projectKey: string }) {
+export function TestPlanTab({ part, detail, reload, edit, projectKey }: TabProps & { part: "cases" | "callers"; edit: string | null; projectKey: string }) {
   const toast = useToast();
   const [items, setItems] = useState<Item[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,7 +31,8 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
 
-  const go = (e: string | null) => navigate(e ? `${pl("/setup/plan")}?${qs({ edit: e })}` : pl("/setup/plan"));
+  const page = (e: string | null) => pl(`/setup/${e && (e === "new-persona" || e.startsWith("personas/")) ? "callers" : e ? "cases" : part}`);
+  const go = (e: string | null) => navigate(e ? `${page(e)}?${qs({ edit: e })}` : page(null));
   const done = (file?: string) => { if (file) reload(); go(null); };
 
   if (error) return <Notice tone="bad">{error}</Notice>;
@@ -44,7 +44,7 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
     const Form = edit === "new-persona" || edit.startsWith("personas/") ? PersonaForm : ScenarioForm;
     return (
       <div className="grid gap-3">
-        <div><Button size="sm" variant="ghost" icon="back" onClick={() => go(null)}>All scenarios and personas</Button></div>
+        <div><Button size="sm" variant="ghost" icon="back" onClick={() => go(null)}>{part === "callers" ? "All callers" : "All test cases"}</Button></div>
         <Form key={edit} detail={detail} file={isNew ? null : edit} initial={item ? item.doc : null} onDone={done} />
         {!isNew && <Help>Advanced: <a href={`${pl("/files")}?${qs({ file: edit })}`}>open the raw editor</a>.</Help>}
       </div>
@@ -64,7 +64,8 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
 
   return (
     <div className="grid gap-4">
-      <PlanWriterCard detail={detail} reload={reload} projectKey={projectKey} />
+      {part === "cases" && <>
+      {!scenarios.length && <PlanWriterCard detail={detail} reload={reload} projectKey={projectKey} />}
       <Card>
         <CardHead level={2} title={`Scenarios (${scenarios.length})`} sub="each one is a situation the agent must handle">
           <Button id="new-scenario" variant="primary" size="sm" icon="plus" onClick={() => go("new-scenario")}>New scenario</Button>
@@ -76,10 +77,10 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
             {scenarios.map(({ file, doc }) => {
               const outcome = (doc.outcome || null) as Obj | null;
               return (
-                <div key={file} data-scenario={str(doc.id)} className="flex items-center gap-3 flex-wrap p-3 border border-line rounded-xl hover:bg-surface-2/60 transition-colors">
+                <div key={file} data-scenario={str(doc.id)} className="flex items-center gap-3 flex-wrap p-3 border border-line rounded-[10px] hover:bg-surface-2/60 transition-colors">
                   <Icon name="target" className="text-muted" />
                   <div className="flex-1 min-w-[200px]">
-                    <a className="font-semibold" href={`${pl("/setup/plan")}?${qs({ edit: file })}`}>{str(doc.title) || str(doc.id)}</a>
+                    <a className="font-semibold" href={`${page(file)}?${qs({ edit: file })}`}>{str(doc.title) || str(doc.id)}</a>
                     <div className="text-muted text-xs font-mono">{str(doc.id)}</div>
                   </div>
                   <Chip tone={doc.criticality === "critical" ? "accent" : "default"}>{str(doc.criticality)}</Chip>
@@ -93,8 +94,10 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
           </div>
         )}
       </Card>
-      <SafetyCard detail={detail} reload={reload} projectKey={projectKey} />
-      <Card>
+      {scenarios.length > 0 && <PlanWriterCard detail={detail} reload={reload} projectKey={projectKey} />}
+      <Help>Advanced: <a href={pl("/files")}>open the raw file editor</a> to edit any file of this agent as text.</Help>
+      </>}
+      {part === "callers" && <Card>
         <CardHead level={2} title={`Personas (${personas.length})`} sub="who calls">
           <div className="flex gap-2">
             <Button id="persona-library-toggle" size="sm" icon="layers" onClick={() => setLibrary(!library)}>{library ? "Close the library" : "Add from library"}</Button>
@@ -104,17 +107,18 @@ export function TestPlanTab({ detail, reload, edit, projectKey }: TabProps & { e
         {library && <div className="mb-4"><PersonaLibrary projectKey={projectKey} detail={detail} onAdded={() => { setLibrary(false); reload(); }} /></div>}
         <div className="grid gap-2 sm:grid-cols-2">
           {personas.map(({ file, doc }) => (
-            <div key={file} data-persona={str(doc.id)} className="flex items-start gap-3 p-3 border border-line rounded-xl">
+            <div key={file} data-persona={str(doc.id)} className="flex items-start gap-3 p-3 border border-line rounded-[10px]">
               <Icon name="user" className="text-muted mt-0.5" />
               <div className="flex-1 min-w-0">
-                <a className="font-semibold" href={`${pl("/setup/plan")}?${qs({ edit: file })}`}>{str(doc.id)}</a>
+                <a className="font-semibold" href={`${page(file)}?${qs({ edit: file })}`}>{str(doc.id)}</a>
                 <div className="text-ink-2 text-[12.5px] mt-0.5">{str(doc.description)}</div>
               </div>
               <Button size="sm" variant="ghost" iconOnly icon="x" aria-label={`Delete ${str(doc.title) || str(doc.id)}`} onClick={() => void remove(file)} />
             </div>
           ))}
         </div>
-      </Card>
+        {!personas.length && <EmptyState icon="user" title="No callers yet" text="Add a few from the library: a calm caller, an impatient one and one who interrupts cover most agents." />}
+      </Card>}
     </div>
   );
 }

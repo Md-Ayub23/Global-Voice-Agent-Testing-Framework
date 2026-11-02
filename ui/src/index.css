@@ -1,62 +1,71 @@
 @import "tailwindcss";
 
+/* Geist, bundled (Latin only) so the dashboard looks the same offline. */
+@font-face { font-family: "Geist"; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2") format("woff2-variations"); }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-display: swap; font-weight: 100 900;
+  src: url("@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2") format("woff2-variations"); }
+
 /* Design tokens. Every color is a role; dark mode swaps the values in one place, and the
    Tailwind theme below maps each role to utilities (bg-surface, text-muted, border-line, ...). */
 :root {
   color-scheme: light;
-  --bg: #f5f6fa;
+  --bg: #ffffff;
   --surface: #ffffff;
-  --surface-2: #f0f2f8;
-  --surface-3: #e8ebf3;
-  --line: #e2e5ee;
-  --line-strong: #cdd2df;
-  --ink: #0f1626;
-  --ink-2: #4a5468;
-  --muted: #7c869a;
-  --accent: #5b5bf0;
-  --accent-2: #0fb5c9;
-  --accent-soft: #ececfe;
-  --accent-ink: #3f3fd1;
-  --good: #0e8f4f;
-  --good-soft: #e3f5ea;
-  --bad: #cf2f2f;
-  --bad-soft: #fde9e8;
-  --warn: #a8640a;
-  --warn-soft: #fdf1dc;
-  --info-soft: #e7f0fc;
-  --caller: #2a78d6;
-  --caller-soft: #e6f0fc;
-  --agent: #1baf7a;
-  --agent-soft: #e4f6ef;
-  --tool: #6250d6;
-  --tool-soft: #efedfc;
-  --shadow-sm: 0 1px 2px rgba(15, 22, 38, .06);
-  --shadow-md: 0 1px 2px rgba(15, 22, 38, .05), 0 6px 20px -8px rgba(15, 22, 38, .12);
-  --shadow-lg: 0 20px 50px -20px rgba(15, 22, 38, .3);
+  --surface-2: #f6f6f7;
+  --surface-3: #ececee;
+  --line: #ebebed;
+  --line-strong: #dcdce0;
+  --ink: #111113;
+  --ink-2: #55555c;
+  --muted: #8b8b93;
+  --accent: #1a5cff;
+  --accent-2: #1a5cff;
+  --accent-soft: #eef3ff;
+  --accent-ink: #1446cc;
+  --good: #11804a;
+  --good-soft: #ebf7f0;
+  --bad: #d92d20;
+  --bad-soft: #fdf0ef;
+  --warn: #b25e09;
+  --warn-soft: #fdf5e7;
+  --info-soft: #f2f6ff;
+  --caller: #1a5cff;
+  --caller-soft: #eef3ff;
+  --agent: #11804a;
+  --agent-soft: #ebf7f0;
+  --tool: #6e56cf;
+  --tool-soft: #f4f1fd;
+  --sidebar: #fafafa;
+  --btn: #1a5cff;
+  --btn-ink: #ffffff;
+  --shadow-sm: 0 1px 2px rgba(17, 17, 19, .04);
+  --shadow-md: 0 1px 2px rgba(17, 17, 19, .04), 0 4px 12px -6px rgba(17, 17, 19, .07);
+  --shadow-lg: 0 12px 32px -12px rgba(17, 17, 19, .18), 0 2px 6px rgba(17, 17, 19, .05);
 }
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
-    --bg: #0b0e15; --surface: #121722; --surface-2: #171d2a; --surface-3: #1e2534;
-    --line: #232b3b; --line-strong: #313b50; --ink: #e8ebf3; --ink-2: #aab3c6; --muted: #727d94;
-    --accent: #7d7dff; --accent-2: #22c3d6; --accent-soft: #23234a; --accent-ink: #a9a9ff;
-    --good: #3fcf86; --good-soft: #10291c; --bad: #ff7a72; --bad-soft: #341616; --warn: #f2b84b; --warn-soft: #33260e;
-    --info-soft: #14233a; --caller: #3987e5; --caller-soft: #142640; --agent: #199e70; --agent-soft: #0f2a21;
-    --tool: #9085e9; --tool-soft: #221f42;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 1px 2px rgba(0, 0, 0, .35), 0 8px 24px -10px rgba(0, 0, 0, .6);
+    --bg: #0c0c0d; --surface: #131315; --surface-2: #19191c; --surface-3: #232327;
+    --line: #222226; --line-strong: #313137; --ink: #ededef; --ink-2: #a0a0a8; --muted: #6e6e77;
+    --accent: #4d82ff; --accent-2: #4d82ff; --accent-soft: #15203a; --accent-ink: #9bb8ff;
+    --good: #3dd68c; --good-soft: #0d261a; --bad: #ff6b5f; --bad-soft: #2e1412; --warn: #f5b546; --warn-soft: #2d2010;
+    --info-soft: #121a2e; --caller: #6b98ff; --caller-soft: #15203a; --agent: #3dd68c; --agent-soft: #0d261a;
+    --tool: #a594f9; --tool-soft: #1f1a38; --sidebar: #0f0f10; --btn: #3a6dff; --btn-ink: #ffffff;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 1px 2px rgba(0, 0, 0, .35), 0 8px 24px -12px rgba(0, 0, 0, .6);
     --shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, .8);
   }
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #0b0e15; --surface: #121722; --surface-2: #171d2a; --surface-3: #1e2534;
-  --line: #232b3b; --line-strong: #313b50; --ink: #e8ebf3; --ink-2: #aab3c6; --muted: #727d94;
-  --accent: #7d7dff; --accent-2: #22c3d6; --accent-soft: #23234a; --accent-ink: #a9a9ff;
-  --good: #3fcf86; --good-soft: #10291c; --bad: #ff7a72; --bad-soft: #341616; --warn: #f2b84b; --warn-soft: #33260e;
-  --info-soft: #14233a; --caller: #3987e5; --caller-soft: #142640; --agent: #199e70; --agent-soft: #0f2a21;
-  --tool: #9085e9; --tool-soft: #221f42;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 1px 2px rgba(0, 0, 0, .35), 0 8px 24px -10px rgba(0, 0, 0, .6);
-  --shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, .8);
+    --bg: #0c0c0d; --surface: #131315; --surface-2: #19191c; --surface-3: #232327;
+    --line: #222226; --line-strong: #313137; --ink: #ededef; --ink-2: #a0a0a8; --muted: #6e6e77;
+    --accent: #4d82ff; --accent-2: #4d82ff; --accent-soft: #15203a; --accent-ink: #9bb8ff;
+    --good: #3dd68c; --good-soft: #0d261a; --bad: #ff6b5f; --bad-soft: #2e1412; --warn: #f5b546; --warn-soft: #2d2010;
+    --info-soft: #121a2e; --caller: #6b98ff; --caller-soft: #15203a; --agent: #3dd68c; --agent-soft: #0d261a;
+    --tool: #a594f9; --tool-soft: #1f1a38; --sidebar: #0f0f10; --btn: #3a6dff; --btn-ink: #ffffff;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 1px 2px rgba(0, 0, 0, .35), 0 8px 24px -12px rgba(0, 0, 0, .6);
+    --shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, .8);
 }
 
 @theme inline {
@@ -64,6 +73,9 @@
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
+  --color-sidebar: var(--sidebar);
+  --color-btn: var(--btn);
+  --color-btn-ink: var(--btn-ink);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
@@ -89,10 +101,12 @@
   --shadow-soft: var(--shadow-sm);
   --shadow-card: var(--shadow-md);
   --shadow-pop: var(--shadow-lg);
-  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
+  --font-sans: "Geist", "Inter", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "Geist Mono", "Cascadia Code", "JetBrains Mono", "SF Mono", Consolas, "Liberation Mono", monospace;
   --ease-out-soft: cubic-bezier(.2, .8, .2, 1);
-  --animate-view-in: view-in .38s cubic-bezier(.2, .8, .2, 1) both;
+  --animate-view-in: view-in .26s cubic-bezier(.2, .8, .2, 1) both;
+  --animate-fade: fade .2s ease-out both;
+  --animate-slide-down: slide-down .22s cubic-bezier(.2, .8, .2, 1) both;
   --animate-rise: rise .35s cubic-bezier(.2, .8, .2, 1) both;
   --animate-reveal: reveal .6s cubic-bezier(.2, .8, .2, 1) both;
   --animate-pop: pop .7s cubic-bezier(.2, .8, .2, 1) .1s both;
@@ -103,7 +117,9 @@
   --animate-dot: dot 1.2s infinite ease-in-out;
 }
 
-@keyframes view-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes view-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slide-down { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes rise { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 @keyframes reveal { 0% { opacity: 0; transform: scale(.96) translateY(10px); } 100% { opacity: 1; transform: none; } }
 @keyframes pop { 0% { transform: scale(.4) rotate(-12deg); opacity: 0; } 60% { transform: scale(1.08); opacity: 1; } 100% { transform: none; } }
@@ -116,13 +132,14 @@
 @layer base {
   html, body { height: 100%; }
   body {
-    background: var(--bg); color: var(--ink); font-family: var(--font-sans); font-size: 14px; line-height: 1.5;
+    background: var(--bg); color: var(--ink); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; font-feature-settings: "ss01";
     -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
   }
   ::selection { background: var(--accent-soft); }
   a { color: var(--accent-ink); }
   a:hover { text-decoration: underline; }
-  h1, h2, h3 { letter-spacing: -.01em; }
+  h1, h2, h3 { letter-spacing: -.02em; }
+  .tabular-nums, td { font-variant-numeric: tabular-nums; }
 }
 
 /* A few things utilities can't say: staggered entry, chart text, the waveform canvas. */
@@ -141,8 +158,8 @@
 }
 
 /* Project avatars: one steady hue per project (set as --h on the element), readable in both themes. */
-.avatar { background: hsl(var(--h) 80% 94%); color: hsl(var(--h) 55% 34%); }
-:root[data-theme="dark"] .avatar { background: hsl(var(--h) 32% 20%); color: hsl(var(--h) 85% 80%); }
+.avatar { background: hsl(var(--h) 30% 94%); color: hsl(var(--h) 35% 30%); box-shadow: inset 0 0 0 1px hsl(var(--h) 25% 86%); }
+:root[data-theme="dark"] .avatar { background: hsl(var(--h) 18% 17%); color: hsl(var(--h) 60% 80%); box-shadow: inset 0 0 0 1px hsl(var(--h) 15% 25%); }
 @media (prefers-color-scheme: dark) {
-  :root:where(:not([data-theme="light"])) .avatar { background: hsl(var(--h) 32% 20%); color: hsl(var(--h) 85% 80%); }
+  :root:where(:not([data-theme="light"])) .avatar { background: hsl(var(--h) 18% 17%); color: hsl(var(--h) 60% 80%); box-shadow: inset 0 0 0 1px hsl(var(--h) 15% 25%); }
 }

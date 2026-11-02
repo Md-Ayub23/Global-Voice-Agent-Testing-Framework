@@ -21,13 +21,14 @@ export function ProjectAvatar({ name, k, size = 40, className }: { name: string;
 export function Kpi({ icon, label, value, foot, tone: t = "accent" }: {
   icon: IconName; label: string; value: ReactNode; foot?: ReactNode; tone?: "accent" | "good" | "warn" | "bad";
 }) {
-  const tile = { accent: "bg-accent-soft text-accent-ink", good: "bg-good-soft text-good", warn: "bg-warn-soft text-warn", bad: "bg-bad-soft text-bad" }[t];
+  const dot = { accent: "bg-accent", good: "bg-good", warn: "bg-warn", bad: "bg-bad" }[t];
   return (
-    <div className="bg-surface border border-line rounded-[14px] shadow-soft p-[18px] grid gap-1.5 min-w-0">
-      <div className="flex items-center gap-2.5 text-ink-2 font-semibold text-[12.5px]">
-        <span className={cx("size-8 rounded-[10px] grid place-items-center", tile)}><Icon name={icon} /></span>{label}
+    <div className="bg-surface border border-line rounded-[10px] px-4 py-3.5 grid gap-1 min-w-0">
+      <div className="flex items-center gap-2 text-ink-2 text-[12.5px]">
+        <Icon name={icon} size={14} className="text-muted" />{label}
+        <i className={cx("ml-auto size-1.5 rounded-full", dot)} />
       </div>
-      <div className="text-[30px] font-extrabold tracking-[-.03em] tabular-nums leading-[1.1] mt-1">{value}</div>
+      <div className="text-[26px] font-semibold tracking-[-.025em] tabular-nums leading-[1.15] mt-1">{value}</div>
       {foot && <div className="text-muted text-xs">{foot}</div>}
     </div>
   );

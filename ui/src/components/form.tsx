@@ -151,7 +151,7 @@ export function SaveBar({ dirty, busy, onSave, onRevert, note, id = "save-sectio
   dirty: boolean; busy?: boolean; onSave: () => void; onRevert?: () => void; note?: ReactNode; id?: string; revertLabel?: string;
 }) {
   return (
-    <div className="sticky bottom-3 z-3 mt-4 flex items-center gap-2.5 flex-wrap px-3.5 py-2.5 rounded-xl border border-line bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur shadow-soft">
+    <div className="sticky bottom-3 z-3 mt-4 flex items-center gap-2.5 flex-wrap px-3.5 py-2.5 rounded-[10px] border border-line bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur shadow-soft">
       {dirty ? <Chip tone="warn">unsaved changes</Chip> : <Chip tone="good">saved</Chip>}
       <span className="text-muted text-xs flex-1 min-w-0">{note}</span>
       {onRevert && <Button size="sm" disabled={(!dirty && !revertLabel) || busy} onClick={onRevert}>{revertLabel || "Undo changes"}</Button>}

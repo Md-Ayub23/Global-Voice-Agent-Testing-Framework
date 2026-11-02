@@ -2,20 +2,34 @@
 // found lately, and where they disagree with you. An item blocks a release only once your labels show
 // the judges catch real failures and pass good calls often enough (both 90% by default, over 20 labels
 // with 5+ failures); until then its findings are opinions. Disagreements can become worked examples.
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { CountUp } from "../components/CountUp";
 import { Kpi } from "../components/dash";
 import { Tip, useToast } from "../components/feedback";
 import { Icon } from "../components/Icon";
-import { Button, Card, CardHead, Chip, EmptyState, Notice, PageHead, Skeleton } from "../components/ui";
+import { Button, Card, CardHead, Chip, EmptyState, LinkTabs, Notice, PageHead, Skeleton } from "../components/ui";
 import { useCrumbs, useLoad } from "../lib/app";
 import { cx } from "../lib/format";
 import { JUDGE_NAME, judgesApi, modelName, packLabel, pctOf, VOTE_LABEL } from "../lib/judges";
 import { projectHref } from "../lib/links";
 import type { Disagreement, JudgeItemRow, Project, Thresholds } from "../lib/types";
 
+// The shared top of the three AI judges pages: scores, reviewing calls and the judges' settings.
+export function JudgesHeader({ project, current, toLabel, actions }: { project: Project; current: "scores" | "review" | "settings"; toLabel?: number; actions?: ReactNode }) {
+  return (
+    <>
+      <PageHead title="AI judges" sub="AI judges read every conversation for what hard checks can't see. Your labels decide when to trust them.">{actions}</PageHead>
+      <LinkTabs value={current} tabs={[
+        { value: "scores", label: "Scores", icon: "scale", href: projectHref(project.key, "/judges") },
+        { value: "review", label: <>Review calls{toLabel ? <span className="ml-1 px-1.5 rounded-full bg-warn-soft text-warn text-[11px] font-semibold">{toLabel}</span> : null}</>, icon: "tag", href: projectHref(project.key, "/labels") },
+        { value: "settings", label: "Judge settings", icon: "sparkles", href: projectHref(project.key, "/setup/judges") },
+      ]} />
+    </>
+  );
+}
+
 export function JudgesPageView({ project }: { project: Project }) {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "AI judges" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "AI judges" }, { label: "Scores" }]);
   const [tick, setTick] = useState(0);
   const { data, error } = useLoad(() => judgesApi.page(project.key), [project.key, tick]);
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
@@ -27,12 +41,10 @@ export function JudgesPageView({ project }: { project: Project }) {
 
   return (
     <>
-      <PageHead title="AI judges" sub="AI judges read every conversation for what hard checks can't see. Your labels decide when to trust them.">
-        <Button icon="sparkles" href={projectHref(project.key, "/setup/judges")}>Set up judges</Button>
+      <JudgesHeader project={project} current="scores" toLabel={s.to_label} actions={
         <Button id="label-calls" variant="primary" icon="tag" href={projectHref(project.key, "/labels")}>
           Label calls{s.to_label ? ` (${s.to_label})` : ""}
-        </Button>
-      </PageHead>
+        </Button>} />
       <div className="flex flex-col gap-4">
         {!on && <Notice tone="warn"><b>The judges are off for this agent.</b> Runs check tools, the database, logs and timing only. <a href={projectHref(project.key, "/setup/judges")}>Turn them on</a>.</Notice>}
         {data.problems.length > 0 && <Notice tone="warn">{data.problems.slice(0, 4).map((p, i) => <div key={i} className="text-[12.5px]">{p}</div>)}</Notice>}
@@ -78,7 +90,7 @@ function HowItWorks({ th, tiebreak }: { th: Thresholds; tiebreak: boolean }) {
       <div className="grid gap-4 sm:grid-cols-3">
         {steps.map(([icon, title, text], i) => (
           <div key={title} className="flex items-start gap-3">
-            <span className="size-8 rounded-[10px] grid place-items-center bg-accent-soft text-accent-ink flex-none"><Icon name={icon} size={16} /></span>
+            <span className="size-8 rounded-lg grid place-items-center bg-accent-soft text-accent-ink flex-none"><Icon name={icon} size={16} /></span>
             <div><b className="text-[13.5px]">{i + 1}. {title}</b><div className="text-[12.5px] text-ink-2 mt-0.5">{text}</div></div>
           </div>
         ))}

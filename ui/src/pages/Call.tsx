@@ -4,7 +4,7 @@ import { LatencyBars, Waveform } from "../components/charts";
 import { Icon } from "../components/Icon";
 import { ChecksList, JudgeList, OutcomeNotice } from "../components/runbits";
 import { RowsTable, Timeline, type TimelineHandle } from "../components/Timeline";
-import { Badge, Button, Card, CardHead, Chip, Legend, Notice, Seg, Skeleton, Table } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, Legend, Notice, Seg, Skeleton, Table, Tabs } from "../components/ui";
 import { api } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
 import { projectHref } from "../lib/links";
@@ -15,7 +15,7 @@ function Kpi({ label, value, foot }: { label: string; value: ReactNode; foot?: R
   return (
     <Card className="grid gap-1">
       <div className="text-ink-2 font-semibold text-[12.5px]">{label}</div>
-      <div className="text-[26px] font-extrabold tracking-[-.02em] tabular-nums leading-[1.15]">{value}</div>
+      <div className="text-[26px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">{value}</div>
       {foot && <div className="text-muted text-xs">{foot}</div>}
     </Card>
   );
@@ -23,13 +23,14 @@ function Kpi({ label, value, foot }: { label: string; value: ReactNode; foot?: R
 
 export function CallPage({ project, runId, testId }: { project: Project; runId: string; testId: string }) {
   const runAt = (path = "") => projectHref(project.key, `/runs/${runId}${path}`);
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
-    { label: "Run history", href: projectHref(project.key, "/runs") }, { label: "Report", href: runAt() }, { label: "Call" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
+    { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run", href: runAt() }, { label: "Call" }]);
   const { data, error } = useLoad(
     () => Promise.all([api.get<CallDetail>(`/api/runs/${runId}/calls/${testId}`), api.get<RunDetail>(`/api/runs/${runId}`)]),
     [runId, testId],
   );
   const [view, setView] = useState<"chat" | "text">("chat");
+  const [side, setSide] = useState("checks");
   const [audio, setAudio] = useState<HTMLAudioElement | null>(null);
   const tl = useRef<TimelineHandle>(null);
   const pendingFlash = useRef<number | null>(null);
@@ -60,6 +61,14 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
   const judged = (v?.checks || []).filter((x) => x.origin === "judge");
   const judgedRan = judged.some((x) => x.judge?.votes?.length);
 
+  const sideTabs = [
+    { value: "checks", label: "Checks" },
+    ...(v && judged.length ? [{ value: "judges", label: "AI judges" }] : []),
+    ...(m.latency_turns?.length ? [{ value: "times", label: "Timing" }] : []),
+    ...(c.database.length ? [{ value: "db", label: "Database" }] : []),
+    { value: "files", label: "Evidence" },
+  ];
+  const sideShown = sideTabs.some((t) => t.value === side) ? side : "checks";
   const onEvidence = (seq: number) => {
     if (view === "chat") tl.current?.flash(seq);
     else { pendingFlash.current = seq; setView("chat"); }
@@ -75,7 +84,7 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
       <div className="flex items-end gap-4 mt-2 mb-5 flex-wrap">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold">{shortScenario(r.scenario_id)}</h1>
+            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{shortScenario(r.scenario_id)}</h1>
             {v ? <Badge status={v.status} /> : <Badge status={running ? "running" : "interrupted"} />}
             {final === false && <Chip tone="warn" icon="refresh">attempt {r.attempt}: Vocto error, rerun · not counted</Chip>}
           </div>
@@ -89,7 +98,7 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
         <div className="flex gap-2">
           {prev && <Button size="sm" iconOnly icon="back" href={runAt(`/calls/${prev.test_id}`)} title="Previous call" aria-label="Previous call" />}
           {next && <Button size="sm" iconOnly icon="arrow" href={runAt(`/calls/${next.test_id}`)} title="Next call" aria-label="Next call" />}
-          <Button size="sm" icon="layers" href={runAt()}>Run report</Button>
+          <Button size="sm" icon="layers" href={runAt()}>Back to the run</Button>
         </div>
       </div>
 
@@ -155,16 +164,17 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
               </dl>
             </Card>
           )}
-          <Card>
+          <Tabs value={sideShown} onChange={setSide} tabs={sideTabs} className="mb-0 -mt-1" />
+          {sideShown === "checks" && <Card className="animate-view-in">
             <CardHead title="Checks" sub={v ? `${own.filter((x) => x.result === "PASS").length} of ${own.length} passed` : undefined} />
             <div id="checks">
               {v ? <ChecksList verdict={v} onEvidence={onEvidence} />
                 : <div className="text-muted text-[12.5px]">{running ? "This call has no verdict yet." : "The run was stopped during this call, so it was never judged."}</div>}
             </div>
             <div className="text-muted text-[11.5px] mt-2">Click an event number to see it in the conversation.</div>
-          </Card>
-          {v && judged.length > 0 && (
-            <Card id="judges">
+          </Card>}
+          {sideShown === "judges" && v && judged.length > 0 && (
+            <Card id="judges" className="animate-view-in">
               <CardHead title="AI judges" sub={judgedRan ? judgeSub(judged) : "not run"}>
                 <Button size="sm" variant="ghost" href={projectHref(project.key, "/judges")}>About</Button>
               </CardHead>
@@ -178,14 +188,14 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
               <JudgeList verdict={v} onEvidence={onEvidence} labelHref={judgedRan && final !== false ? projectHref(project.key, `/labels/${runId}/${testId}`) : undefined} />
             </Card>
           )}
-          {m.latency_turns && m.latency_turns.length > 0 && (
-            <Card>
+          {sideShown === "times" && m.latency_turns && m.latency_turns.length > 0 && (
+            <Card className="animate-view-in">
               <CardHead title="Response times" sub="end of the caller's words → first sound of the answer" />
               <LatencyBars rows={m.latency_turns} limits={limits} width={330} />
             </Card>
           )}
-          {c.database.length > 0 && (
-            <Card>
+          {sideShown === "db" && c.database.length > 0 && (
+            <Card className="animate-view-in">
               <CardHead title="Database after the call" />
               <div className="flex flex-col gap-3">
                 {c.database.map((d) => (
@@ -197,7 +207,7 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
               </div>
             </Card>
           )}
-          <Card>
+          {sideShown === "files" && <Card className="animate-view-in">
             <CardHead title="Evidence downloads" sub={`${r.locked ? "sealed" : "still open"}${r.events_sha256 ? ` · sha256 ${r.events_sha256.slice(0, 10)}…` : ""}`} />
             <div className="flex flex-col gap-1.5">
               {c.files.map((f) => (
@@ -206,7 +216,7 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
                 </a>
               ))}
             </div>
-          </Card>
+          </Card>}
         </div>
       </div>
     </>

@@ -153,7 +153,7 @@ function DraftRow({ t, on, open, crit, onToggle, onOpen, onCrit }: {
   const sc = t.scenario as Record<string, any>;
   const blocked = t.problems.length > 0 || t.accepted;
   return (
-    <div data-draft={t.id} className={cx("rounded-xl border", on ? "border-accent/60 bg-accent-soft/30" : "border-line")}>
+    <div data-draft={t.id} className={cx("rounded-[10px] border", on ? "border-accent/60 bg-accent-soft/30" : "border-line")}>
       <div className="flex items-center gap-3 p-2.5 flex-wrap">
         <input type="checkbox" aria-label={`Add ${t.title}`} className="accent-[var(--accent)]" checked={on && !blocked} disabled={blocked} onChange={(e) => onToggle(e.target.checked)} />
         <button type="button" className="flex-1 min-w-[200px] text-left cursor-pointer" onClick={onOpen}>

@@ -17,9 +17,9 @@ import type { CallDetail, Job, Limits, Project, RunDetail } from "../lib/types";
 export function Live({ project, jobId }: { project: Project; jobId: string | null }) {
   const { activeJob, projects } = useApp();
   const { data, error } = useLoad<Job | Job[]>(() => (jobId ? api.get<Job>(`/api/jobs/${jobId}`) : api.get<Job[]>("/api/jobs")), [jobId]);
-  const base = [{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }];
-  useCrumbs(jobId ? [...base, { label: "Live run", href: projectHref(project.key, "/live") }, { label: data && !Array.isArray(data) && data.kind === "exit-check" ? "Exit check" : "Test run" }]
-    : [...base, { label: "Live run" }]);
+  const base = [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }];
+  useCrumbs(jobId ? [...base, { label: "Results", href: projectHref(project.key, "/runs") }, { label: data && !Array.isArray(data) && data.kind === "exit-check" ? "Exit check" : "Test run" }]
+    : [...base, { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Live" }]);
 
   if (!jobId) {
     if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
@@ -30,18 +30,18 @@ export function Live({ project, jobId }: { project: Project; jobId: string | nul
     const other = projectOfJob(activeJob, projects);
     return (
       <>
-        <div className="mt-2 mb-5"><h1 className="text-2xl font-bold">Live run</h1><div className="mt-1 text-ink-2">Watch a run of {project.name} as it happens: every turn, tool call and check.</div></div>
+        <div className="mt-2 mb-5"><h1 className="text-[24px] font-semibold">Live run</h1><div className="mt-1 text-ink-2">Watch a run of {project.name} as it happens: every turn, tool call and check.</div></div>
         {activeJob && other && other.key !== project.key && (
           <Notice className="mb-4" icon="activity">A run of <b>{other.name}</b> is in progress. <a href={projectHref(other.key, `/live/${activeJob.id}`)}>Watch it</a></Notice>
         )}
         <Card><EmptyState title="Nothing is running" text="Start a run and it appears here live." icon="wave"
-          action={<Button href={projectHref(project.key, "/new")} variant="primary" icon="play">New run</Button>} /></Card>
+          action={<Button href={projectHref(project.key, "/new")} variant="primary" icon="play">Run tests</Button>} /></Card>
       </>
     );
   }
   if (error) {
-    return <Card><EmptyState title="This run isn't live any more" text="Vocto was restarted since. Finished runs are all in Run history." icon="help"
-      action={<Button href={projectHref(project.key, "/runs")}>Run history</Button>} /></Card>;
+    return <Card><EmptyState title="This run isn't live any more" text="Vocto was restarted since. Finished runs are all in Results." icon="help"
+      action={<Button href={projectHref(project.key, "/runs")}>Results</Button>} /></Card>;
   }
   if (!data) return <Skeleton />;
   if (Array.isArray(data)) return <Skeleton />;   // the list from before the address changed
@@ -173,7 +173,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
     <>
       <div className="flex items-end gap-4 mt-2 mb-5 flex-wrap">
         <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5"><h1 className="text-2xl font-bold">{exit ? "Exit check" : "Test run"}</h1><span id="status"><Badge status={job.status} /></span></div>
+          <div className="flex flex-wrap items-center gap-2.5"><h1 className="text-[24px] font-semibold">{exit ? "Exit check" : "Test run"}</h1><span id="status"><Badge status={job.status} /></span></div>
           <div className="mt-2 flex flex-wrap items-center gap-1.5 text-ink-2">
             <b className="text-ink">{project.name}</b>
             {runMode && <Chip tone={runMode === "voice" ? "agent" : "caller"} icon={runMode === "voice" ? "mic" : "text"}>{modeLabel(runMode)}</Chip>}
@@ -330,7 +330,7 @@ function SidePanel({ call, limits, live }: { call: CallDetail; limits: Limits | 
   const last = ev[ev.length - 1];
   const m = call.verdict?.metrics;
   const stat = (label: string, value: React.ReactNode) => (
-    <div className="grid gap-1"><div className="text-ink-2 font-semibold text-[12.5px]">{label}</div><div className="text-[22px] font-extrabold tabular-nums leading-[1.15]">{value}</div></div>
+    <div className="grid gap-1"><div className="text-ink-2 font-semibold text-[12.5px]">{label}</div><div className="text-[22px] font-semibold tabular-nums leading-[1.15]">{value}</div></div>
   );
   return (
     <>
@@ -458,13 +458,13 @@ function Console({ lines, open }: { lines: string[]; open: boolean }) {
     : /warning|harness/i.test(l) ? "text-[#f2b84b]" : /^vatf/.test(l) ? "text-[#7c869a]" : "";
   const rendered = useMemo(() => lines.map((l, i) => <div key={i} className={cls(l)}>{l || " "}</div>), [lines]);
   return (
-    <details className="bg-surface border border-line rounded-[14px] shadow-soft p-[18px] mt-4" id="console-box" open={isOpen}
+    <details className="bg-surface border border-line rounded-[10px] p-[18px] mt-4" id="console-box" open={isOpen}
       onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary className="flex items-center cursor-pointer list-none">
         <Icon name="arrow" size={14} className={cx("mr-2 transition-transform", isOpen && "rotate-90")} />
         <h3 className="flex-1 font-semibold text-sm">Activity log</h3><span className="text-muted text-[12.5px]">technical details</span>
       </summary>
-      <div ref={box} id="console" className="mt-3 font-mono text-xs leading-[1.55] bg-[#0b0f17] text-[#c9d1e3] rounded-xl px-3.5 py-3 max-h-[260px] overflow-auto whitespace-pre-wrap break-words">
+      <div ref={box} id="console" className="mt-3 font-mono text-xs leading-[1.55] bg-[#0b0f17] text-[#c9d1e3] rounded-[10px] px-3.5 py-3 max-h-[260px] overflow-auto whitespace-pre-wrap break-words">
         {rendered}
       </div>
     </details>

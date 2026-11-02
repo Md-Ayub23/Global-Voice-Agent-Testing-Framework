@@ -5,7 +5,7 @@ import { Tip } from "../components/feedback";
 import { Icon } from "../components/Icon";
 import { EvRef, Hero, OptionChips, heroToneOf } from "../components/runbits";
 import { Help } from "../components/form";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, Legend, Notice, Skeleton, Table, rowLink } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, EmptyState, Legend, Notice, Skeleton, Table, Tabs, rowLink } from "../components/ui";
 import { api } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
 import { modeLabel, projectHref, runHref } from "../lib/links";
@@ -79,10 +79,11 @@ function CallsTable({ calls, runId, voice, running }: { calls: CallBrief[]; runI
 }
 
 export function RunReport({ project, runId }: { project: Project; runId: string }) {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
-    { label: "Run history", href: projectHref(project.key, "/runs") }, { label: "Report" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
+    { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run" }]);
   const { data: run, error } = useLoad(() => api.get<RunDetail>(`/api/runs/${runId}`), [runId]);
   const [dotsBox, dotsWidth] = useWidth<HTMLDivElement>();
+  const [tab, setTab] = useState("calls");
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!run) return <Skeleton />;
 
@@ -112,12 +113,23 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
     </span>
   ));
 
+  const heard = !!(d?.heard_numbers && d.heard_numbers.numbers > 0);
+  const tabs: { value: string; label: ReactNode }[] = [
+    { value: "calls", label: <>Calls <Count n={finals.length} /></> },
+    ...(d && reliability.length ? [{ value: "reliability", label: "Reliability" }] : []),
+    ...(timed || heard ? [{ value: "times", label: "Response times" }] : []),
+    ...(d?.judges?.length ? [{ value: "judges", label: "AI judges" }] : []),
+    ...(d?.safety ? [{ value: "safety", label: <>Safety {d.safety.failed ? <Count n={d.safety.failed} bad /> : null}</> }] : []),
+    ...(info ? [{ value: "setup", label: "Run setup" }] : []),
+  ];
+  const shown = tabs.some((t) => t.value === tab) ? tab : "calls";
+
   return (
     <>
-      <div className="flex items-end gap-4 mt-2 mb-5 flex-wrap">
+      <div className="flex items-end gap-4 mt-3 mb-6 flex-wrap">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-2xl font-bold">{modeLabel(sm.mode)} run report</h1>
+            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{modeLabel(sm.mode)} test run</h1>
             <OptionChips run={sm} />
           </div>
           <div className="mt-1 text-ink-2 flex flex-wrap items-center gap-2">
@@ -167,7 +179,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
             {voice && (
               <Card className="grid gap-1">
                 <div className="flex items-center gap-2 text-ink-2 font-semibold text-[12.5px]"><Icon name="clock" />Response time</div>
-                <div className="text-[28px] font-extrabold tracking-[-.02em] tabular-nums leading-[1.15]">
+                <div className="text-[28px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">
                   {fmtMs(d.latency.p50_ms)}<small className="text-sm font-semibold text-muted ml-1">p50</small>
                 </div>
                 <div className="text-muted text-xs">p95 {fmtMs(d.latency.p95_ms)} · limits {fmtMs(d.latency.p50_limit_ms)} / {fmtMs(d.latency.p95_limit_ms)}</div>
@@ -181,11 +193,15 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           </div>
         )}
 
-        {d?.heard_numbers && d.heard_numbers.numbers > 0 && <HeardCard heard={d.heard_numbers} callLink={callLink} />}
+        <div className="mt-2">
+          <Tabs value={shown} onChange={setTab} tabs={tabs} className="mb-0" />
+        </div>
 
-        {d?.safety && <SafetyRunCard safety={d.safety} callLink={callLink} projectKey={project.key} />}
+        {shown === "times" && d?.heard_numbers && d.heard_numbers.numbers > 0 && <HeardCard heard={d.heard_numbers} callLink={callLink} />}
 
-        {d && reliability.length > 0 && (
+        {shown === "safety" && d?.safety && <SafetyRunCard safety={d.safety} callLink={callLink} projectKey={project.key} />}
+
+        {shown === "reliability" && d && reliability.length > 0 && (
           <Card>
             <CardHead level={2} title="Reliability" sub="pass^k: a critical scenario must pass every repeat" />
             <Table head={["Scenario", "Criticality", "Repeats", "Passed", "All passed"]}>
@@ -215,9 +231,9 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           </Card>
         )}
 
-        {d && d.judges && d.judges.length > 0 && <JudgesCard judges={d.judges} projectKey={project.key} relabelled={d.relabelled_at} />}
+        {shown === "judges" && d && d.judges && d.judges.length > 0 && <JudgesCard judges={d.judges} projectKey={project.key} relabelled={d.relabelled_at} />}
 
-        {timed && (
+        {shown === "times" && timed && (
           <Card>
             <CardHead level={2} title="Response times" sub="every timed answer · grey ones don't count (talk-over, injected delays) · click a dot to open its call" />
             <div ref={dotsBox}>
@@ -229,21 +245,21 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           </Card>
         )}
 
-        <Card flush>
+        {shown === "calls" && <Card flush>
           <CardHead level={2} title="Calls" sub="click a call to see the conversation, the checks and the evidence" className="px-[18px] pt-4 mb-2" />
           {finals.length ? <CallsTable calls={finals} runId={runId} voice={voice} running={running} />
             : <EmptyState title="No calls" text="No call finished in this run." icon="phone" />}
-        </Card>
+        </Card>}
 
-        {reruns.length > 0 && (
+        {shown === "calls" && reruns.length > 0 && (
           <Card flush>
             <CardHead level={2} title="Reruns after Vocto errors" sub="Vocto's own failures: rerun automatically, never blamed on the agent" className="px-[18px] pt-4 mb-2" />
             <CallsTable calls={reruns} runId={runId} voice={voice} running={running} />
           </Card>
         )}
 
-        {info && (
-          <details className="bg-surface border border-line rounded-[14px] shadow-soft p-[18px] group">
+        {shown === "setup" && info && (
+          <details open className="bg-surface border border-line rounded-[10px] p-5 group">
             <summary className="cursor-pointer font-semibold flex items-center gap-2 list-none">
               <Icon name="arrow" className="transition-transform group-open:rotate-90" />How this run was set up
             </summary>
@@ -269,6 +285,11 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
       </div>
     </>
   );
+}
+
+// A small count next to a tab name.
+function Count({ n, bad }: { n: number; bad?: boolean }) {
+  return <span className={cx("ml-1 px-1.5 rounded-full text-[11px] font-semibold tabular-nums", bad ? "bg-bad-soft text-bad" : "bg-surface-3 text-ink-2")}>{n}</span>;
 }
 
 // One line under the decision: which layer decided, and the judge opinions that were left out of it.
@@ -340,7 +361,7 @@ function SafetyRunCard({ safety, callLink, projectKey }: { safety: SafetyResult;
     <Card id="run-safety">
       <CardHead level={2} title="Safety tests"
         sub={`${safety.passed} of ${safety.calls} attack call(s) clean · ${safety.failed} with a finding${safety.to_review ? ` · ${safety.to_review} waiting for your label` : ""}${blocking ? ` · ${blocking} blocking` : ""}`}>
-        <Button size="sm" variant="ghost" icon="sliders" href={projectHref(projectKey, "/setup/plan")}>Choose attacks</Button>
+        <Button size="sm" variant="ghost" icon="sliders" href={projectHref(projectKey, "/setup/safety")}>Choose attacks</Button>
       </CardHead>
       <div className="flex flex-wrap gap-1.5 mb-3">
         {Object.entries(safety.packs).map(([pack, p]) => (
@@ -353,7 +374,7 @@ function SafetyRunCard({ safety, callLink, projectKey }: { safety: SafetyResult;
         <div className="grid gap-2" id="safety-findings">
           {safety.findings.map((f, i) => (
             <a key={i} href={callLink(f.test_id)} data-finding={f.check_id}
-              className="flex items-start gap-3 p-3 border border-line rounded-xl hover:bg-surface-2/60 hover:no-underline transition-colors text-ink">
+              className="flex items-start gap-3 p-3 border border-line rounded-[10px] hover:bg-surface-2/60 hover:no-underline transition-colors text-ink">
               {f.result === "NEEDS_REVIEW" ? <Chip tone="warn" icon="help" className="font-bold">Needs you</Chip>
                 : f.result === "FAIL" && !f.can_block ? <Chip icon="info" className="font-bold">Opinion: fail</Chip>
                 : <Badge status={f.result} label={f.result === "FAIL" ? "Problem" : undefined} />}

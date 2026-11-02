@@ -1,7 +1,8 @@
 // The agent and how to reach it: name, domain, its address (voice or text), headers, test id.
 import { useState } from "react";
 import { Area, Block, Check, Grid, Help, KeyValue, Num, Problems, SaveBar, Select, Text, TestResult, type Obj, type TestOutcome } from "../../components/form";
-import { Button, Card, Choice, Field, Notice } from "../../components/ui";
+import { Button, Card, Choice, Field, Notice, inputCls } from "../../components/ui";
+import { cx } from "../../lib/format";
 import { owner, setupApi } from "../../lib/setup";
 import { asList, asObj, str, useDraft, type TabProps } from "./common";
 
@@ -19,7 +20,7 @@ function Identity({ detail, reload }: TabProps) {
           <Field label="Name"><Text id="agent-name" value={d.draft.name as string} onChange={(v) => d.setDraft({ ...d.draft, name: v })} /></Field>
           <Field label="Industry" hint="Shown on the dashboard as the type of agent.">
             <>
-              <input list="domains" className="h-9 w-full px-[11px] rounded-[9px] border border-line-strong bg-surface text-ink outline-none font-normal focus:border-accent"
+              <input list="domains" className={cx(inputCls, "font-normal")}
                 value={d.draft.domain as string} onChange={(e) => d.setDraft({ ...d.draft, domain: e.target.value })} />
               <datalist id="domains">{DOMAINS.map((x) => <option key={x} value={x} />)}</datalist>
             </>
@@ -239,7 +240,7 @@ function StartAgent({ detail, reload }: TabProps) {
               <Field label={i ? "" : "Name"}><Text mono value={b.id} placeholder="skip_confirmation" onChange={(v) => setBug(i, { id: v })} /></Field>
               <Field label={i ? "" : "What it does"}><Text value={b.title} placeholder="Places the order without confirming it" onChange={(v) => setBug(i, { title: v })} /></Field>
               <Field label={i ? "" : "Caught by scenario"}>
-                <input list="ap-scenarios" className="h-9 w-full px-[11px] rounded-[9px] border border-line-strong bg-surface text-ink outline-none font-mono text-[12.5px] focus:border-accent"
+                <input list="ap-scenarios" className={cx(inputCls, "font-normal font-mono text-[12.5px]")}
                   value={b.scenario} onChange={(e) => setBug(i, { scenario: e.target.value })} />
               </Field>
               <Field label={i ? "" : "Judge item (optional)"}><Text mono value={b.judge} placeholder="polite-professional-tone" onChange={(v) => setBug(i, { judge: v })} /></Field>

@@ -21,21 +21,23 @@ function stepsOf(p: Project, stats: ProjectStats, judges?: JudgeSummary, safetyR
   const tools = main?.tools?.length ?? 0;
   const conn = !!main && main.ok && !!(main.connection.target || main.connection.launch);
   return [
-    { key: "agent", title: "Connect the agent", icon: "plug", need: "required", href: projectHref(k, "/setup/agent"), done: conn, problem: !!main && !main.ok,
+    { key: "agent", title: "Connect the agent", icon: "plug", need: "required", href: projectHref(k, "/setup/connection"), done: conn, problem: !!main && !main.ok,
       text: conn ? `${p.channels.map(modeLabel).join(" and ")} connection set` : main && !main.ok ? `${main.problems.length} thing(s) to fix` : "Add the agent's address" },
     { key: "tools", title: "Tools", icon: "tool", need: "recommended", href: projectHref(k, "/setup/tools"), done: tools > 0,
       text: tools ? `${tools} tool${tools === 1 ? "" : "s"} watched` : "See and break the agent's API calls" },
-    { key: "backend", title: "Backend & database", icon: "db", need: "recommended", href: projectHref(k, "/setup/backend"), done: !!main?.backend && main.backend !== "none",
+    { key: "backend", title: "Database", icon: "db", need: "recommended", href: projectHref(k, "/setup/backend"), done: !!main?.backend && main.backend !== "none",
       text: main?.backend && main.backend !== "none" ? (main.backend === "sql" ? "Database connected" : "API connected") : "Check what really got saved" },
     { key: "logs", title: "Logs", icon: "logs", need: "optional", href: projectHref(k, "/setup/logs"), done: !!main?.logs && main.logs !== "none",
       text: main?.logs && main.logs !== "none" ? "Agent logs collected" : "Keep the agent's logs with each call" },
-    { key: "plan", title: "Test plan", icon: "plan", need: "required", href: projectHref(k, "/setup/plan"), done: stats.scenarios > 0,
-      text: stats.scenarios ? `${stats.scenarios} scenario${stats.scenarios === 1 ? "" : "s"} · ${stats.personas} persona${stats.personas === 1 ? "" : "s"}` : "Add scenarios and callers" },
+    { key: "plan", title: "Test cases", icon: "plan", need: "required", href: projectHref(k, "/setup/cases"), done: stats.scenarios > 0,
+      text: stats.scenarios ? `${stats.scenarios} scenario${stats.scenarios === 1 ? "" : "s"}` : "Write them, or let Claude draft them" },
+    { key: "callers", title: "Callers", icon: "user", need: "recommended", href: projectHref(k, "/setup/callers"), done: stats.personas > 0,
+      text: stats.personas ? `${stats.personas} persona${stats.personas === 1 ? "" : "s"}` : "Add callers from the library" },
     { key: "judges", title: "AI judges", icon: "scale", need: "recommended", href: projectHref(k, judges?.labelled_calls ? "/judges" : "/setup/judges"),
       done: !!judges && judges.items > 0 && main?.judges !== false && !!judges.labelled_calls,
       text: main?.judges === false ? "Off: turn on to check tone and facts" : !judges ? "Check tone, facts and scope"
         : judges.labelled_calls ? `${judges.calibrated} of ${judges.items} items trusted to block` : `${judges.items} items · label calls to trust them` },
-    { key: "safety", title: "Safety tests", icon: "shield", need: "recommended", href: projectHref(k, safetyRun ? `/runs/${safetyRun.run_id}` : "/setup/plan"),
+    { key: "safety", title: "Safety tests", icon: "shield", need: "recommended", href: projectHref(k, safetyRun ? `/runs/${safetyRun.run_id}` : "/setup/safety"),
       done: !!safetyRun, problem: !!safetyRun?.safety?.failed,
       text: main?.safety?.enabled === false ? "Off: turn on to try attacks on the agent"
         : safetyRun?.safety ? `Last run: ${safetyRun.safety.passed} of ${safetyRun.safety.calls} attacks handled safely`
@@ -59,21 +61,21 @@ function SetupSteps({ steps }: { steps: Step[] }) {
       <div className="grid gap-2.5 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" id="setup-steps">
         {steps.map((s, i) => (
           <a key={s.key} href={s.href} data-step={s.key}
-            className={cx("group flex items-start gap-3 p-3 rounded-xl border transition-colors hover:no-underline text-ink",
+            className={cx("group flex items-start gap-3 p-3 rounded-[10px] border transition-colors hover:no-underline text-ink",
               s.done ? "border-line bg-surface hover:bg-surface-2" : s.problem ? "border-[color-mix(in_srgb,var(--warn)_40%,transparent)] bg-warn-soft/50 hover:bg-warn-soft"
-                : "border-dashed border-line-strong hover:border-accent hover:bg-accent-soft/40")}>
-            <span className={cx("size-8 rounded-full grid place-items-center flex-none text-[13px] font-bold",
-              s.done ? "bg-good text-white" : s.problem ? "bg-warn text-white" : "bg-surface-3 text-ink-2")}>
-              {s.done ? <Icon name="check" size={15} strokeWidth={3} /> : s.problem ? <Icon name="alert" size={15} /> : i + 1}
+                : "border-line hover:border-line-strong hover:bg-surface-2")}>
+            <span className={cx("size-6 mt-px rounded-full grid place-items-center flex-none text-[12px] font-medium tabular-nums",
+              s.done ? "bg-good-soft text-good" : s.problem ? "bg-warn-soft text-warn" : "border border-line-strong text-ink-2")}>
+              {s.done ? <Icon name="check" size={13} strokeWidth={2.5} /> : s.problem ? <Icon name="alert" size={13} /> : i + 1}
             </span>
             <span className="flex-1 min-w-0">
               <span className="flex items-center gap-2 flex-wrap">
-                <b className="text-[13.5px]">{s.title}</b>
-                {!s.done && s.need !== "required" && <span className="text-[11px] text-muted font-semibold uppercase tracking-[.05em]">{s.need}</span>}
+                <b className="text-[13.5px] font-medium">{s.title}</b>
+                {!s.done && s.need !== "required" && <span className="font-mono text-[10.5px] text-muted uppercase tracking-[.06em]">{s.need}</span>}
               </span>
               <span className="block text-[12.5px] text-ink-2 mt-0.5">{s.text}</span>
             </span>
-            <Icon name="chevron" size={16} className="text-muted mt-2 transition-transform group-hover:translate-x-0.5" />
+            <Icon name="chevron" size={16} className="text-muted mt-1 transition-transform group-hover:translate-x-0.5" />
           </a>
         ))}
       </div>
@@ -82,7 +84,7 @@ function SetupSteps({ steps }: { steps: Step[] }) {
 }
 
 export function ProjectOverviewPage({ project }: { project: Project }) {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name }]);
   const { activeJob, projects } = useApp();
   const { data, error } = useLoad(() => api.get<ProjectOverview>(`/api/project/${project.key}`), [project.key, activeJob?.status]);
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
@@ -100,7 +102,7 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
       <div className="flex items-start gap-4 mt-2 mb-6 flex-wrap">
         <ProjectAvatar name={project.name} k={project.key} size={56} />
         <div className="flex-1 min-w-[240px]">
-          <h1 className="text-2xl font-bold tracking-[-.02em]">{project.name}</h1>
+          <h1 className="text-[24px] font-semibold tracking-[-.02em]">{project.name}</h1>
           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
             <Chip>{domainLabel(project.domain)}</Chip>
             {project.channels.map((c) => <Chip key={c} tone={c === "voice" ? "agent" : "caller"} icon={c === "voice" ? "mic" : "text"}>{modeLabel(c)}</Chip>)}
@@ -110,7 +112,7 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
           {project.description && <p className="text-ink-2 mt-2 max-w-[760px]">{project.description}</p>}
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button icon="settings" href={projectHref(project.key, "/setup/agent")}>Set up</Button>
+          <Button icon="settings" href={projectHref(project.key, "/setup/connection")}>Set up</Button>
           {running
             ? <Button variant="primary" icon="activity" href={projectHref(project.key, "/live")}>Watch live run</Button>
             : <Button id="run-tests" variant="primary" icon="play" href={projectHref(project.key, "/new")}>Run tests</Button>}
@@ -152,7 +154,7 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
         <div className={cx("grid gap-4 items-start grid-cols-1", s.runs > 0 && "xl:grid-cols-[minmax(0,1fr)_380px]")}>
           <Card flush>
             <div className="flex items-center px-[18px] pt-4 pb-3"><h2 className="font-semibold text-base flex-1">Recent runs</h2>
-              <Button href={projectHref(project.key, "/runs")} variant="ghost" size="sm">Run history <Icon name="arrow" /></Button></div>
+              <Button href={projectHref(project.key, "/runs")} variant="ghost" size="sm">All results <Icon name="arrow" /></Button></div>
             {data.recent_runs.length ? (
               <Table head={["Decision", "Channel", "Calls", "Pass / fail", "p95", "When"]}>
                 {data.recent_runs.map((r) => (

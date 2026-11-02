@@ -15,28 +15,34 @@ It needs nothing beyond `uv sync`. Forms save into the same YAML files as before
 
 ## How it is organised
 
-The app is built around **projects**: one project per voice agent you test. The sidebar has the
-workspace pages at the top, and once you open a project, that project's own pages below it (with a
-switcher to jump to another project).
+The app is built around **agents**: one per voice agent you test (each is a project folder underneath).
+The sidebar has the workspace pages at the top. Once you open an agent, its own pages appear below in the
+order the work happens: **Overview**, then **1 Set up**, **2 Test** and **3 Quality**, with a switcher to jump
+to another agent. Pages that belong together are tabs of one page, so nothing is hidden inside another page.
 
 | Page | What it is for |
 |---|---|
-| **Dashboard** (home) | Every agent at a glance: how many projects and which kinds (voice / text, industry), test runs, the release GO rate, runs per day for the last 14 days, each project's last result and recent decisions, and the latest runs across all projects. Runs with bug switches on are bug tests: they are listed but left out of the GO rate. |
-| **Projects** | Your agents and Vocto's practice agents as cards. *New project* asks for the agent's name, industry, voice or text, and (optionally) its address. |
-| **Settings** | Each agent's test settings (p50 / p95 limits, repeats, coverage, budget), **Secrets** (every `${NAME}` your projects use, with a place to set its value; kept on this computer only), the Anthropic API key and the speech models. |
+| **Home** | Every agent at a glance: *Needs attention* (agents whose latest run was NO-GO or not enough evidence, and your agents not ready to run), how many agents and which kinds, test runs, the release GO rate, runs per day for 14 days, each agent's last result and the latest runs. Runs with bug switches on are bug tests: listed but left out of the GO rate. |
+| **Agents** | Your agents and Vocto's practice agents as cards. *New agent* asks for the agent's name, industry, voice or text, and (optionally) its address. |
+| **Settings** | The Anthropic API key, the speech models, **Secrets** (every `${NAME}` your agents use; kept on this computer only) and a link to each agent's pass rules. |
 
-Inside a project:
+Inside an agent:
 
-| Page | What it is for |
-|---|---|
-| **Overview** | The agent, its latest release decision, a setup checklist (connect the agent, tools, backend, logs, test plan, AI judges, safety tests, first run) with a link to each step, its numbers and recent runs. |
-| **New run** | Choose the channel (voice or text), scenarios, caller (Claude or a free dry run) and repeats, then *Start run*. *Include safety tests* adds the attack calls written for this agent. For an agent that runs on this computer, *Start the agent for me* starts it before the first call and stops it after the last, and *Planted bug* starts it with one known bug. Practice agents offer bug switches; they and agents with planted bugs also have the exit check. |
-| **Live run** | A run as it happens: the conversation of the current call, tool calls, broken tools, response times and checks as each call is judged. For voice runs, *Listen live* plays the call in your browser as it happens (see [phase2-guide.md](phase2-guide.md#listening-live)). |
-| **Run history** | Every run of this agent; filter by decision or channel. Agents with an exit check also have an *Exit checks* tab. |
-| **AI judges** | What the AI judges score (items for every agent, the industry pack, the agent's own, scenario questions), whether each item is trusted to block yet, how many of your failures it caught and good calls it passed, *Teach the judges* examples, and recent results. *Label calls* opens the queue. See [phase3-guide.md](phase3-guide.md). |
-| **Label calls** | Calls waiting for your label, the most useful first (judges disagree, a judge failed it, bug tests). Pick Pass / Fail / Doesn't apply per item without seeing the judges' answers, with an optional why; after saving you see the judges' answers, and the run's decision is updated. |
-| **Run report** and **Call** | The decision and why, scorecard, coverage, safety tests (each kind of attack and every finding), reliability, response times and every call; for one call the recording, conversation, said vs did vs stored, each check with its evidence, and the database after the call. |
-| **Set up** (7 pages) | **Agent & connection** (including the voice format, Twilio Media Streams or Vocto's protocol, and *Starting the agent* with its planted bugs), **Tools**, **Backend & database**, **Logs**, **Test plan** (scenarios and personas as forms, and the safety tests: how hard to push, which attacks, planted secrets), **AI judges** (on/off, the agent's policy, items, custom items, models and the deciding judge) and **Test settings**. Each page has a *Next* button, so a new project can be set up in order. See [onboarding-guide.md](onboarding-guide.md). |
+| Group | Page | What it is for |
+|---|---|---|
+| | **Overview** | The agent, its latest release decision, a set-up checklist with a link to each step, its numbers and recent runs. |
+| 1 Set up | **Connection** | Who the agent is and how Vocto reaches it (voice format, Twilio Media Streams or Vocto's protocol, *Starting the agent* and its planted bugs). |
+| | **Tools & data** | Three tabs: **Tools** (the APIs the agent calls), **Database** (read-only access to check what really got saved) and **Logs**. |
+| | **Test cases** | The scenarios as a list and forms, and *Write tests for me* (Claude drafts a plan from the agent's instructions). *Advanced* opens the raw file editor. |
+| | **Callers** | Personas (who calls), and *Add from library*. |
+| | **Safety tests** | How hard to push, which attacks, your own questions, planted secrets. |
+| | **Pass rules** | What a GO needs for this agent: p50 / p95 limits, repeats, coverage, budget. |
+| 2 Test | **Run tests** | Choose the channel, scenarios, caller (Claude or a free dry run) and repeats, then *Start run*; or an exit check. *Include safety tests* adds the attack calls. |
+| | **Results** | A run in progress is pinned on top (*Watch live* shows the calls as they happen; for voice, *Listen live* plays them). Below, every run, filterable, and an *Exit checks* tab. A run opens its page: the decision and why, scorecard and coverage, then tabs for **Calls**, **Reliability**, **Response times**, **AI judges**, **Safety** and **Run setup**. A call shows its recording and conversation, with tabs beside it for **Checks**, **AI judges**, **Timing**, **Database** and **Evidence**. |
+| 3 Quality | **AI judges** | Three tabs: **Scores** (what the judges score, whether each item is trusted to block yet, *Teach the judges*), **Review calls** (label calls, the most useful first, without seeing the judges' answers) and **Judge settings** (on/off, the agent's policy, items, models). See [phase3-guide.md](phase3-guide.md). |
+
+Each set-up page has a *Next* button, so a new agent can be set up in order. Addresses from before this layout
+(for example `#/p/<agent>/setup/plan`) still work and open the new page. See [onboarding-guide.md](onboarding-guide.md).
 
 The app never shows terminal commands or folder locations. Everything a run needs is set up in it.
 
@@ -56,7 +62,7 @@ in `ui/`; the built files are committed in `src/vatf/web/static/`, so `uv run va
 - `src/vatf/web/server.py`: the HTTP server (Python standard library only) and its JSON API.
 - `src/vatf/web/jobs.py`: starts each run as the real `vatf run` / `vatf exit-check` command and follows it.
 - `src/vatf/web/data.py`: reads projects, runs and calls for the pages, and builds the dashboard numbers (`dashboard`, `project_overview`) and the secrets list.
-- `ui/src/pages/`: one file per page. `ui/src/App.tsx` maps addresses to pages: `#/` (dashboard), `#/projects`, `#/settings`, and `#/p/<project>/...` for one project's pages.
+- `ui/src/pages/`: one file per page. `ui/src/App.tsx` maps addresses to pages: `#/` (home), `#/projects` (agents), `#/settings`, and `#/p/<project>/...` for one agent's pages; `components/Layout.tsx` holds the sidebar groups.
 - `ui/src/components/`: shared pieces: `Timeline.tsx` (the conversation), `charts.tsx`, `ui.tsx`
   (buttons, cards, badges), `Layout.tsx` (sidebar and top bar).
 - `ui/src/lib/`: the API client, the response types (`types.ts`, matching `data.py`), formatting.

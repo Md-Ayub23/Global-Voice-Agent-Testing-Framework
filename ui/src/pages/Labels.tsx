@@ -6,7 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../components/feedback";
 import { Icon } from "../components/Icon";
 import { Timeline, type TimelineHandle } from "../components/Timeline";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, Notice, PageHead, Skeleton } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, EmptyState, Notice, Skeleton } from "../components/ui";
+import { JudgesHeader } from "./Judges";
 import { api } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
 import { ago, cx, shortScenario } from "../lib/format";
@@ -25,8 +26,8 @@ const REASON_TONE: Record<string, "warn" | "bad" | "accent" | "default"> = {
 };
 
 export function Labels({ project, runId, testId }: { project: Project; runId?: string; testId?: string }) {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
-    { label: "AI judges", href: projectHref(project.key, "/judges") }, { label: "Label calls" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
+    { label: "AI judges", href: projectHref(project.key, "/judges") }, { label: "Review calls" }]);
   const [tick, setTick] = useState(0);
   const { data: queue, error } = useLoad(() => judgesApi.queue(project.key), [project.key, tick]);
   const current = runId && testId ? { run_id: runId, test_id: testId } : null;
@@ -45,9 +46,8 @@ export function Labels({ project, runId, testId }: { project: Project; runId?: s
 
   return (
     <>
-      <PageHead title="Label calls" sub={<>Say what a careful reviewer would say. Your labels show Vocto which judges to trust: until an item catches the failures you find and passes the calls you pass, its findings are only an opinion.</>}>
-        <Button icon="scale" href={projectHref(project.key, "/judges")}>Judges and calibration</Button>
-      </PageHead>
+      <JudgesHeader project={project} current="review" toLabel={queue.length} />
+      <p className="text-ink-2 text-[13px] -mt-1 mb-4 max-w-[860px]">Say what a careful reviewer would say. Your labels show Vocto which judges to trust: until an item catches the failures you find and passes the calls you pass, its findings are only an opinion.</p>
       {!queue.length && !current ? (
         <Card><EmptyState icon="check-circle" title="Nothing waiting for a label"
           text="Every judged call has your labels. New runs with the AI judges on bring new calls here."

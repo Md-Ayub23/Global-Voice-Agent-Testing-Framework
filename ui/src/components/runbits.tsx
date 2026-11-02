@@ -138,10 +138,10 @@ export function EvRef({ children, onClick, href, ...rest }: { children: ReactNod
 }
 
 const HERO_TONE = {
-  good: { text: "text-good", seal: "bg-good shadow-[0_14px_30px_-14px_var(--good)]", glow: "var(--good-soft)" },
-  bad: { text: "text-bad", seal: "bg-bad shadow-[0_14px_30px_-14px_var(--bad)]", glow: "var(--bad-soft)" },
-  warn: { text: "text-warn", seal: "bg-warn shadow-[0_14px_30px_-14px_var(--warn)]", glow: "var(--warn-soft)" },
-  neutral: { text: "text-ink", seal: "bg-accent shadow-[0_14px_30px_-14px_var(--accent)]", glow: "var(--accent-soft)" },
+  good: { text: "text-good", seal: "bg-good-soft text-good ring-1 ring-[color-mix(in_srgb,var(--good)_25%,transparent)]", bar: "bg-good" },
+  bad: { text: "text-bad", seal: "bg-bad-soft text-bad ring-1 ring-[color-mix(in_srgb,var(--bad)_25%,transparent)]", bar: "bg-bad" },
+  warn: { text: "text-warn", seal: "bg-warn-soft text-warn ring-1 ring-[color-mix(in_srgb,var(--warn)_25%,transparent)]", bar: "bg-warn" },
+  neutral: { text: "text-ink", seal: "bg-accent-soft text-accent ring-1 ring-[color-mix(in_srgb,var(--accent)_25%,transparent)]", bar: "bg-accent" },
 };
 export type HeroTone = keyof typeof HERO_TONE;
 export const heroToneOf = (decision: string | null | undefined): HeroTone => {
@@ -156,17 +156,17 @@ export function Hero({ tone, icon, eyebrow, title, children, actions, reasons, f
   const t = HERO_TONE[tone];
   const ic: IconName = icon || (tone === "good" ? "check" : tone === "bad" ? "x" : tone === "warn" ? "alert" : "play");
   return (
-    <div data-hero={tone} className={cx("relative overflow-hidden rounded-[18px] px-4 sm:px-[26px] py-5 sm:py-6 border border-line bg-surface shadow-card animate-reveal", className)}>
-      <div className="absolute inset-0 pointer-events-none opacity-90" style={{ background: `radial-gradient(1200px 300px at -10% -40%, ${t.glow}, transparent 60%)` }} />
+    <div data-hero={tone} className={cx("relative overflow-hidden rounded-[10px] px-4 sm:px-6 py-5 border border-line bg-surface animate-reveal", className)}>
+      <div className={cx("absolute left-0 inset-y-0 w-1", t.bar)} />
       <div className="relative">
         <div className="flex flex-wrap items-start gap-5">
           <div className="flex items-center gap-4 flex-[1_1_320px] min-w-0">
-            <div className={cx("size-12 sm:size-16 rounded-[14px] sm:rounded-[18px] grid place-items-center text-white flex-none animate-pop [&_svg]:size-7 sm:[&_svg]:size-[34px]", t.seal)}>
+            <div className={cx("size-11 sm:size-14 rounded-[10px] grid place-items-center flex-none animate-pop [&_svg]:size-6 sm:[&_svg]:size-7", t.seal)}>
               <Icon name={ic} size={34} strokeWidth={2.4} />
             </div>
             <div className="min-w-0">
               {eyebrow && <div className="text-muted text-[12.5px] font-semibold">{eyebrow}</div>}
-              <div className={cx("text-[26px] sm:text-[34px] font-extrabold tracking-[-.03em] leading-[1.05]", t.text)}>{title}</div>
+              <div className={cx("text-[26px] sm:text-[30px] font-bold tracking-[-.03em] leading-[1.1]", t.text)}>{title}</div>
               {children}
             </div>
           </div>

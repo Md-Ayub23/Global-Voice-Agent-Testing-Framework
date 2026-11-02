@@ -203,7 +203,7 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
             const failed = resp && !resp.ok;
             return (
               <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`}
-                className={cx("self-stretch md:mx-10 border border-line border-l-[3px] rounded-xl px-3 py-2.5 text-[13px] animate-rise",
+                className={cx("self-stretch md:mx-10 border border-line border-l-[3px] rounded-[10px] px-3 py-2.5 text-[13px] animate-rise",
                   it.fault ? "border-l-bad bg-[color-mix(in_srgb,var(--bad-soft)_45%,var(--surface))]" : failed ? "border-l-bad bg-surface" : "border-l-tool bg-surface")}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Icon name="tool" className="text-tool" />
@@ -240,7 +240,7 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
             const d = it.e.data;
             const rows: Record<string, unknown>[] | null = d.rows || null;
             return (
-              <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`} className="self-stretch md:mx-10 border border-line border-l-[3px] border-l-tool rounded-xl bg-surface px-3 py-2.5 text-[13px] animate-rise">
+              <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`} className="self-stretch md:mx-10 border border-line border-l-[3px] border-l-tool rounded-[10px] bg-surface px-3 py-2.5 text-[13px] animate-rise">
                 <div className="flex items-center gap-2 flex-wrap">
                   <Icon name="db" className="text-tool" /><span className="text-muted text-[12.5px]">Database after the call</span>
                   <b className="font-mono text-[13px]">{d.probe}</b><span className="flex-1" />

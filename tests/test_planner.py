@@ -246,3 +246,34 @@ def test_dashboard_needs_a_key(web_root, monkeypatch):
     key = data.project_by_path(web_root, "examples/pipecat-food")["key"]
     with pytest.raises(ValueError, match="API key"):
         plans.generate(web_root, key, {})
+
+
+def test_long_answers_are_streamed():
+    """The SDK refuses a plain request that may take over ten minutes (the plan's 32k-token answer)."""
+    from types import SimpleNamespace as NS
+    from vatf.contracts.models import LLMMessage, LLMRequest
+    from vatf.llm import Budget, ClaudeClient
+    msg = NS(content=[NS(type="text", text="{}")], stop_reason="end_turn", model="claude-opus-5-5",
+             usage=NS(input_tokens=1, output_tokens=1))
+    calls = []
+
+    class Stream:
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get_final_message(self): return msg
+
+    class Messages:
+        async def create(self, **k):
+            calls.append("create")
+            return msg
+
+        def stream(self, **k):
+            calls.append("stream" if "output_config" in k else "stream without format")
+            return Stream()
+
+    client = ClaudeClient(Budget(5), api_key="sk-test")
+    client._client = NS(messages=Messages())
+    for tokens in (8000, 32000):
+        asyncio.run(client.complete(LLMRequest("plan_write", "claude-opus-5-5", "s", (LLMMessage("user", "u"),), tokens,
+                                               json_schema={"type": "object"})))
+    assert calls == ["create", "stream"]

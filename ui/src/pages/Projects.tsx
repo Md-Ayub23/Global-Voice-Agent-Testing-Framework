@@ -41,14 +41,14 @@ function ProjectCard({ p }: { p: Row }) {
       <div className="flex gap-2">
         <Button size="sm" icon="overview" href={projectHref(p.key)}>Open</Button>
         <Button size="sm" icon="play" href={projectHref(p.key, "/new")}>Run tests</Button>
-        <Button size="sm" variant="ghost" icon="settings" href={projectHref(p.key, "/setup/agent")}>Set up</Button>
+        <Button size="sm" variant="ghost" icon="settings" href={projectHref(p.key, "/setup/connection")}>Set up</Button>
       </div>
     </Card>
   );
 }
 
 export function Projects() {
-  useCrumbs([{ label: "Projects" }]);
+  useCrumbs([{ label: "Agents" }]);
   const { data, error } = useLoad(() => api.get<Dashboard>("/api/dashboard"), []);
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton />;
@@ -56,13 +56,13 @@ export function Projects() {
   const examples = data.projects.filter((p) => p.example);
   return (
     <>
-      <PageHead title="Projects" sub="One project per voice agent you test. Each has its own setup, test plan, runs and results.">
-        <Button id="new-project" variant="primary" icon="plus" href="#/projects/new">New project</Button>
+      <PageHead title="Agents" sub="Every voice agent you test. Each has its own set up, test cases, runs and results.">
+        <Button id="new-project" variant="primary" icon="plus" href="#/projects/new">New agent</Button>
       </PageHead>
       <h2 className="font-semibold mb-2.5">Your agents</h2>
       {mine.length ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 stagger mb-8">{mine.map((p) => <ProjectCard key={p.key} p={p} />)}</div> : (
-        <Card className="mb-8"><EmptyState icon="bot" title="No agents yet" text="Create a project for the voice agent you want to test. You'll need its address, and ideally test access to its tools, database and logs."
-          action={<Button variant="primary" icon="plus" href="#/projects/new">New project</Button>} /></Card>
+        <Card className="mb-8"><EmptyState icon="bot" title="No agents yet" text="Add the voice agent you want to test. You'll need its address, and ideally test access to its tools, database and logs."
+          action={<Button variant="primary" icon="plus" href="#/projects/new">New agent</Button>} /></Card>
       )}
       {examples.length > 0 && (
         <>
@@ -78,7 +78,7 @@ export function Projects() {
 const DOMAINS = ["Healthcare", "Banking", "Insurance", "Retail", "Travel", "Telecom", "Restaurants", "Real estate", "Utilities"];
 
 export function NewProject() {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: "New project" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: "New agent" }]);
   const toast = useToast();
   const { reloadProjects } = useApp();
   const [name, setName] = useState("");
@@ -95,12 +95,12 @@ export function NewProject() {
       const r = await setupApi.newProject({ name, id: slug(name), domain: domain.trim().toLowerCase(), description, channel, target, voice_format: voiceFormat });
       await reloadProjects();
       toast(`Created ${name}`);
-      navigate(projectHref(r.key, "/setup/agent"));
+      navigate(projectHref(r.key, "/setup/connection"));
     } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(false); }
   };
   return (
     <>
-      <PageHead title="New project" sub="Tell Vocto about the agent. Tools, database, logs and the test plan come next, step by step." />
+      <PageHead title="New agent" sub="Tell Vocto about the agent. Tools, database, logs and test cases come next, step by step." />
       <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,860px)_minmax(0,1fr)]">
         <Card>
           <div className="grid gap-5">
@@ -153,7 +153,7 @@ export function NewProject() {
               </Field>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              <Button id="np-create" variant="primary" size="lg" icon="plus" busy={busy} disabled={busy || !name.trim()} onClick={() => void create()}>Create project</Button>
+              <Button id="np-create" variant="primary" size="lg" icon="plus" busy={busy} disabled={busy || !name.trim()} onClick={() => void create()}>Create agent</Button>
               <Button variant="ghost" href="#/projects">Cancel</Button>
             </div>
           </div>
@@ -170,12 +170,12 @@ export function NewProject() {
               ["play", "Run tests", "Get a GO or NO-GO release decision with the evidence."],
             ] as const).map(([icon, title, text]) => (
               <li key={title} className="flex gap-3 items-start">
-                <span className="size-8 rounded-[10px] grid place-items-center bg-surface text-accent-ink border border-line flex-none"><Icon name={icon} size={15} /></span>
+                <span className="size-8 rounded-lg grid place-items-center bg-surface text-accent-ink border border-line flex-none"><Icon name={icon} size={15} /></span>
                 <span><b className="text-[13.5px]">{title}</b><span className="block text-[12.5px] text-ink-2">{text}</span></span>
               </li>
             ))}
           </ol>
-          <Help className="mt-4">Passwords and API tokens are never stored in a project: you'll keep them under Settings › Secrets.</Help>
+          <Help className="mt-4">Passwords and API tokens are never stored with an agent: you'll keep them under Settings › Secrets.</Help>
         </Card>
       </div>
     </>

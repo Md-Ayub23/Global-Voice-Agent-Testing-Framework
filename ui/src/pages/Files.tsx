@@ -146,7 +146,7 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
   return (
     <>
       <PageHead title="Raw editor"
-        sub={<>For experts: the text behind the setup pages. Every save is checked the same way. <a href={pl("/setup/plan")}>Back to the test plan</a></>} />
+        sub={<>For experts: the text behind the setup pages. Every save is checked the same way. <a href={pl("/setup/cases")}>Back to test cases</a></>} />
       {loadError && <Notice tone="bad" className="mb-4">{loadError}</Notice>}
       <div className="grid gap-4 items-start grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)]">
         <Card className="p-2.5 lg:sticky lg:top-[70px]">
@@ -210,6 +210,6 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
 }
 
 export function Files({ project, query }: { project: Project; query: URLSearchParams }) {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Raw editor" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Raw editor" }]);
   return <Editor project={project.path} initialFile={query.get("file")} />;
 }

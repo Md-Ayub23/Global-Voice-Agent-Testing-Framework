@@ -12,7 +12,7 @@ import { Icon } from "./Icon";
 
 const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-export function Ring({ value, size = 64, stroke = 7, toneName }: { value: number | null | undefined; size?: number; stroke?: number; toneName?: "good" | "warn" | "bad" }) {
+export function Ring({ value, size = 56, stroke = 4, toneName }: { value: number | null | undefined; size?: number; stroke?: number; toneName?: "good" | "warn" | "bad" }) {
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const v = value == null ? 0 : Math.max(0, Math.min(1, value));
@@ -30,7 +30,7 @@ export function Ring({ value, size = 64, stroke = 7, toneName }: { value: number
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={offset} style={{ transition: "stroke-dashoffset 1s cubic-bezier(.2,.8,.2,1)" }} />
       </svg>
-      <b className="absolute inset-0 grid place-items-center text-sm font-extrabold">{value == null ? "—" : `${Math.round(v * 100)}%`}</b>
+      <b className="absolute inset-0 grid place-items-center text-[13px] font-semibold tabular-nums">{value == null ? "—" : `${Math.round(v * 100)}%`}</b>
     </div>
   );
 }
@@ -238,12 +238,12 @@ export function Waveform({ runId, testId, audio, events }: { runId: string; test
   }, [data, audio]);
 
   if (error) return <div className="text-muted text-[12.5px] p-3.5">{error}</div>;
-  if (!data) return <div className="h-[120px] rounded-xl animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]" />;
+  if (!data) return <div className="h-[120px] rounded-[10px] animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]" />;
   const lanes = Object.keys(data.channels);
   return (
     <div
       ref={box}
-      className="relative rounded-xl bg-surface-2 border border-line overflow-hidden cursor-pointer"
+      className="relative rounded-[10px] bg-surface-2 border border-line overflow-hidden cursor-pointer"
       onClick={(e) => {
         if (!audio) return;
         const r = e.currentTarget.getBoundingClientRect();

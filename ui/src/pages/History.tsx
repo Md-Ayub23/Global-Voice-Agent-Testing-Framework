@@ -1,13 +1,13 @@
-// One project's run history: every run of this agent, filterable, plus its exit checks.
+// Results: the run going on now (if any) on top, then every run of this agent, filterable, plus its exit checks.
 import { useEffect, useState } from "react";
 import { Icon } from "../components/Icon";
 import { OptionChips } from "../components/runbits";
-import { Badge, Button, Card, CardHead, EmptyState, Notice, PageHead, Seg, Skeleton, Table, Tabs, inputCls, rowLink } from "../components/ui";
+import { Badge, Button, Card, CardHead, EmptyState, LiveDot, Notice, PageHead, Seg, Skeleton, Table, Tabs, inputCls, rowLink } from "../components/ui";
 import { api } from "../lib/api";
-import { useCrumbs, useLoad } from "../lib/app";
+import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { ago, cx, fmtDate, fmtMs, money } from "../lib/format";
 import { navigate } from "../lib/router";
-import { modeLabel, projectHref, runHref } from "../lib/links";
+import { modeLabel, projectHref, projectOfJob, runHref } from "../lib/links";
 import type { ExitCheckRecord, Project, RunSummary } from "../lib/types";
 
 type Filter = "all" | "GO" | "NO_GO" | "NO_GO_INSUFFICIENT_EVIDENCE" | "none" | "text" | "voice";
@@ -33,11 +33,13 @@ function matches(r: RunSummary, filter: Filter, q: string) {
 }
 
 export function History({ project }: { project: Project }) {
-  useCrumbs([{ label: "Projects", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Run history" }]);
+  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Results" }]);
+  const { activeJob, projects } = useApp();
+  const live = activeJob && activeJob.status === "running" && projectOfJob(activeJob, projects)?.key === project.key ? activeJob : null;
   const { data, error } = useLoad(() => Promise.all([
     api.get<RunSummary[]>(`/api/runs?project=${encodeURIComponent(project.key)}`),
     api.get<ExitCheckRecord[]>(`/api/exit-checks?project=${encodeURIComponent(project.key)}`),
-  ]), [project.key]);
+  ]), [project.key, live?.id]);
   const [st, setSt] = useState<Saved>(restore);
   useEffect(() => {
     try { sessionStorage.setItem(KEY, JSON.stringify(st)); } catch { /* storage blocked */ }
@@ -51,9 +53,18 @@ export function History({ project }: { project: Project }) {
 
   return (
     <>
-      <PageHead title="Run history" sub={<>Every test run of <b className="text-ink">{project.name}</b>, newest first.</>}>
-        <Button href={projectHref(project.key, "/new")} variant="primary" icon="play">New run</Button>
-      </PageHead>
+      <PageHead title="Results" sub={<>Every test run of <b className="text-ink">{project.name}</b> and its release decision, newest first.</>} />
+      {live && (
+        <a href={projectHref(project.key, `/live/${live.id}`)} id="live-card"
+          className="group flex items-center gap-4 mb-5 p-4 rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-accent-soft/50 hover:bg-accent-soft hover:no-underline text-ink transition-colors animate-view-in">
+          <span className="size-10 rounded-[10px] grid place-items-center bg-accent text-white flex-none"><Icon name="wave" size={20} /></span>
+          <span className="flex-1 min-w-0">
+            <span className="flex items-center gap-2"><LiveDot /><b className="text-[14px]">{live.kind === "exit-check" ? "Exit check running" : "Test run in progress"}</b></span>
+            <span className="block text-[12.5px] text-ink-2 mt-0.5">Started {ago(live.started_at)} · watch the calls and listen in as they happen</span>
+          </span>
+          <span className="text-accent-ink font-semibold text-[13px] inline-flex items-center gap-1">Watch live <Icon name="arrow" size={15} className="transition-transform group-hover:translate-x-0.5" /></span>
+        </a>
+      )}
       <Tabs value={st.tab} onChange={(tab) => setSt({ ...st, tab })}
         tabs={[{ value: "runs", label: `Runs (${runs.length})` }, ...(checks.length || project.example ? [{ value: "exit" as const, label: `Exit checks (${checks.length})` }] : [])]} />
 
@@ -89,7 +100,8 @@ export function History({ project }: { project: Project }) {
               </Table>
             ) : (
               <EmptyState icon="search" title={runs.length ? "No runs match" : "No runs yet"}
-                text={runs.length ? "Try another filter." : "Start the first one from New run."} />
+                text={runs.length ? "Try another filter." : "Start the first one from Run tests."}
+                action={runs.length ? undefined : <Button variant="primary" icon="play" href={projectHref(project.key, "/new")}>Run tests</Button>} />
             )}
           </Card>
         </div>

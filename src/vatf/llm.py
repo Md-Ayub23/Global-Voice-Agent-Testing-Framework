@@ -19,6 +19,7 @@ PRICES = {
     "claude-opus-5-5": (4.00, 20.00),
 }
 DEFAULT_MODEL = "claude-haiku-5-5"
+STREAM_ABOVE_TOKENS = 16000
 
 
 class LLMError(Exception):
@@ -110,7 +111,13 @@ class ClaudeClient:
 
         self._budget.check()
         try:
-            msg = await self._client.messages.create(**kwargs)
+            if request.max_tokens > STREAM_ABOVE_TOKENS:
+                # Long answers (the test plan writer) must be streamed: the SDK refuses a plain request
+                # that could take more than ten minutes.
+                async with self._client.messages.stream(**kwargs) as stream:
+                    msg = await stream.get_final_message()
+            else:
+                msg = await self._client.messages.create(**kwargs)
         except anthropic.APIError as e:
             raise LLMError(f"Claude API error: {e}") from e
         if msg.stop_reason == "refusal":

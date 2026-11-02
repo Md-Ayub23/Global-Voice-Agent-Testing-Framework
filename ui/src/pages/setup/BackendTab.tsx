@@ -103,7 +103,7 @@ export function BackendTab({ detail, reload }: TabProps) {
       {access !== "none" && (
         <Block title="Probes: what to look up after a call" sub="Scenarios point at these by id. Bind values: :test_id, :call_started_at, :call_ended_at, and any caller fact by name (:full_name).">
           {probes.map((p, i) => (
-            <div key={`${i}-${d.version}`} data-probe={str(p.id)} className="grid gap-3 p-3.5 border border-line rounded-xl bg-surface-2/40">
+            <div key={`${i}-${d.version}`} data-probe={str(p.id)} className="grid gap-3 p-3.5 border border-line rounded-[10px] bg-surface-2/40">
               <div className="flex items-center gap-2">
                 <b className="font-mono flex-1">{str(p.id) || "new probe"}</b>
                 <Button size="sm" variant="ghost" icon="x" onClick={() => set({ probes: probes.filter((_, j) => j !== i) })}>Remove</Button>
