@@ -1,0 +1,16 @@
+# From Vocto's persona library: Confused caller.
+schema_version: '0.1'
+kind: persona
+id: confused-caller
+description: Not sure what they need. Gives partial or slightly wrong details at first, corrects them later, and
+  asks what words mean.
+traits:
+  patience: medium
+  verbosity: normal
+  mood: anxious
+  clarity: low
+speech:
+  tts_voice: en_US-lessac-medium
+  speaking_rate: 0.95
+behaviour:
+  interrupts: false

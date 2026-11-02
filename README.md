@@ -7,7 +7,7 @@ callers, watches the voice, the tool calls and the backend state, scores each
 call with hard checks and calibrated AI judges, and gives a GO / NO-GO release
 decision.
 
-**Status: Phase 3 (AI judges).** The framework runs real test calls against the
+**Status: Phase 5 (harder callers and call quality).** The framework runs real test calls against the
 clinic example agent, in text or by voice: the simulated caller speaks (Piper),
 listens (Whisper) and hears only what came down the line. It checks what the agent
 said against what it did and what was stored, measures response times on the call
@@ -17,6 +17,11 @@ data), with items for every agent plus packs for ten industries and the agent's 
 block a release once a person's labels show they catch real failures (90% of failures caught and of good calls passed, over 20 labels); a third deciding judge breaks ties. Built-in **safety
 tests** try to make the agent go wrong (off-topic questions, pushing for passwords, prompt tricks,
 other people's data, abuse and more), written for each agent from its industry, tools and policy.
+**Harder callers and call quality (Phase 5):** callers with accents, on a phone line with lost
+packets, who cut in, say "mm-hm", pause mid-sentence or go quiet; every voice call is scored on 14
+call quality metrics (time to first word, p90 / p99, silences, talk-over, stop time, and more) with
+good / warn / bad bands, and the report splits results by caller condition. See
+[docs/phase5-guide.md](docs/phase5-guide.md).
 
 **Real agents:** besides its own practice agents, Vocto tests a real open-source agent it did not
 write: Pipecat's food ordering agent, run on this computer as a phone agent and called the way
@@ -35,6 +40,7 @@ fill in its address, tools, backend and logs access, test plan and test settings
 - [docs/safety-guide.md](docs/safety-guide.md): safety tests: the attacks, planted secrets, how they affect the decision
 - [docs/phase1-guide.md](docs/phase1-guide.md): text mode, how to run it and what each part does
 - [docs/phase2-guide.md](docs/phase2-guide.md): voice mode, response times, barge-in, noise, read-back checks
+- [docs/phase5-guide.md](docs/phase5-guide.md): harder callers (accents, phone line, cut-ins, "mm-hm", pauses, silence) and call quality metrics with good / warn / bad bands
 - [docs/real-agents-guide.md](docs/real-agents-guide.md): testing a real open-source agent (Pipecat food ordering), planted bugs, agents Vocto starts itself
 - [docs/twilio-protocol.md](docs/twilio-protocol.md): calling a phone agent the way Twilio Media Streams does
 - [docs/voice-protocol.md](docs/voice-protocol.md): how vatf talks to a voice agent over a WebSocket

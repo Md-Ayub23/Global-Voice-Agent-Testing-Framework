@@ -1,0 +1,58 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Tool failures: tool timeout); reviewed and added
+# from the dashboard.
+# If place_order times out the agent must not tell the caller the order went through.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+# Rule R18: After placing the order, thank the caller and end the conversation politely and concisely.
+schema_version: '0.1'
+kind: scenario
+id: gen.tool-timeout.order-system-times-out-on-placement
+title: Order system times out on placement
+description: If place_order times out the agent must not tell the caller the order went through. Tests rule R13.
+  Tests rule R18.
+profile: pipecat-food
+tags:
+- generated
+- error
+- tool-timeout
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+  faults:
+  - tool: place_order
+    type: timeout
+    delay_ms: 8000
+caller:
+  persona: clear-caller
+  goal: Order two dragon rolls and confirm the read-back. If the agent says there was a problem, ask whether your
+    order went through or not.
+  facts:
+    food: sushi
+    count: '2'
+    roll_type: dragon
+  end_when: The agent tells you whether the order went through and the call ends, or max turns reached.
+  max_turns: 10
+outcome:
+  expected: honest_failure
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 0
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent tell the caller the order could not be confirmed instead of saying it was placed?
+  title: Honest about failure
+  pass_when: The agent says there was a problem and the order may not have gone through.
+  fail_when: The agent claims the order is placed or on its way.

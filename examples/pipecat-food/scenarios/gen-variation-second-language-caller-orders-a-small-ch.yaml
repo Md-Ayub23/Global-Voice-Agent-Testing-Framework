@@ -1,0 +1,64 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Normal calls: variation); reviewed and added from
+# the dashboard.
+# Checks the smallest size and simple language handling from a non-native speaker.
+# Rule R2: Keep the conversation friendly, casual and polite.
+# Rule R6: Pizza pricing: small $10, medium $15, large $20.
+# Rule R7: Pizza types available: pepperoni, cheese, supreme, vegetarian.
+# Rule R11: Read back the complete order details and ask if the caller wants anything else or to make
+# changes.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+schema_version: '0.1'
+kind: scenario
+id: gen.variation.second-language-caller-orders-a-small-ch
+title: Second-language caller orders a small cheese pizza
+description: Checks the smallest size and simple language handling from a non-native speaker. Tests rule R2. Tests
+  rule R6. Tests rule R7. Tests rule R11. Tests rule R13.
+profile: pipecat-food
+tags:
+- generated
+- happy
+- variation
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: second-language
+  goal: You want a pizza. Use short simple sentences. Say 'small pizza, only cheese'. If the agent talks fast or
+    uses hard words, ask it to say it more simply. When it reads back a small cheese pizza for 10 dollars, say 'yes,
+    correct, that is all'.
+  facts:
+    food: pizza
+    size: small
+    pizza_type: cheese
+  end_when: The agent confirms the order is placed and ends the call, or max turns reached.
+  max_turns: 12
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: pizza
+      size: small
+      pizza_type: cheese
+      price: '10'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: When the caller asked for simpler words, did the agent rephrase plainly and politely?
+  title: Simpler wording
+  pass_when: The agent repeats the point in shorter, simpler sentences without impatience.
+  fail_when: The agent repeats the same complex wording or ignores the request.

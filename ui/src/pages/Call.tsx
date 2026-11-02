@@ -2,11 +2,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LatencyBars, Waveform } from "../components/charts";
 import { Icon } from "../components/Icon";
+import { CallQuality } from "../components/quality";
 import { ChecksList, JudgeList, OutcomeNotice } from "../components/runbits";
 import { RowsTable, Timeline, type TimelineHandle } from "../components/Timeline";
 import { Badge, Button, Card, CardHead, Chip, Legend, Notice, Seg, Skeleton, Table, Tabs } from "../components/ui";
 import { api } from "../lib/api";
-import { useCrumbs, useLoad } from "../lib/app";
+import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { projectHref } from "../lib/links";
 import { fmtDate, fmtDuration, fmtMs, money, shortScenario } from "../lib/format";
 import type { CallDetail, Check, Project, RunDetail } from "../lib/types";
@@ -31,6 +32,7 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
   );
   const [view, setView] = useState<"chat" | "text">("chat");
   const [side, setSide] = useState("checks");
+  const { system } = useApp();
   const [audio, setAudio] = useState<HTMLAudioElement | null>(null);
   const tl = useRef<TimelineHandle>(null);
   const pendingFlash = useRef<number | null>(null);
@@ -65,6 +67,7 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
     { value: "checks", label: "Checks" },
     ...(v && judged.length ? [{ value: "judges", label: "AI judges" }] : []),
     ...(m.latency_turns?.length ? [{ value: "times", label: "Timing" }] : []),
+    ...(m.quality && Object.keys(m.quality).length ? [{ value: "quality", label: "Quality" }] : []),
     ...(c.database.length ? [{ value: "db", label: "Database" }] : []),
     { value: "files", label: "Evidence" },
   ];
@@ -194,6 +197,7 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
               <LatencyBars rows={m.latency_turns} limits={limits} width={330} />
             </Card>
           )}
+          {sideShown === "quality" && m.quality && <CallQuality quality={m.quality} conditions={v?.conditions} defs={system?.metrics || []} />}
           {sideShown === "db" && c.database.length > 0 && (
             <Card className="animate-view-in">
               <CardHead title="Database after the call" />

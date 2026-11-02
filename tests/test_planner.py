@@ -157,7 +157,9 @@ def test_accept_writes_files_and_personas(food):
     picked = [t["id"] for t in plan["tests"] if t["selected"]]
     out = planner.accept(food, planner.latest_plan(food), picked, critical={picked[1]: "normal"})
     assert sorted(out["added"]) == sorted(picked) and not out["skipped"]
-    assert "impatient-caller" in out["personas"] and (food / "personas" / "impatient-caller.yaml").is_file()
+    # The example already ships impatient-caller.yaml, so only the personas it lacks are added.
+    assert out["personas"] and all((food / "personas" / f"{p}.yaml").is_file() for p in out["personas"])
+    assert (food / "personas" / "impatient-caller.yaml").is_file()
     project = load_project(food)                       # still a valid project
     ids = {s["id"] for s in project.scenarios}
     assert set(picked) <= ids

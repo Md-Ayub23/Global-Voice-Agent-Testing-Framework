@@ -11,6 +11,7 @@ from pathlib import Path
 
 import numpy as np
 
+from ..accents import speaker_id, split_voice
 from ..audio.pcm import from_pcm16, resample, to_pcm16
 from ..contracts.models import AudioClip
 from ..contracts.speech import Transcript
@@ -28,6 +29,7 @@ class PiperTTS:
         self._lock = threading.Lock()
 
     def _voice(self, name: str):
+        name = split_voice(name)[0]          # "voice#speaker": the file is the voice's
         with self._lock:
             if name not in self._voices:
                 from piper import PiperVoice
@@ -42,14 +44,17 @@ class PiperTTS:
             return self._voices[name]
 
     def warm_up(self, voice: str) -> None:
-        """Download and load a voice now, so it never happens in the middle of a call."""
-        self._voice(voice)
+        """Download and load a voice now, so it never happens in the middle of a call (and check that a
+        multi-speaker voice has the speaker asked for)."""
+        v = self._voice(voice)
+        speaker_id(split_voice(voice)[1], v.config.speaker_id_map, voice)
 
     def synthesize(self, text: str, voice: str, speaking_rate: float = 1.0) -> AudioClip:
         from piper import SynthesisConfig
 
         v = self._voice(voice)
-        cfg = SynthesisConfig(length_scale=1.0 / max(speaking_rate, 0.1))
+        cfg = SynthesisConfig(length_scale=1.0 / max(speaking_rate, 0.1),
+                              speaker_id=speaker_id(split_voice(voice)[1], v.config.speaker_id_map, voice))
         parts, rate = [], v.config.sample_rate
         for chunk in v.synthesize(text, syn_config=cfg):
             rate = chunk.sample_rate

@@ -1,0 +1,16 @@
+# From Vocto's persona library: Caller speaking a second language.
+schema_version: '0.1'
+kind: persona
+id: second-language
+description: English is not their first language. Uses short, simple sentences, sometimes the wrong word, and asks
+  the agent to say things more simply.
+traits:
+  patience: medium
+  verbosity: normal
+  mood: calm
+  clarity: medium
+speech:
+  tts_voice: en_GB-alba-medium
+  speaking_rate: 0.9
+behaviour:
+  interrupts: false

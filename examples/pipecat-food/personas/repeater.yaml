@@ -1,0 +1,15 @@
+# From Vocto's persona library: Caller who repeats questions.
+schema_version: '0.1'
+kind: persona
+id: repeater
+description: Asks the same question again in different words to make sure, even after it has been answered.
+traits:
+  patience: medium
+  verbosity: normal
+  mood: calm
+  clarity: medium
+speech:
+  tts_voice: en_US-amy-medium
+  speaking_rate: 1.0
+behaviour:
+  interrupts: false

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from ..audio.tap import PORT_ENV, unpack
+from ..conditions import PRESETS
 from ..evidence import utc_now
 from ..speech import ENGINES
 from ..util import read_json, write_json
@@ -204,6 +205,13 @@ class JobManager:
                     args += [flag, req[key]]
         if req.get("safety"):
             args.append("--safety")
+        cond = req.get("conditions") or "as_written"
+        if cond not in PRESETS:
+            raise JobError(f"caller conditions must be one of {', '.join(PRESETS)}")
+        if cond != "as_written":
+            if profile["mode"] != "voice":
+                raise JobError("caller conditions apply to voice runs only")
+            args += ["--conditions", cond]
         if req.get("show_pii"):
             args.append("--show-pii")
         if kind == "run":

@@ -1,0 +1,66 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Normal calls: variation); reviewed and added from
+# the dashboard.
+# Combines ordering with a delivery question; the agent must look up the estimate rather than guess.
+# Rule R6: Pizza pricing: small $10, medium $15, large $20.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+# Rule R16: Delivery takes about 30 minutes.
+# Rule R18: After placing the order, thank the caller and end the conversation politely and concisely.
+schema_version: '0.1'
+kind: scenario
+id: gen.variation.rambling-caller-orders-a-large-supreme-a
+title: Rambling caller orders a large supreme and asks when it arrives
+description: Combines ordering with a delivery question; the agent must look up the estimate rather than guess.
+  Tests rule R6. Tests rule R13. Tests rule R16. Tests rule R18.
+profile: pipecat-food
+tags:
+- generated
+- happy
+- variation
+criticality: normal
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: rambling-caller
+  goal: Start with a short story about your friends coming over for the game. Then say you want a large supreme
+    pizza. Confirm the read-back of large supreme for 20 dollars. After it's placed, ask how long until it gets
+    to you.
+  facts:
+    food: pizza
+    size: large
+    pizza_type: supreme
+  end_when: The agent has placed the order, told you the delivery time and said goodbye, or max turns reached.
+  max_turns: 12
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: pizza
+      size: large
+      pizza_type: supreme
+      price: '20'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: calls-delivery-estimate
+  type: tool_called
+  tool: delivery_estimate
+  description: The agent uses delivery_estimate instead of guessing.
+- id: ask-1
+  type: judge
+  intent: Did the agent tell the caller delivery takes about 30 minutes?
+  title: Delivery time stated
+  pass_when: The agent says about 30 minutes after checking the estimate.
+  fail_when: The agent gives a different time or no time.

@@ -1,0 +1,64 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Normal calls: happy path); reviewed and added
+# from the dashboard.
+# Core pizza flow with a different size and type than the existing test, checking the medium price of
+# 15 dollars.
+# Rule R4: Start by greeting the caller and asking whether they want pizza or sushi.
+# Rule R6: Pizza pricing: small $10, medium $15, large $20.
+# Rule R11: Read back the complete order details and ask if the caller wants anything else or to make
+# changes.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+# Rule R18: After placing the order, thank the caller and end the conversation politely and concisely.
+schema_version: '0.1'
+kind: scenario
+id: gen.happy-path.caller-orders-a-medium-vegetarian-pizza
+title: Caller orders a medium vegetarian pizza
+description: Core pizza flow with a different size and type than the existing test, checking the medium price of
+  15 dollars. Tests rule R4. Tests rule R6. Tests rule R11. Tests rule R13. Tests rule R18.
+profile: pipecat-food
+tags:
+- generated
+- happy
+- happy-path
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: calm-adult
+  goal: You want a pizza. When asked, say you'd like a medium vegetarian pizza. Listen to the read-back. If it says
+    medium vegetarian for 15 dollars, say yes, that's right, nothing else. Then say thanks and goodbye.
+  facts:
+    food: pizza
+    size: medium
+    pizza_type: vegetarian
+  end_when: The agent confirms the order is placed and says goodbye, or the call reaches max turns.
+  max_turns: 10
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: pizza
+      size: medium
+      pizza_type: vegetarian
+      price: '15'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent read back a medium vegetarian pizza at 15 dollars before placing the order?
+  title: Correct price read back
+  pass_when: The read-back names medium, vegetarian and 15 dollars before the caller confirms.
+  fail_when: The price is wrong, missing, or the order is placed before any read-back.

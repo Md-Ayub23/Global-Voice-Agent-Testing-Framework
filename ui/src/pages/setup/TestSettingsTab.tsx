@@ -2,7 +2,10 @@
 // Empty fields use what the profile extends, or Vocto's defaults.
 import type { ReactNode } from "react";
 import { Block, Grid, Num, Problems, SaveBar, type Obj } from "../../components/form";
-import { Card, Field } from "../../components/ui";
+import { bandWords } from "../../components/quality";
+import { Card, Field, Switch, Table } from "../../components/ui";
+import { useApp } from "../../lib/app";
+import type { MetricDef } from "../../lib/types";
 import { asObj, useDraft, type TabProps } from "./common";
 
 type Row = [key: string, label: string, hint: ReactNode, step?: number];
@@ -29,7 +32,24 @@ const LIMITS: Row[] = [
 ];
 
 export function TestSettingsTab({ detail, reload }: TabProps) {
-  const d = useDraft({ thresholds: asObj(detail.raw.thresholds), limits: asObj(detail.raw.limits) }, detail.file, detail.project, reload);
+  const { system } = useApp();
+  const d = useDraft({ thresholds: asObj(detail.raw.thresholds), limits: asObj(detail.raw.limits), metrics: asObj(detail.raw.metrics) },
+    detail.file, detail.project, reload);
+  const own = (id: string) => asObj(asObj(d.draft.metrics)[id]);
+  const base = (id: string) => asObj(asObj(detail.base.metrics)[id]);
+  const setMetric = (id: string, key: "good" | "warn" | "blocks", v: number | boolean | undefined) => {
+    const row = { ...own(id) } as Obj;
+    if (v === undefined || (v === false && !base(id).blocks)) delete row[key]; else row[key] = v;
+    const all = { ...asObj(d.draft.metrics) } as Obj;
+    if (Object.keys(row).length) all[id] = row; else delete all[id];
+    d.setDraft({ ...d.draft, metrics: all });
+  };
+  const metricPh = (m: MetricDef, key: "good" | "warn") => {
+    const fromBase = base(m.id)[key];
+    if (fromBase != null) return String(fromBase);
+    const def = key === "good" ? m.default_good : m.default_warn;
+    return def == null ? "no band" : String(def);
+  };
   const inherited = (section: "thresholds" | "limits", key: string) => {
     const fromBase = asObj(detail.base[section])[key];
     if (fromBase != null) return `${fromBase} (from ${detail.extends})`;
@@ -58,6 +78,29 @@ export function TestSettingsTab({ detail, reload }: TabProps) {
       </Block>
       <Block title="Limits" sub="Safety and cost caps for each run.">
         {rows("limits", LIMITS)}
+      </Block>
+      <Block title="Call quality" sub="Each metric is read off every call's recording and gets a good, warn or bad band. A metric only stops a release when Blocks is on and the run's value is in the bad band; otherwise it is a warning on the report. An empty field uses the default shown in grey.">
+        <div id="metric-bands">
+          <Table compact head={["Metric", "Good", "Warn", "Blocks"]}>
+            {(system?.metrics || []).map((m) => (
+              <tr key={m.id} data-metric={m.id}>
+                <td className="min-w-[220px]">
+                  <b>{m.title}</b>{m.voice_only && <span className="text-muted text-[11.5px]"> · voice</span>}
+                  <div className="text-muted text-[11.5px]">{m.about}</div>
+                  <div className="text-muted text-[11.5px]">{m.unit === "%" ? "percent" : m.unit} · {m.better === "higher" ? "higher is better" : "lower is better"}{m.default_good != null ? ` · default ${bandWords({ ...m, good: m.default_good, warn: m.default_warn })}` : ""}</div>
+                </td>
+                <td className="w-[130px]"><Num id={`metric-${m.id}-good`} value={own(m.id).good as number} placeholder={metricPh(m, "good")} min={0}
+                  onChange={(v) => setMetric(m.id, "good", v)} /></td>
+                <td className="w-[130px]"><Num id={`metric-${m.id}-warn`} value={own(m.id).warn as number} placeholder={metricPh(m, "warn")} min={0}
+                  onChange={(v) => setMetric(m.id, "warn", v)} /></td>
+                <td className="w-[90px]">
+                  <label><Switch id={`metric-${m.id}-blocks`} checked={!!(own(m.id).blocks ?? base(m.id).blocks)} label=""
+                    onChange={(v) => setMetric(m.id, "blocks", v)} /></label>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        </div>
       </Block>
       <Problems items={d.problems} />
       <SaveBar id="save-settings" dirty={d.dirty} busy={d.busy} onSave={() => void d.save()} onRevert={d.revert} />

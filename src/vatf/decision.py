@@ -15,6 +15,7 @@ from typing import Any, Mapping, Sequence
 
 from .evidence import utc_now
 from .latency import percentile
+from .metrics import by_condition, run_quality
 
 EXIT_CODES = {"GO": 0, "NO_GO": 1, "NO_GO_INSUFFICIENT_EVIDENCE": 2}
 VERIFIED = {"PASS", "FAIL"}
@@ -92,7 +93,8 @@ def _basis(verdicts: Sequence[Mapping[str, Any]], reasons: Sequence[Mapping[str,
     if any(checks.get(ref, {}).get("origin") == "judge" for ref in judged_blockers):
         layers.append("trusted_judges")
     rules = {r["rule"] for r in reasons}
-    for rule, layer in (("reliability", "reliability"), ("latency", "latency"), ("coverage", "evidence"),
+    for rule, layer in (("reliability", "reliability"), ("latency", "latency"), ("metric", "call_quality"),
+                        ("coverage", "evidence"),
                         ("needs_review", "evidence")):
         if rule in rules and layer not in layers:
             layers.append(layer)
@@ -140,6 +142,28 @@ def _safety_summary(verdicts: Sequence[Mapping[str, Any]], titles: Mapping[str, 
     to_review = sum(p["to_review"] for p in packs.values())
     return {"calls": len(calls), "passed": len(calls) - failed - to_review, "failed": failed, "to_review": to_review,
             "packs": dict(packs), "findings": findings}
+
+
+def _shown(q: Mapping[str, Any]) -> str:
+    if q["value"] is None:
+        return (q.get("detail") or {}).get("note", "no value")
+    unit = {"ms": " ms", "%": "%", "wpm": " words/min", "turns": " turns", "s": " s"}[q["unit"]]
+    v = q["value"]
+    return f"{v:,.0f}{unit}" if q["unit"] in ("ms", "wpm") else f"{v:g}{unit}"
+
+
+def _limit(q: Mapping[str, Any]) -> str:
+    word = "at least" if q["better"] == "higher" else "at most"
+    warn = q["warn"] if q["warn"] is not None else q["good"]
+    return f"good is {word} {q['good']:g}, warn {word} {warn:g}"
+
+
+def _metric_refs(verdicts: Sequence[Mapping[str, Any]], mid: str) -> list[str]:
+    """The calls whose own value of the metric is bad (or warn when none is bad)."""
+    rows = [(v["test_id"], ((v.get("metrics") or {}).get("quality") or {}).get(mid, {}).get("band")) for v in verdicts
+            if v.get("status") != "ERROR"]
+    bad = [t for t, b in rows if b == "bad"]
+    return (bad or [t for t, b in rows if b == "warn"])[:20]
 
 
 class LocalDecisionEngine:
@@ -233,6 +257,12 @@ class LocalDecisionEngine:
         elif voice:
             reasons_evidence.append({"rule": "coverage", "message": "No agent answer could be timed."})
 
+        # Call quality (metrics.py): a metric the owner set to block, in its bad band, is a NO-GO.
+        quality = run_quality(verdicts, profile)
+        for q in quality:
+            if q["blocks"] and q["band"] == "bad":
+                reasons_bad.append({"rule": "metric", "message": f"{q['title']}: {_shown(q)} is in the bad band "
+                                                                 f"({_limit(q)}).", "refs": _metric_refs(verdicts, q["id"])})
         safety = _safety_summary(verdicts, {sc["id"]: sc.get("title", sc["id"]) for sc in scenarios})
         if reasons_bad:
             decision, reasons = "NO_GO", reasons_bad + reasons_evidence
@@ -251,6 +281,13 @@ class LocalDecisionEngine:
                                            f"finding and {safety['to_review']} wait for your label. They don't block "
                                            "on their own (advisory, or not a blocker); see the Safety tests card.",
                                 "refs": sorted({f["test_id"] for f in safety["findings"]})[:20]})
+            weak = [q for q in quality if q["band"] in ("warn", "bad")]
+            if weak:
+                reasons.append({"rule": "metric_warnings",
+                                "message": "Call quality: " + "; ".join(f"{q['title']} {_shown(q)} ({q['band']})"
+                                                                        for q in weak)
+                                           + ". These don't block (switch Blocks on in Pass rules to make them).",
+                                "refs": sorted({r for q in weak for r in _metric_refs(verdicts, q["id"])})[:20]})
 
         return {
             "schema_version": "0.1",
@@ -278,6 +315,8 @@ class LocalDecisionEngine:
             "basis": _basis(verdicts, reasons),
             **({"safety": safety} if safety else {}),
             **({"heard_numbers": heard} if (heard := _heard_summary(verdicts)) else {}),
+            **({"quality": quality} if quality else {}),
+            **({"by_condition": conds} if (conds := by_condition(verdicts)) else {}),
             "calls": [{"test_id": v["test_id"], "scenario_id": v["scenario_id"], "repeat": v["repeat"],
                        "status": v["status"]} for v in verdicts],
         }

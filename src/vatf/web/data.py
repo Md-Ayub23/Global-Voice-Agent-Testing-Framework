@@ -21,11 +21,15 @@ from typing import Any, Mapping
 import yaml
 
 from .. import __version__, attacks
+from ..accents import accent_list
+from ..audio.noise import KINDS as NOISE_KINDS
+from ..conditions import preset_list
 from ..connectors import is_voice
 from ..contracts.models import TraceEvent
 from ..evidence import TEXT_FIELDS, mask_events
 from ..llm import DEFAULT_MODEL
 from ..loader import ProjectError, load_project
+from ..metrics import metric_list
 from ..story import database_rows, judgement, story_rows
 from ..util import read_json
 
@@ -757,6 +761,9 @@ def system(root: Path, runs: Path) -> dict[str, Any]:
                     (".env" if key else None)},
         "models": {"folder": str(models), "piper_voices": piper, "whisper": whisper,
                    "bytes": _size(models) if models.is_dir() else 0},
+        # Phase 5: what the Callers, Test cases, Pass rules and Run tests forms offer.
+        "accents": accent_list(), "conditions": preset_list(), "metrics": metric_list(),
+        "noises": list(NOISE_KINDS),
     }
 
 

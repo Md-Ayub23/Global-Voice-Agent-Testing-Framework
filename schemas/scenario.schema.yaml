@@ -104,10 +104,17 @@ properties:
     properties:
       noise:
         description: Synthetic background noise on the caller's line (see src/vatf/audio/noise.py).
-        enum: [none, office, street, cafe, car]
+        enum: [none, office, street, cafe, car, tv]
         default: none
       noise_file: {description: "A WAV recording to use as background noise instead (path from the repo root).", type: string}
       snr_db: {description: "Speech-to-noise ratio in dB. Lower is noisier. Default 15.", type: number}
+      line:
+        description: Phase 5. The phone line the caller is on (src/vatf/audio/line.py).
+        type: object
+        additionalProperties: false
+        properties:
+          codec: {description: "phone = band-limited 300-3400 Hz and G.711 mu-law, like a phone call.", enum: [none, phone], default: none}
+          packet_loss_pct: {description: "Share of 20 ms frames lost on the way, in short bursts.", type: number, minimum: 0, maximum: 50, default: 0}
       barge_in:
         type: array
         items:

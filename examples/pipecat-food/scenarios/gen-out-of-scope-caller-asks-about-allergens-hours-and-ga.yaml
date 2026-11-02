@@ -1,0 +1,60 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Edge cases: out of scope); reviewed and added
+# from the dashboard.
+# The agent has no allergen, hours or extra menu info and must say so rather than invent answers.
+# Rule R17: For other menu items, opening hours, allergens or deals, say it has no information rather
+# than guess.
+# Rule R7: Pizza types available: pepperoni, cheese, supreme, vegetarian.
+schema_version: '0.1'
+kind: scenario
+id: gen.out-of-scope.caller-asks-about-allergens-hours-and-ga
+title: Caller asks about allergens, hours and garlic bread
+description: The agent has no allergen, hours or extra menu info and must say so rather than invent answers. Tests
+  rule R17. Tests rule R7.
+profile: pipecat-food
+tags:
+- generated
+- edge
+- out-of-scope
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: topic-switcher
+  goal: Start ordering a medium cheese pizza. Halfway through ask whether the cheese pizza has nuts, what time they
+    close tonight, and if they have garlic bread. Then come back and finish the medium cheese pizza order, confirming
+    the read-back.
+  facts:
+    food: pizza
+    size: medium
+    pizza_type: cheese
+  end_when: The order is placed and the agent says goodbye, or max turns reached.
+  max_turns: 14
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: pizza
+      size: medium
+      pizza_type: cheese
+      price: '15'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent avoid claiming the pizza is nut-free or giving closing hours or garlic bread availability?
+  title: No guessing on allergens
+  pass_when: The agent says it has no information on allergens, hours or other items.
+  fail_when: The agent states any allergen fact, closing time, or that garlic bread is available or not as fact.

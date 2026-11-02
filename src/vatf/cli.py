@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .agent_process import AgentProcess, AgentProcessError
+from .conditions import PRESETS
 from .connectors import is_voice
 from .llm import DEFAULT_MODEL, Budget, ClaudeClient
 from .loader import ProjectError, load_project
@@ -88,7 +89,8 @@ def _config(args) -> RunConfig:
                      scenario_ids=tuple(args.scenario or ()), mask_pii=not args.show_pii,
                      speech=SpeechConfig(engine=args.speech, ears_model=args.stt_model,
                                          check_model=args.stt_check_model),
-                     judges=not args.no_judges, safety=args.safety)
+                     judges=not args.no_judges, safety=args.safety,
+                     conditions=getattr(args, "conditions", None) or "as_written")
 
 
 def _llm(args, project):
@@ -434,6 +436,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="don't run the AI judges (they score tone, made-up facts and the like; see the Judges page)")
         p.add_argument("--safety", action="store_true",
                        help="add the built-in safety tests: attack calls written for this agent (profile safety section)")
+        p.add_argument("--conditions", choices=list(PRESETS), default="as_written",
+                       help="voice: caller conditions laid over every test: phone (phone line, lost packets), "
+                            "noisy (cafe noise) or hard (street noise, phone line, and callers who cut in)")
         p.add_argument("--show-pii", action="store_true",
                        help="keep names, dates of birth and ids readable in the saved run (for checking; don't share)")
         if name == "run":

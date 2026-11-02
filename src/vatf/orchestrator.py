@@ -25,6 +25,7 @@ from .gateway import GatewayError, ToolGateway, gateway_address, uses_gateway
 from .judges import JudgePanel, judge_settings, skipped
 from .loader import Project, ProjectError
 from .logs import LogCollector
+from .metrics import call_quality, with_bands
 from .outcome import evaluate_outcome
 from .probe import BackendProbe, ProbeSetupError, load_fixtures
 from .proxy import InProcessToolProxy
@@ -63,6 +64,7 @@ class RunConfig:
     speech: SpeechConfig = field(default_factory=SpeechConfig)  # voice mode: the caller's TTS and STT
     judges: bool = True                           # False (--no-judges): skip the AI judges for this run
     safety: bool = False                          # True (--safety): add the built-in safety tests (attacks.py)
+    conditions: str = "as_written"                # voice: caller conditions preset over every test (conditions.py)
 
 
 class Orchestrator:
@@ -153,6 +155,10 @@ class Orchestrator:
     def preflight(self) -> None:
         """Problems that would make every call fail, found before the first call: secrets named as
         ${NAME} in the profile must be set (in the .env file or the shell)."""
+        from .conditions import PRESETS
+
+        if self.config.conditions not in PRESETS:
+            raise RunSetupError(f"unknown caller conditions {self.config.conditions!r} (use one of {', '.join(PRESETS)})")
         p = self.profile
         named = [p["connection"].get("options", {}).get("headers"), p.get("backend", {}).get("connection"),
                  p.get("backend", {}).get("headers"), (p.get("logs") or {}).get("url"), (p.get("logs") or {}).get("headers"),
@@ -173,7 +179,7 @@ class Orchestrator:
             "project": Path(self.project.folder).as_posix(), "profile_file": self.project.profile_file,
             "profile_id": self.profile["id"], "profile_name": self.profile.get("name", self.profile["id"]),
             "mode": self.mode, "offline": cfg.offline, "repeats": cfg.repeats,
-            "scenario_ids": list(cfg.scenario_ids), "safety": cfg.safety, "agent_options": dict(self.profile["connection"].get("options", {})),
+            "scenario_ids": list(cfg.scenario_ids), "safety": cfg.safety, "conditions": cfg.conditions, "agent_options": dict(self.profile["connection"].get("options", {})),
             "caller_model": None if cfg.offline else cfg.caller_model, "pii_masked": cfg.mask_pii,
             "judges": ({"enabled": False, "why": self._judges_off()} if self._judges_off() else
                        {k: v for k, v in judge_settings(self.profile).items() if k != "policy"}),
@@ -235,8 +241,8 @@ class Orchestrator:
 
         voices = set()
         for pc in plan:
-            persona = self.project.personas.get(pc.persona_id or "", {})
-            voices.add(persona.get("speech", {}).get("tts_voice", self.config.speech.caller_voice))
+            scenario = self.project.scenario(pc.scenario_id)
+            voices.add(self._conditions(scenario, "").voice)
         try:
             tts, stt = make_tts(self.config.speech, self.config.root), make_stt(self.config.speech, self.config.root)
             await asyncio.to_thread(lambda: ([tts.warm_up(v) for v in sorted(voices)], stt.warm_up()))
@@ -269,10 +275,12 @@ class Orchestrator:
                 self._gateway.attach(proxy)
             logs = LogCollector(self.profile, self.config.root)
             logs.begin()
-            writer.emit("connector", "call_started", {"test_id": ctx.test_id, "mode": self.mode})
+            cond = self._conditions(scenario, ctx.test_id) if self.mode == "voice" else None
+            writer.emit("connector", "call_started", {"test_id": ctx.test_id, "mode": self.mode,
+                                                      **({"conditions": cond.summary()} if cond else {})})
             caller = self._caller(scenario, meta)
             if self.mode == "voice":
-                ended_by, reason, turn = await self._converse_voice(ctx, scenario, caller, proxy, writer, live)
+                ended_by, reason, turn = await self._converse_voice(ctx, scenario, caller, proxy, writer, live, cond)
             else:
                 ended_by, reason, turn = await self._converse_text(ctx, scenario, caller, proxy, writer, live)
             writer.emit("connector", "call_ended", {"ended_by": ended_by, "reason": reason,
@@ -419,9 +427,19 @@ class Orchestrator:
         live.pop("session", None)
         return ended_by, reason, turn
 
-    async def _converse_voice(self, ctx, scenario, caller, proxy, writer, live) -> tuple[str, str, int]:
+    def _conditions(self, scenario: Mapping[str, Any], seed: str):
+        """The caller conditions of one voice call: persona, the test's audio and the run's preset."""
+        from .conditions import resolve
+
+        persona = self.project.personas.get((scenario.get("caller") or {}).get("persona", ""), {})
+        return resolve(persona, scenario, preset=self.config.conditions,
+                       default_voice=self.config.speech.caller_voice, seed=seed)
+
+    async def _converse_voice(self, ctx, scenario, caller, proxy, writer, live, cond=None) -> tuple[str, str, int]:
+        from .audio.line import LineEffects
         from .audio.noise import load_noise
         from .audio.recorder import Line, Recorder
+        from .conditions import noise_settings
         from .audio.tap import LiveTap
         from .speech import make_stt, make_tts
         from .voice_call import VoiceConversation, VoiceSettings
@@ -432,13 +450,13 @@ class Orchestrator:
         limits = self.profile.get("limits", {})
         audio = scenario.get("audio", {})
         persona = self.project.personas.get(scenario.get("caller", {}).get("persona", ""), {})
-        voice_cfg = persona.get("speech", {})
-        caller_voice = voice_cfg.get("tts_voice", self.config.speech.caller_voice)
+        cond = cond or self._conditions(scenario, ctx.test_id)
         try:
             tts, stt = make_tts(self.config.speech, self.config.root), make_stt(self.config.speech, self.config.root)
             # Models load (and download, the first time) here, before the agent is dialled.
-            await asyncio.to_thread(lambda: (tts.warm_up(caller_voice), stt.warm_up()))
-            noise = load_noise(audio, limits.get("max_call_seconds", 300) + 60, sr, ctx.test_id, self.config.root)
+            await asyncio.to_thread(lambda: (tts.warm_up(cond.voice), stt.warm_up()))
+            noise = load_noise(noise_settings(cond), limits.get("max_call_seconds", 300) + 60, sr, ctx.test_id,
+                               self.config.root)
         except Exception as e:
             raise HarnessError("speech_setup_failed", f"{type(e).__name__}: {e}{blocked_hint(e)}") from e
         try:
@@ -446,7 +464,8 @@ class Orchestrator:
         except ConnectError as e:
             raise HarnessError("connect_failed", str(e)) from e
         answered = rec.now_sample()   # the agent can only be heard from here on
-        line = Line(rec, session.send_frame, noise)
+        line = Line(rec, session.send_frame, noise,
+                    LineEffects(sr, phone=cond.phone, packet_loss_pct=cond.packet_loss_pct, seed=ctx.test_id))
         live.update(session=session, line=line, recorder=rec)
         line.start()
         live["tap"] = LiveTap.from_env(rec, f"{ctx.test_id} {scenario['id']}")   # dashboard's "Listen live"
@@ -455,15 +474,17 @@ class Orchestrator:
         settings = VoiceSettings(
             end_of_turn_ms=limits.get("end_of_turn_ms", 1000),
             no_reply_ms=behaviour.get("hangs_up_after_silence_ms", limits.get("no_reply_ms", 15000)),
-            barge_in=list(audio.get("barge_in", [])))
+            barge_in=list(audio.get("barge_in", [])), conditions=cond)
         conv = VoiceConversation(
             session=session, recorder=rec, line=line, tts=tts, stt=stt,
-            voice=caller_voice,
-            speaking_rate=voice_cfg.get("speaking_rate", 1.0), settings=settings, writer=writer, proxy=proxy)
+            voice=cond.voice, speaking_rate=cond.speaking_rate, settings=settings, writer=writer, proxy=proxy)
+        await conv.prepare_sounds()
 
         heard = await conv.listen(since=answered, caller_end=None, turn=1)
-        conv.emit_agent_turn(heard, 1, None)
+        conv.emit_agent_turn(heard, 1, None, answered=answered)
         turn, caller_turns, silent = 1, 0, 0
+        if heard.interrupted:          # a scenario cut-in on the greeting (audio.barge_in agent_turn 1)
+            heard, turn, caller_turns = await self._after_cut_in(conv, caller, heard, turn, caller_turns)
         ended_by, reason = None, ""
         max_turns, deadline = self._limits(scenario)
         while ended_by is None:
@@ -480,7 +501,9 @@ class Orchestrator:
                 ended_by, reason = "caller", "the agent stopped answering"
                 break
             action = await caller.next_turn(heard.text)
-            clip = await conv.synthesize(action.say) if action.say else None
+            clip = await conv.prepare(action.say) if action.say else None
+            if action.say and cond.quiet_turn == caller_turns + 1 and not conv._done():
+                await self._go_quiet(conv, cond, heard, turn, writer)
             # The agent may go on talking while the caller thinks of an answer (a second sentence, or
             # what it says after a tool call). A person would stop and listen, then answer all of it.
             for _ in range(MAX_WENT_ON):
@@ -491,7 +514,7 @@ class Orchestrator:
                 redo = getattr(caller, "redo", None)       # a scripted caller keeps its next line
                 if redo is not None:
                     action = await redo(heard.text)
-                    clip = await conv.synthesize(action.say) if action.say else None
+                    clip = await conv.prepare(action.say) if action.say else None
             if not action.say:
                 ended_by = "caller"
                 reason = ("the script ended" if scenario["style"] == "scripted" and not getattr(caller, "following_up", False)
@@ -507,18 +530,44 @@ class Orchestrator:
             heard = await conv.listen(since=start, caller_end=end, turn=turn)
             conv.emit_agent_turn(heard, turn, end)
             if heard.interrupted:
-                b_start, b_end, words = heard.barge
-                turn += 1
-                caller_turns += 1
-                conv.emit_caller_turn(words, b_start, b_end, turn, barge_in=True)
-                note = getattr(caller, "note_barge_in", None)
-                if note:
-                    note(heard.text, words)
-                heard = await conv.listen(since=heard.end + 1, caller_end=b_end, turn=turn)
-                conv.emit_agent_turn(heard, turn, b_end)
+                heard, turn, caller_turns = await self._after_cut_in(conv, caller, heard, turn, caller_turns)
             silent = silent + 1 if heard.start is None else 0
         await self._hang_up(live, writer)
         return ended_by, reason, turn
+
+    async def _after_cut_in(self, conv, caller, heard, turn: int, caller_turns: int):
+        """The caller cut in on the agent: write down what it said, then hear the agent's answer to it."""
+        b_start, b_end, words = heard.barge
+        if not heard.auto:      # the caller's own cut-in keeps the turn, so scripted turn checks line up
+            turn += 1
+            caller_turns += 1
+        conv.emit_caller_turn(words, b_start, b_end, turn, barge_in=True, auto=heard.auto)
+        note = getattr(caller, "note_barge_in", None)
+        if note:
+            note(heard.text, words)
+        heard = await conv.listen(since=heard.end + 1, caller_end=b_end, turn=turn)
+        conv.emit_agent_turn(heard, turn, b_end)
+        return heard, turn, caller_turns
+
+    async def _go_quiet(self, conv, cond, heard, turn: int, writer) -> None:
+        """The caller says nothing for quiet_ms after the agent's turn (once per call). A good agent checks
+        in ("are you still there?"); the call loop then hears that and the caller answers it."""
+        rec = conv.rec
+        start = heard.end if heard.end is not None else rec.now_sample()
+        deadline = start + cond.behaviour.quiet_ms * rec.sr // 1000
+        while rec.now_sample() < deadline and not conv.agent_went_on() and not conv._done():
+            if conv.line.error:
+                raise conv.line.error
+            await asyncio.sleep(0.03)
+        spans = rec.agent_spans(conv._heard_to + 1, rec.now_sample())
+        spoke = spans[0][0] if spans else None
+        if spoke is None and rec.agent_playing():
+            spoke = rec.now_sample()
+        end = spoke if spoke is not None else max(deadline, start)
+        data: dict[str, Any] = {"kind": "silence", "text": "", "quiet_ms": cond.behaviour.quiet_ms,
+                                "agent_spoke_after_ms": rec.ms(spoke - start) if spoke is not None else None,
+                                "audio": {"file": "audio/call.wav", "start_ms": rec.ms(start), "end_ms": rec.ms(end)}}
+        writer.emit("caller", "caller_sound", data, turn=turn, t_ms=rec.ms(start))
 
     async def _hang_up(self, live: dict[str, Any], writer) -> None:
         """Close whatever is open; in voice mode save the recording (also after a harness error)."""
@@ -667,7 +716,13 @@ class Orchestrator:
                 message=("The simulated caller went off script: " + "; ".join(e.data.get("problems", []))
                          if off else "The simulated caller kept to its goal and facts."),
                 evidence=(EvidenceRef(e.seq),), evidence_level=EvidenceLevel.AI_OPINION))
-        return LocalVerdictBuilder().build(trace, merge_results(results, judged), block)
+        verdict = LocalVerdictBuilder().build(trace, merge_results(results, judged), block)
+        # Call quality (metrics.py): read off the timeline, banded with this agent's own values.
+        verdict["metrics"]["quality"] = with_bands(call_quality(events, self.mode, scenario), self.profile)
+        started = next((e for e in events if e.type == "call_started"), None)
+        if started is not None and started.data.get("conditions"):
+            verdict["conditions"] = dict(started.data["conditions"])
+        return verdict
 
 
 def _error_code(e: Exception) -> str:

@@ -66,10 +66,27 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
             rows.append((n, "AGENT", text + (f"  [{'; '.join(notes)}]" if notes else "")))
         elif t == "caller_turn":
             text = d.get("text", "")
+            notes = []
+            if d.get("spoken"):
+                notes.append(f"said as: {d['spoken']}")
+            if d.get("pause_ms"):
+                notes.append(f"paused {d['pause_ms']} ms mid-sentence")
             if "audio" in d:
-                text += f"  [{'cut in, ' if d.get('barge_in') else ''}spoke {_secs(d['audio']['start_ms'])}" \
-                        f"-{_secs(d['audio']['end_ms'])}]"
-            rows.append((n, "CALLER", text))
+                cut = ("cut in on its own, " if d.get("barge_in_auto") else "cut in, ") if d.get("barge_in") else ""
+                notes.append(f"{cut}spoke {_secs(d['audio']['start_ms'])}-{_secs(d['audio']['end_ms'])}")
+            rows.append((n, "CALLER", text + (f"  [{'; '.join(notes)}]" if notes else "")))
+        elif t == "caller_sound" and d.get("kind") == "backchannel":
+            kept = "the agent kept talking" if d.get("agent_kept_talking") else "the agent stopped"
+            rows.append((n, "CALLER", f"({d.get('text', 'mm-hm')}, said over the agent)  [{kept}]"))
+        elif t == "caller_sound" and d.get("kind") == "silence":
+            after = d.get("agent_spoke_after_ms")
+            then = (f"the agent spoke again after {_secs(after)}" if after is not None
+                    else f"the agent said nothing for {_secs(d.get('quiet_ms', 0))}")
+            rows.append((n, "CALLER", f"(says nothing)  [{then}]"))
+        elif t == "call_started" and d.get("conditions"):
+            c = d["conditions"]
+            extra = f"; caller {', '.join(c['behaviours'])}" if c.get("behaviours") else ""
+            rows.append((n, "conditions", f"{c.get('label', 'clean line')}{extra}"))
         elif t == "stt_text":
             rows.append((n, "second listen", f"turn #{d.get('agent_turn')} heard again ({d.get('model', '')}): "
                                              f"{d.get('text', '')}"))

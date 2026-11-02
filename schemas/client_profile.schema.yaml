@@ -406,6 +406,20 @@ properties:
         default: 0.9
       max_harness_retries: {type: integer, minimum: 0, default: 2}
 
+  metrics:
+    description: >
+      Phase 5 call quality metrics (src/vatf/metrics.py): this agent's good and warn values, and whether a
+      run value in the bad band blocks the release. Unset fields keep the framework's defaults.
+    type: object
+    propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, turns_to_goal, escalated, duration_s]}
+    additionalProperties:
+      type: object
+      additionalProperties: false
+      properties:
+        good: {type: number}
+        warn: {type: number}
+        blocks: {type: boolean, default: false}
+
   limits:
     description: Cost and safety caps for one run.
     type: object

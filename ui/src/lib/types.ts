@@ -15,7 +15,29 @@ export interface System {
   api_key: { set: boolean; hint: string | null; source: string | null };
   models: { folder: string; piper_voices: string[]; whisper: { name: string; bytes: number }[]; bytes: number };
   active_job: Job | null;
+  accents?: { id: string; label: string; voice: string }[];
+  conditions?: { id: string; title: string; about: string }[];
+  metrics?: MetricDef[];
+  noises?: string[];
 }
+
+// Phase 5: call quality metrics (src/vatf/metrics.py) and caller conditions (conditions.py).
+export type Band = "good" | "warn" | "bad" | null;
+export type MetricUnit = "ms" | "%" | "wpm" | "turns" | "s";
+export interface MetricDef {
+  id: string; title: string; unit: MetricUnit; better: "lower" | "higher"; about: string; voice_only: boolean;
+  default_good: number | null; default_warn: number | null; good: number | null; warn: number | null; blocks: boolean;
+}
+export interface QualityValue { value: number | boolean | null; band: Band; n?: number; never?: boolean; note?: string; [k: string]: unknown }
+export interface QualityRow {
+  id: string; title: string; unit: MetricUnit; better: "lower" | "higher"; value: number | null; band: Band;
+  good: number | null; warn: number | null; blocks: boolean; calls: number; about: string; detail?: Record<string, number | string>;
+}
+export interface ConditionRow {
+  label: string; calls: number; passed: number; failed: number; pass_rate: number | null;
+  p50_ms: number | null; p90_ms: number | null; talked_over_pct: number | null; behaviours: string[];
+}
+export interface CallConditions { label: string; preset?: string; voice?: string; accent?: string; behaviours?: string[]; [k: string]: unknown }
 
 export interface Scenario {
   id: string;
@@ -190,6 +212,7 @@ export interface Metrics {
   latency_turns?: LatencyTurn[];
   latency_p50_ms?: number | null;
   latency_p95_ms?: number | null;
+  quality?: Record<string, QualityValue>;
 }
 
 export interface CallBrief {
@@ -226,8 +249,10 @@ export interface DecisionDoc {
   safety?: SafetyResult;
   basis?: { decided_by: Layer[]; judge_opinions: number; opinions_to_label?: number; trusted_items?: number };
   heard_numbers?: { numbers: number; heard_right: number; misheard: { test_id: string; seq: number; said: string; heard: string }[] };
+  quality?: QualityRow[];
+  by_condition?: ConditionRow[];
 }
-export type Layer = "all_checks" | "hard_checks" | "trusted_judges" | "reliability" | "latency" | "evidence";
+export type Layer = "all_checks" | "hard_checks" | "trusted_judges" | "reliability" | "latency" | "call_quality" | "evidence";
 
 export interface RunInfo {
   run_id: string;
@@ -245,6 +270,7 @@ export interface RunInfo {
   plan: { scenario_id: string; persona_id: string | null; repeat: number }[];
   judges?: { enabled?: boolean; why?: string; primary_model?: string; secondary_model?: string; tiebreak?: boolean; tiebreak_model?: string } | null;
   safety?: boolean;
+  conditions?: string;
   speech?: { engine: string; ears_model: string; check_model: string } | null;
 }
 
@@ -282,6 +308,7 @@ export interface Verdict {
   checks: Check[];
   metrics: Metrics & { judge_cost_usd?: number };
   judge_notes?: string[];
+  conditions?: CallConditions;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

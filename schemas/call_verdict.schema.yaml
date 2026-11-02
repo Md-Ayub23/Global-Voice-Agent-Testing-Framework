@@ -59,6 +59,14 @@ properties:
     type: array
     items: {$ref: "#/$defs/check_result"}
 
+  conditions:
+    description: Voice, Phase 5. The caller conditions this call ran under (conditions.py summary()).
+    type: object
+    properties:
+      label: {type: string}
+      preset: {type: string}
+      behaviours: {type: array, items: {type: string}}
+
   judge_notes:
     description: Problems the AI judges met on this call (e.g. a judge gave no usable answer).
     type: array
@@ -89,6 +97,17 @@ properties:
       latency_p95_ms: {type: [integer, "null"]}
       cost_usd: {type: number}
       judge_cost_usd: {description: "What the AI judges cost for this call (not part of cost_usd).", type: number}
+      quality:
+        description: Phase 5 call quality metrics (src/vatf/metrics.py), each with its band for this call.
+        type: object
+        propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, turns_to_goal, escalated, duration_s]}
+        additionalProperties:
+          type: object
+          required: [value, band]
+          properties:
+            value: {type: [number, boolean, "null"]}
+            band: {enum: [good, warn, bad, null]}
+            n: {type: integer}
       heard_numbers:
         description: >
           Voice calls where the agent reports its own words: how many numbers it said, and how many the caller's

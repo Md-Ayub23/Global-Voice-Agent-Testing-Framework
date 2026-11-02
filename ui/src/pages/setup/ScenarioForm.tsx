@@ -96,6 +96,8 @@ function CheckList({ checks, onChange, ctx, needId, prefix }: { checks: Obj[]; o
   );
 }
 
+const NOISES: [string, string][] = [["none", "None"], ["office", "Office"], ["street", "Street"], ["cafe", "Cafe (voices)"], ["car", "Car"], ["tv", "TV or radio"]];
+
 export function ScenarioForm({ detail, file, initial, onDone }: { detail: ProfileDetail; file: string | null; initial: Obj | null; onDone: (file?: string) => void }) {
   const toast = useToast();
   const pid = str(detail.merged.id);
@@ -310,10 +312,18 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
       </Block>
 
       {voiceOn && (
-        <Block title="Audio (voice runs)" sub="A harder line: background noise, and the caller cutting in.">
-          <Grid cols={3}>
-            <Field label="Background noise"><Select value={str(at("audio", "noise")) || "none"} options={["none", "office", "street", "cafe", "car"]} onChange={(v) => put(["audio", "noise"], v === "none" ? undefined : v)} /></Field>
+        <Block title="Audio (voice runs)" sub="A harder line: background noise, a phone line, and the caller cutting in. Who the caller is (accent, behaviour) is set on Callers.">
+          <Grid cols={4}>
+            <Field label="Background noise"><Select id="audio-noise" value={str(at("audio", "noise")) || "none"} options={NOISES} onChange={(v) => put(["audio", "noise"], v === "none" ? undefined : v)} /></Field>
             <Field label="Speech-to-noise (dB)" hint="Lower is noisier. Default 15."><Num value={at("audio", "snr_db") as number} placeholder={15} onChange={(v) => put(["audio", "snr_db"], v)} /></Field>
+            <Field label="Phone line" hint="Phone: 300-3400 Hz and the G.711 codec, like a real call.">
+              <Select id="audio-line" value={str(at("audio", "line", "codec")) || "none"} options={[["none", "Clean (wideband)"], ["phone", "Phone (narrowband)"]]}
+                onChange={(v) => put(["audio", "line", "codec"], v === "none" ? undefined : v)} />
+            </Field>
+            <Field label="Packets lost (%)" hint="20 ms frames dropped in short bursts. 1-3% is a poor mobile line.">
+              <Num id="audio-loss" value={at("audio", "line", "packet_loss_pct") as number} placeholder={0} min={0} max={50} step={0.5}
+                onChange={(v) => put(["audio", "line", "packet_loss_pct"], v || undefined)} />
+            </Field>
           </Grid>
           <Field label="Caller cuts in">
             <div className="grid gap-2">

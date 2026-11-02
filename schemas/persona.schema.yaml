@@ -34,7 +34,13 @@ properties:
     properties:
       tts_voice: {type: string}
       speaking_rate: {type: number, minimum: 0.5, maximum: 2.0, default: 1.0}
-      accent: {type: string}
+      accent:
+        description: >
+          Phase 5. An accent from src/vatf/accents.py (american, british, scottish, northern-english, irish,
+          indian, hindi-l1, mandarin-l1, spanish-l1, arabic-l1, korean-l1, vietnamese-l1...). Picks the voice
+          when tts_voice is not given.
+        type: string
+      volume_db: {description: "Phase 5. Speak this many dB softer (negative) or louder than normal.", type: number, minimum: -20, maximum: 6}
   behaviour:
     type: object
     additionalProperties: false
@@ -44,3 +50,18 @@ properties:
         type: boolean
         default: false
       hangs_up_after_silence_ms: {type: integer, default: 8000}
+      interrupt_after_ms: {description: "Cuts in once the agent has talked this long in one turn. Default 2500.", type: integer, minimum: 300}
+      interrupt_chance: {description: "Chance of cutting in on each turn that long. Default 0.5.", type: number, minimum: 0, maximum: 1}
+      interrupt_max: {description: "Cut-ins per call at most. Default 2.", type: integer, minimum: 1}
+      interrupt_lines: {description: "What the caller says when it cuts in (one is picked).", type: array, items: {type: string}}
+      backchannels: {description: "Says \"mm-hm\" or \"okay\" while the agent talks; the agent should keep talking.", type: boolean, default: false}
+      backchannel_after_ms: {type: integer, minimum: 300, default: 1800}
+      backchannel_chance: {type: number, minimum: 0, maximum: 1, default: 0.6}
+      backchannel_max: {type: integer, minimum: 1, default: 3}
+      pauses_mid_sentence: {description: "Stops for a moment in the middle of longer sentences; the agent should wait.", type: boolean, default: false}
+      pause_ms: {type: integer, minimum: 200, maximum: 5000, default: 1200}
+      pause_chance: {type: number, minimum: 0, maximum: 1, default: 0.5}
+      fillers: {description: "Starts some answers with um, uh or hmm.", type: boolean, default: false}
+      filler_chance: {type: number, minimum: 0, maximum: 1, default: 0.4}
+      goes_quiet: {description: "Once per call, says nothing for quiet_ms; the agent should check in.", type: boolean, default: false}
+      quiet_ms: {type: integer, minimum: 2000, maximum: 60000, default: 12000}

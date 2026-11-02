@@ -24,6 +24,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from .caller import _last_json_object
+from .conditions import judge_note
 from .contracts.models import CheckResult, EvidenceLevel, EvidenceRef, LLMMessage, LLMRequest, Result
 from .rubrics import RubricItem
 from .story import story_rows
@@ -36,7 +37,7 @@ JUDGE_NAMES = {"primary": "first judge", "secondary": "second judge", "tiebreak"
 GROUP_SIZE = 6        # items per request: a judge answers a few focused questions better than many
 VOTES = {"PASS", "FAIL", "NOT_APPLICABLE"}
 # Timeline rows the judges read: the conversation and what really happened behind it.
-SKIP_ROWS = {"validator", "vatf error", "logs", "call ended"}
+SKIP_ROWS = {"validator", "vatf error", "logs", "call ended", "conditions"}
 
 JUDGE_SYSTEM = """You review recorded phone calls handled by an AI voice agent, for a release test.
 You get the agent's description and policy, the caller's goal, the call as numbered lines, and a list of
@@ -139,6 +140,9 @@ def judge_prompt(profile: Mapping[str, Any], scenario: Mapping[str, Any], events
     if profile.get("domain"):
         about.append(f"Industry: {profile['domain']}")
     about.append(f"Channel: {'voice (speech-recognition transcripts)' if mode == 'voice' else 'text'}")
+    started = next((e for e in events if e["type"] == "call_started"), None)
+    if mode == "voice" and started and started["data"].get("conditions"):
+        about.append(judge_note(started["data"]["conditions"]))
     policy = settings["policy"].strip() or "(none given: judge against common good practice)"
     prompt = (
         "\n".join(about)

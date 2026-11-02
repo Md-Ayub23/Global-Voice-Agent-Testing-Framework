@@ -1,0 +1,54 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Normal calls: variation); reviewed and added from
+# the dashboard.
+# Minimum valid sushi count of one; checks the agent accepts it and prices it at 8 dollars.
+# Rule R8: Only call select_sushi_order once the caller has specified both count and roll type.
+# Rule R9: Sushi pricing: $8 per roll.
+# Rule R10: Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per
+# order.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+schema_version: '0.1'
+kind: scenario
+id: gen.variation.caller-orders-a-single-california-roll
+title: Caller orders a single california roll
+description: Minimum valid sushi count of one; checks the agent accepts it and prices it at 8 dollars. Tests rule
+  R8. Tests rule R9. Tests rule R10. Tests rule R13.
+profile: pipecat-food
+tags:
+- generated
+- happy
+- variation
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: clear-caller
+  goal: You want sushi. Say you'd like just one california roll. When the agent reads back one california roll for
+    8 dollars, say yes, that's everything.
+  facts:
+    food: sushi
+    count: '1'
+    roll_type: california
+  end_when: The agent confirms the order is placed and ends the call, or max turns reached.
+  max_turns: 10
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: sushi
+      count: '1'
+      roll_type: california
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b

@@ -20,6 +20,7 @@ properties:
     enum:
       - call_started
       - caller_turn
+      - caller_sound
       - agent_turn
       - tool_request
       - tool_response
@@ -52,6 +53,19 @@ allOf:
             text: {description: "What the simulated caller said (its own words).", type: string}
             audio: {$ref: "#/$defs/audio_span"}
             barge_in: {type: boolean}
+  - if: {properties: {type: {const: caller_sound}}}
+    then:
+      properties:
+        data:
+          required: [kind]
+          properties:
+            kind: {description: "backchannel (a short mm-hm over the agent) or silence (the caller says nothing).", enum: [backchannel, silence]}
+            text: {type: string}
+            agent_kept_talking: {description: "backchannel: the agent talked on through it, as it should.", type: boolean}
+            agent_turn: {description: "backchannel: seq of the agent turn it was said over.", type: integer}
+            quiet_ms: {type: integer}
+            agent_spoke_after_ms: {description: "silence: when the agent spoke again (null: it never did).", type: [integer, "null"]}
+            audio: {$ref: "#/$defs/audio_span"}
   - if: {properties: {type: {const: agent_turn}}}
     then:
       properties:

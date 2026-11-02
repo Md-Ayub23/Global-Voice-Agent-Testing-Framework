@@ -1,0 +1,1806 @@
+{
+ "schema_version": "0.1",
+ "kind": "test_plan",
+ "profile": "pipecat-food",
+ "created_at": "2026-11-02T07:36:47+00:00",
+ "model": "claude-opus-5-5",
+ "asked": {
+  "count": 15,
+  "focus": "",
+  "mix": {
+   "happy": 6,
+   "edge": 5,
+   "error": 2,
+   "adversarial": 1,
+   "audio": 1
+  }
+ },
+ "got": {
+  "happy": 6,
+  "edge": 5,
+  "error": 2,
+  "adversarial": 1,
+  "audio": 1
+ },
+ "analysis": {
+  "summary": "Phone-based order-taking agent for Tony's takeaway, built on Pipecat Flows. It greets the caller, asks pizza or sushi, collects size and type (pizza) or count and type (sushi), reads back the order with price, allows revisions, places the order via place_order only after confirmation, can give a delivery estimate (~30 minutes), and ends the call politely. One order per call; it must decline to guess about anything outside its menu and pricing info.",
+  "intents": [
+   {
+    "id": "order_pizza",
+    "description": "Caller orders a pizza by choosing size and type; agent reads back, confirms, and places the order.",
+    "tools": [
+     "place_order"
+    ]
+   },
+   {
+    "id": "order_sushi",
+    "description": "Caller orders sushi rolls by choosing count and roll type; agent reads back, confirms, and places the order.",
+    "tools": [
+     "place_order"
+    ]
+   },
+   {
+    "id": "revise_order",
+    "description": "Caller changes details of the order after read-back before confirming.",
+    "tools": []
+   },
+   {
+    "id": "ask_delivery_time",
+    "description": "Caller asks when the food will arrive.",
+    "tools": [
+     "delivery_estimate"
+    ]
+   },
+   {
+    "id": "ask_unsupported_info",
+    "description": "Caller asks about other menu items, opening hours, allergens or deals; agent says it has no such information.",
+    "tools": []
+   }
+  ],
+  "slots": [
+   {
+    "name": "food_choice",
+    "description": "Whether the caller wants pizza or sushi.",
+    "example": "pizza"
+   },
+   {
+    "name": "pizza_size",
+    "description": "Pizza size: small, medium or large.",
+    "example": "medium"
+   },
+   {
+    "name": "pizza_type",
+    "description": "Pizza type: pepperoni, cheese, supreme or vegetarian.",
+    "example": "supreme"
+   },
+   {
+    "name": "roll_count",
+    "description": "Number of sushi rolls, 1 to 10.",
+    "example": "4"
+   },
+   {
+    "name": "roll_type",
+    "description": "Sushi roll type: california, spicy tuna, rainbow or dragon.",
+    "example": "rainbow"
+   },
+   {
+    "name": "order_confirmation",
+    "description": "Caller's confirmation that the read-back order is correct with no changes.",
+    "example": "yes, that's right"
+   }
+  ],
+  "rules": [
+   {
+    "id": "R1",
+    "text": "Always use the available functions to progress the conversation.",
+    "kind": "must"
+   },
+   {
+    "id": "R2",
+    "text": "Keep the conversation friendly, casual and polite.",
+    "kind": "must"
+   },
+   {
+    "id": "R3",
+    "text": "Do not output special characters or emojis since responses become audio.",
+    "kind": "must_not"
+   },
+   {
+    "id": "R4",
+    "text": "Start by greeting the caller and asking whether they want pizza or sushi.",
+    "kind": "must"
+   },
+   {
+    "id": "R5",
+    "text": "Only call select_pizza_order once the caller has specified both size and type.",
+    "kind": "must"
+   },
+   {
+    "id": "R6",
+    "text": "Pizza pricing: small $10, medium $15, large $20.",
+    "kind": "fact"
+   },
+   {
+    "id": "R7",
+    "text": "Pizza types available: pepperoni, cheese, supreme, vegetarian.",
+    "kind": "fact"
+   },
+   {
+    "id": "R8",
+    "text": "Only call select_sushi_order once the caller has specified both count and roll type.",
+    "kind": "must"
+   },
+   {
+    "id": "R9",
+    "text": "Sushi pricing: $8 per roll.",
+    "kind": "fact"
+   },
+   {
+    "id": "R10",
+    "text": "Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per order.",
+    "kind": "fact"
+   },
+   {
+    "id": "R11",
+    "text": "Read back the complete order details and ask if the caller wants anything else or to make changes.",
+    "kind": "must"
+   },
+   {
+    "id": "R12",
+    "text": "Use revise_order if the caller wants to change something.",
+    "kind": "must"
+   },
+   {
+    "id": "R13",
+    "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+    "kind": "must"
+   },
+   {
+    "id": "R14",
+    "text": "Never place an order without caller confirmation.",
+    "kind": "must_not"
+   },
+   {
+    "id": "R15",
+    "text": "Take only one order per call.",
+    "kind": "must"
+   },
+   {
+    "id": "R16",
+    "text": "Delivery takes about 30 minutes.",
+    "kind": "fact"
+   },
+   {
+    "id": "R17",
+    "text": "For other menu items, opening hours, allergens or deals, say it has no information rather than guess.",
+    "kind": "must"
+   },
+   {
+    "id": "R18",
+    "text": "After placing the order, thank the caller and end the conversation politely and concisely.",
+    "kind": "must"
+   }
+  ],
+  "workflows": [
+   {
+    "intent": "order_pizza",
+    "steps": [
+     "Greet caller and ask pizza or sushi",
+     "Caller chooses pizza",
+     "Collect pizza size and type",
+     "Call select_pizza_order once both are given",
+     "Read back full order with price and ask for changes or anything else",
+     "On confirmation call complete_order, which calls place_order",
+     "Thank caller and end call"
+    ]
+   },
+   {
+    "intent": "order_sushi",
+    "steps": [
+     "Greet caller and ask pizza or sushi",
+     "Caller chooses sushi",
+     "Collect roll count (1-10) and roll type",
+     "Call select_sushi_order once both are given",
+     "Read back full order with total price ($8 x count) and ask for changes",
+     "On confirmation call complete_order, which calls place_order",
+     "Thank caller and end call"
+    ]
+   },
+   {
+    "intent": "revise_order",
+    "steps": [
+     "During read-back caller asks to change something",
+     "Call revise_order",
+     "Re-collect changed details and reselect the order",
+     "Read back updated order and ask for confirmation",
+     "Place order only after confirmation"
+    ]
+   },
+   {
+    "intent": "ask_delivery_time",
+    "steps": [
+     "Caller asks when food will arrive",
+     "Call delivery_estimate",
+     "Tell caller about 30 minutes"
+    ]
+   },
+   {
+    "intent": "ask_unsupported_info",
+    "steps": [
+     "Caller asks about other items, hours, allergens or deals",
+     "State the agent has no such information without guessing",
+     "Return to the order flow"
+    ]
+   }
+  ],
+  "unclear": [
+   "Whether pizza orders can include more than one pizza (quantity) or only a single pizza.",
+   "What the agent should say or do if place_order fails (retry, apologize, escalate) and whether it must avoid claiming the order was placed.",
+   "Whether there is any human handoff or escalation path at all.",
+   "How to handle sushi requests over 10 rolls or below 1, or unavailable sizes/types.",
+   "Whether one call can mix pizza and sushi, given 'one order per call' and 'anything else' in the read-back.",
+   "Whether the delivery address, caller name or phone number must be collected; none is mentioned.",
+   "Whether delivery_estimate may return values other than 30 minutes and which source takes precedence.",
+   "Expected values of the status column in orders_for_test and whether price is stored as a total.",
+   "Whether select_pizza_order, select_sushi_order, complete_order and revise_order are observable tool calls in Vocto (only place_order and delivery_estimate are listed).",
+   "What to do if the caller hangs up or declines after read-back without confirming."
+  ]
+ },
+ "tests": [
+  {
+   "n": 1,
+   "id": "gen.happy-path.caller-orders-a-medium-vegetarian-pizza",
+   "file": "scenarios/gen-happy-path-caller-orders-a-medium-vegetarian-pizza.yaml",
+   "category": "happy",
+   "kind": "happy_path",
+   "title": "Caller orders a medium vegetarian pizza",
+   "why": "Core pizza flow with a different size and type than the existing test, checking the medium price of 15 dollars.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R4",
+     "text": "Start by greeting the caller and asking whether they want pizza or sushi.",
+     "kind": "must"
+    },
+    {
+     "id": "R6",
+     "text": "Pizza pricing: small $10, medium $15, large $20.",
+     "kind": "fact"
+    },
+    {
+     "id": "R11",
+     "text": "Read back the complete order details and ask if the caller wants anything else or to make changes.",
+     "kind": "must"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    },
+    {
+     "id": "R18",
+     "text": "After placing the order, thank the caller and end the conversation politely and concisely.",
+     "kind": "must"
+    }
+   ],
+   "persona": "calm-adult",
+   "persona_new": false,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.happy-path.caller-orders-a-medium-vegetarian-pizza",
+    "title": "Caller orders a medium vegetarian pizza",
+    "description": "Core pizza flow with a different size and type than the existing test, checking the medium price of 15 dollars. Tests rule R4. Tests rule R6. Tests rule R11. Tests rule R13. Tests rule R18.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "happy",
+     "happy-path"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "calm-adult",
+     "goal": "You want a pizza. When asked, say you'd like a medium vegetarian pizza. Listen to the read-back. If it says medium vegetarian for 15 dollars, say yes, that's right, nothing else. Then say thanks and goodbye.",
+     "facts": {
+      "food": "pizza",
+      "size": "medium",
+      "pizza_type": "vegetarian"
+     },
+     "end_when": "The agent confirms the order is placed and says goodbye, or the call reaches max turns.",
+     "max_turns": 10
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "medium",
+       "pizza_type": "vegetarian",
+       "price": "15"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent read back a medium vegetarian pizza at 15 dollars before placing the order?",
+      "title": "Correct price read back",
+      "pass_when": "The read-back names medium, vegetarian and 15 dollars before the caller confirms.",
+      "fail_when": "The price is wrong, missing, or the order is placed before any read-back."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 2,
+   "id": "gen.variation.second-language-caller-orders-a-small-ch",
+   "file": "scenarios/gen-variation-second-language-caller-orders-a-small-ch.yaml",
+   "category": "happy",
+   "kind": "variation",
+   "title": "Second-language caller orders a small cheese pizza",
+   "why": "Checks the smallest size and simple language handling from a non-native speaker.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R2",
+     "text": "Keep the conversation friendly, casual and polite.",
+     "kind": "must"
+    },
+    {
+     "id": "R6",
+     "text": "Pizza pricing: small $10, medium $15, large $20.",
+     "kind": "fact"
+    },
+    {
+     "id": "R7",
+     "text": "Pizza types available: pepperoni, cheese, supreme, vegetarian.",
+     "kind": "fact"
+    },
+    {
+     "id": "R11",
+     "text": "Read back the complete order details and ask if the caller wants anything else or to make changes.",
+     "kind": "must"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    }
+   ],
+   "persona": "second-language",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.variation.second-language-caller-orders-a-small-ch",
+    "title": "Second-language caller orders a small cheese pizza",
+    "description": "Checks the smallest size and simple language handling from a non-native speaker. Tests rule R2. Tests rule R6. Tests rule R7. Tests rule R11. Tests rule R13.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "happy",
+     "variation"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "second-language",
+     "goal": "You want a pizza. Use short simple sentences. Say 'small pizza, only cheese'. If the agent talks fast or uses hard words, ask it to say it more simply. When it reads back a small cheese pizza for 10 dollars, say 'yes, correct, that is all'.",
+     "facts": {
+      "food": "pizza",
+      "size": "small",
+      "pizza_type": "cheese"
+     },
+     "end_when": "The agent confirms the order is placed and ends the call, or max turns reached.",
+     "max_turns": 12
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "small",
+       "pizza_type": "cheese",
+       "price": "10"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "When the caller asked for simpler words, did the agent rephrase plainly and politely?",
+      "title": "Simpler wording",
+      "pass_when": "The agent repeats the point in shorter, simpler sentences without impatience.",
+      "fail_when": "The agent repeats the same complex wording or ignores the request."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 3,
+   "id": "gen.variation.slow-speaker-orders-four-rainbow-rolls",
+   "file": "scenarios/gen-variation-slow-speaker-orders-four-rainbow-rolls.yaml",
+   "category": "happy",
+   "kind": "variation",
+   "title": "Slow speaker orders four rainbow rolls",
+   "why": "Sushi flow with a mid-range count, checking the total of 32 dollars and patience with pauses.",
+   "intent": "order_sushi",
+   "rules": [
+    {
+     "id": "R8",
+     "text": "Only call select_sushi_order once the caller has specified both count and roll type.",
+     "kind": "must"
+    },
+    {
+     "id": "R9",
+     "text": "Sushi pricing: $8 per roll.",
+     "kind": "fact"
+    },
+    {
+     "id": "R10",
+     "text": "Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per order.",
+     "kind": "fact"
+    },
+    {
+     "id": "R11",
+     "text": "Read back the complete order details and ask if the caller wants anything else or to make changes.",
+     "kind": "must"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    }
+   ],
+   "persona": "slow-speaker",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.variation.slow-speaker-orders-four-rainbow-rolls",
+    "title": "Slow speaker orders four rainbow rolls",
+    "description": "Sushi flow with a mid-range count, checking the total of 32 dollars and patience with pauses. Tests rule R8. Tests rule R9. Tests rule R10. Tests rule R11. Tests rule R13.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "happy",
+     "variation"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "slow-speaker",
+     "goal": "You want sushi. Speak slowly with pauses. Say you want... four... rainbow rolls. Ask the agent to repeat the total once. When the read-back says four rainbow rolls for 32 dollars, confirm it's right and you want nothing else.",
+     "facts": {
+      "food": "sushi",
+      "count": "4",
+      "roll_type": "rainbow"
+     },
+     "end_when": "The agent confirms the order is placed and says goodbye, or max turns reached.",
+     "max_turns": 12
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "sushi",
+       "count": "4",
+       "roll_type": "rainbow"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent state the total as 32 dollars for four rolls?",
+      "title": "Correct sushi total",
+      "pass_when": "The agent says 32 dollars (four at 8 dollars each).",
+      "fail_when": "The agent gives any other total or no total."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 4,
+   "id": "gen.variation.caller-orders-a-single-california-roll",
+   "file": "scenarios/gen-variation-caller-orders-a-single-california-roll.yaml",
+   "category": "happy",
+   "kind": "variation",
+   "title": "Caller orders a single california roll",
+   "why": "Minimum valid sushi count of one; checks the agent accepts it and prices it at 8 dollars.",
+   "intent": "order_sushi",
+   "rules": [
+    {
+     "id": "R8",
+     "text": "Only call select_sushi_order once the caller has specified both count and roll type.",
+     "kind": "must"
+    },
+    {
+     "id": "R9",
+     "text": "Sushi pricing: $8 per roll.",
+     "kind": "fact"
+    },
+    {
+     "id": "R10",
+     "text": "Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per order.",
+     "kind": "fact"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    }
+   ],
+   "persona": "clear-caller",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.variation.caller-orders-a-single-california-roll",
+    "title": "Caller orders a single california roll",
+    "description": "Minimum valid sushi count of one; checks the agent accepts it and prices it at 8 dollars. Tests rule R8. Tests rule R9. Tests rule R10. Tests rule R13.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "happy",
+     "variation"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "clear-caller",
+     "goal": "You want sushi. Say you'd like just one california roll. When the agent reads back one california roll for 8 dollars, say yes, that's everything.",
+     "facts": {
+      "food": "sushi",
+      "count": "1",
+      "roll_type": "california"
+     },
+     "end_when": "The agent confirms the order is placed and ends the call, or max turns reached.",
+     "max_turns": 10
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "sushi",
+       "count": "1",
+       "roll_type": "california"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    }
+   },
+   "accepted": true
+  },
+  {
+   "n": 5,
+   "id": "gen.variation.rambling-caller-orders-a-large-supreme-a",
+   "file": "scenarios/gen-variation-rambling-caller-orders-a-large-supreme-a.yaml",
+   "category": "happy",
+   "kind": "variation",
+   "title": "Rambling caller orders a large supreme and asks when it arrives",
+   "why": "Combines ordering with a delivery question; the agent must look up the estimate rather than guess.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R6",
+     "text": "Pizza pricing: small $10, medium $15, large $20.",
+     "kind": "fact"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    },
+    {
+     "id": "R16",
+     "text": "Delivery takes about 30 minutes.",
+     "kind": "fact"
+    },
+    {
+     "id": "R18",
+     "text": "After placing the order, thank the caller and end the conversation politely and concisely.",
+     "kind": "must"
+    }
+   ],
+   "persona": "rambling-caller",
+   "persona_new": true,
+   "criticality": "normal",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.variation.rambling-caller-orders-a-large-supreme-a",
+    "title": "Rambling caller orders a large supreme and asks when it arrives",
+    "description": "Combines ordering with a delivery question; the agent must look up the estimate rather than guess. Tests rule R6. Tests rule R13. Tests rule R16. Tests rule R18.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "happy",
+     "variation"
+    ],
+    "criticality": "normal",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "rambling-caller",
+     "goal": "Start with a short story about your friends coming over for the game. Then say you want a large supreme pizza. Confirm the read-back of large supreme for 20 dollars. After it's placed, ask how long until it gets to you.",
+     "facts": {
+      "food": "pizza",
+      "size": "large",
+      "pizza_type": "supreme"
+     },
+     "end_when": "The agent has placed the order, told you the delivery time and said goodbye, or max turns reached.",
+     "max_turns": 12
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "large",
+       "pizza_type": "supreme",
+       "price": "20"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "calls-delivery-estimate",
+      "type": "tool_called",
+      "tool": "delivery_estimate",
+      "description": "The agent uses delivery_estimate instead of guessing."
+     },
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent tell the caller delivery takes about 30 minutes?",
+      "title": "Delivery time stated",
+      "pass_when": "The agent says about 30 minutes after checking the estimate.",
+      "fail_when": "The agent gives a different time or no time."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 6,
+   "id": "gen.variation.confused-caller-switches-roll-type-at-re",
+   "file": "scenarios/gen-variation-confused-caller-switches-roll-type-at-re.yaml",
+   "category": "happy",
+   "kind": "variation",
+   "title": "Confused caller switches roll type at read-back",
+   "why": "Revision on a sushi order: the saved order must reflect the corrected roll type only.",
+   "intent": "revise_order",
+   "rules": [
+    {
+     "id": "R11",
+     "text": "Read back the complete order details and ask if the caller wants anything else or to make changes.",
+     "kind": "must"
+    },
+    {
+     "id": "R12",
+     "text": "Use revise_order if the caller wants to change something.",
+     "kind": "must"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    }
+   ],
+   "persona": "confused-caller",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.variation.confused-caller-switches-roll-type-at-re",
+    "title": "Confused caller switches roll type at read-back",
+    "description": "Revision on a sushi order: the saved order must reflect the corrected roll type only. Tests rule R11. Tests rule R12. Tests rule R13.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "happy",
+     "variation"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "confused-caller",
+     "goal": "You want sushi. Ask for three california rolls. When the agent reads it back, say wait, actually you meant the dragon ones, three dragon rolls. Confirm only once the agent reads back three dragon rolls for 24 dollars.",
+     "facts": {
+      "food": "sushi",
+      "count": "3",
+      "roll_type": "dragon",
+      "first_choice": "california"
+     },
+     "end_when": "The agent places the corrected order and ends the call, or max turns reached.",
+     "max_turns": 14
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "sushi",
+       "count": "3",
+       "roll_type": "dragon"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent read back the updated order with three dragon rolls before placing it?",
+      "title": "Updated read-back",
+      "pass_when": "A second read-back with dragon rolls and 24 dollars happens before placement.",
+      "fail_when": "The agent places the order without re-reading it, or places california rolls."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 7,
+   "id": "gen.boundary.caller-asks-for-eleven-rolls-above-the-l",
+   "file": "scenarios/gen-boundary-caller-asks-for-eleven-rolls-above-the-l.yaml",
+   "category": "edge",
+   "kind": "boundary",
+   "title": "Caller asks for eleven rolls, above the limit",
+   "why": "Sushi orders are capped at 10 rolls; the agent must not accept or place 11.",
+   "intent": "order_sushi",
+   "rules": [
+    {
+     "id": "R10",
+     "text": "Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per order.",
+     "kind": "fact"
+    },
+    {
+     "id": "R8",
+     "text": "Only call select_sushi_order once the caller has specified both count and roll type.",
+     "kind": "must"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    }
+   ],
+   "persona": "fast-talker",
+   "persona_new": false,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.boundary.caller-asks-for-eleven-rolls-above-the-l",
+    "title": "Caller asks for eleven rolls, above the limit",
+    "description": "Sushi orders are capped at 10 rolls; the agent must not accept or place 11. Tests rule R10. Tests rule R8. Tests rule R13.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "edge",
+     "boundary"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "fast-talker",
+     "goal": "Say quickly in one breath: sushi, eleven spicy tuna rolls, that's it. If the agent says the maximum is 10, say fine, make it ten spicy tuna. Confirm the read-back of ten rolls for 80 dollars.",
+     "facts": {
+      "food": "sushi",
+      "requested_count": "11",
+      "count": "10",
+      "roll_type": "spicy tuna"
+     },
+     "end_when": "The agent places a ten-roll order and says goodbye, or max turns reached.",
+     "max_turns": 12
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "sushi",
+       "count": "10",
+       "roll_type": "spicy tuna",
+       "price": "80"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent tell the caller that 10 rolls is the maximum instead of accepting 11?",
+      "title": "Limit explained",
+      "pass_when": "The agent says the limit is 10 and asks how to proceed.",
+      "fail_when": "The agent accepts or reads back 11 rolls."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 8,
+   "id": "gen.out-of-scope.caller-asks-about-allergens-hours-and-ga",
+   "file": "scenarios/gen-out-of-scope-caller-asks-about-allergens-hours-and-ga.yaml",
+   "category": "edge",
+   "kind": "out_of_scope",
+   "title": "Caller asks about allergens, hours and garlic bread",
+   "why": "The agent has no allergen, hours or extra menu info and must say so rather than invent answers.",
+   "intent": "ask_unsupported_info",
+   "rules": [
+    {
+     "id": "R17",
+     "text": "For other menu items, opening hours, allergens or deals, say it has no information rather than guess.",
+     "kind": "must"
+    },
+    {
+     "id": "R7",
+     "text": "Pizza types available: pepperoni, cheese, supreme, vegetarian.",
+     "kind": "fact"
+    }
+   ],
+   "persona": "topic-switcher",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.out-of-scope.caller-asks-about-allergens-hours-and-ga",
+    "title": "Caller asks about allergens, hours and garlic bread",
+    "description": "The agent has no allergen, hours or extra menu info and must say so rather than invent answers. Tests rule R17. Tests rule R7.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "edge",
+     "out-of-scope"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "topic-switcher",
+     "goal": "Start ordering a medium cheese pizza. Halfway through ask whether the cheese pizza has nuts, what time they close tonight, and if they have garlic bread. Then come back and finish the medium cheese pizza order, confirming the read-back.",
+     "facts": {
+      "food": "pizza",
+      "size": "medium",
+      "pizza_type": "cheese"
+     },
+     "end_when": "The order is placed and the agent says goodbye, or max turns reached.",
+     "max_turns": 14
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "medium",
+       "pizza_type": "cheese",
+       "price": "15"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent avoid claiming the pizza is nut-free or giving closing hours or garlic bread availability?",
+      "title": "No guessing on allergens",
+      "pass_when": "The agent says it has no information on allergens, hours or other items.",
+      "fail_when": "The agent states any allergen fact, closing time, or that garlic bread is available or not as fact."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 9,
+   "id": "gen.invalid-input.caller-asks-for-an-extra-large-hawaiian",
+   "file": "scenarios/gen-invalid-input-caller-asks-for-an-extra-large-hawaiian.yaml",
+   "category": "edge",
+   "kind": "invalid_input",
+   "title": "Caller asks for an extra large hawaiian pizza",
+   "why": "Neither the size nor type exists; the agent must offer real options and not place an invalid order.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R5",
+     "text": "Only call select_pizza_order once the caller has specified both size and type.",
+     "kind": "must"
+    },
+    {
+     "id": "R6",
+     "text": "Pizza pricing: small $10, medium $15, large $20.",
+     "kind": "fact"
+    },
+    {
+     "id": "R7",
+     "text": "Pizza types available: pepperoni, cheese, supreme, vegetarian.",
+     "kind": "fact"
+    }
+   ],
+   "persona": "repeater",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.invalid-input.caller-asks-for-an-extra-large-hawaiian",
+    "title": "Caller asks for an extra large hawaiian pizza",
+    "description": "Neither the size nor type exists; the agent must offer real options and not place an invalid order. Tests rule R5. Tests rule R6. Tests rule R7.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "edge",
+     "invalid-input"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "repeater",
+     "goal": "Ask for an extra large hawaiian pizza. When told it's not available, ask again in other words if they really don't do hawaiian or a bigger size. Then settle on a large vegetarian and confirm the read-back.",
+     "facts": {
+      "food": "pizza",
+      "requested": "extra large hawaiian",
+      "size": "large",
+      "pizza_type": "vegetarian"
+     },
+     "end_when": "The large vegetarian order is placed and the call ends, or max turns reached.",
+     "max_turns": 14
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "large",
+       "pizza_type": "vegetarian",
+       "price": "20"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent list the real sizes or types instead of accepting hawaiian or extra large?",
+      "title": "Valid options offered",
+      "pass_when": "The agent names small, medium, large and/or pepperoni, cheese, supreme, vegetarian.",
+      "fail_when": "The agent accepts hawaiian or extra large, or invents a price for them."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 10,
+   "id": "gen.cancel-midway.angry-caller-backs-out-after-the-read-ba",
+   "file": "scenarios/gen-cancel-midway-angry-caller-backs-out-after-the-read-ba.yaml",
+   "category": "edge",
+   "kind": "cancel_midway",
+   "title": "Angry caller backs out after the read-back",
+   "why": "An order must never be placed without confirmation, even after it was fully selected.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    },
+    {
+     "id": "R14",
+     "text": "Never place an order without caller confirmation.",
+     "kind": "must_not"
+    },
+    {
+     "id": "R2",
+     "text": "Keep the conversation friendly, casual and polite.",
+     "kind": "must"
+    }
+   ],
+   "persona": "angry-caller",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.cancel-midway.angry-caller-backs-out-after-the-read-ba",
+    "title": "Angry caller backs out after the read-back",
+    "description": "An order must never be placed without confirmation, even after it was fully selected. Tests rule R13. Tests rule R14. Tests rule R2.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "edge",
+     "cancel-midway"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "angry-caller",
+     "goal": "Complain that your last order came cold. Order a medium pepperoni pizza anyway. When the agent reads it back, say no, forget it, you don't want to order anymore, and say goodbye. Do not confirm at any point.",
+     "facts": {
+      "food": "pizza",
+      "size": "medium",
+      "pizza_type": "pepperoni"
+     },
+     "end_when": "The caller has cancelled and the agent acknowledges, or max turns reached.",
+     "max_turns": 10
+    },
+    "checks": [
+     {
+      "id": "never-place-order",
+      "type": "tool_not_called",
+      "tool": "place_order",
+      "severity": "blocker",
+      "description": "place_order must not run in this call."
+     },
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent avoid saying the order was placed after the caller cancelled?",
+      "title": "No false confirmation",
+      "pass_when": "The agent accepts the cancellation politely and does not claim an order was sent.",
+      "fail_when": "The agent says the order is placed or on its way."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 11,
+   "id": "gen.missing-info.caller-gives-pizza-type-but-no-size",
+   "file": "scenarios/gen-missing-info-caller-gives-pizza-type-but-no-size.yaml",
+   "category": "edge",
+   "kind": "missing_info",
+   "title": "Caller gives pizza type but no size",
+   "why": "The agent must ask for the missing size rather than assume one.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R5",
+     "text": "Only call select_pizza_order once the caller has specified both size and type.",
+     "kind": "must"
+    },
+    {
+     "id": "R6",
+     "text": "Pizza pricing: small $10, medium $15, large $20.",
+     "kind": "fact"
+    }
+   ],
+   "persona": "impatient-caller",
+   "persona_new": false,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.missing-info.caller-gives-pizza-type-but-no-size",
+    "title": "Caller gives pizza type but no size",
+    "description": "The agent must ask for the missing size rather than assume one. Tests rule R5. Tests rule R6.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "edge",
+     "missing-info"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "impatient-caller",
+     "goal": "Say just 'pepperoni pizza, quick'. Don't mention a size. Sigh if asked, then say small. Confirm the read-back of small pepperoni for 10 dollars.",
+     "facts": {
+      "food": "pizza",
+      "size": "small",
+      "pizza_type": "pepperoni"
+     },
+     "end_when": "The order is placed and the call ends, or max turns reached.",
+     "max_turns": 10
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "small",
+       "pizza_type": "pepperoni",
+       "price": "10"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent ask which size the caller wanted before reading back an order?",
+      "title": "Asked for size",
+      "pass_when": "The agent asks for the size before any read-back.",
+      "fail_when": "The agent assumes a size without asking."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 12,
+   "id": "gen.tool-timeout.order-system-times-out-on-placement",
+   "file": "scenarios/gen-tool-timeout-order-system-times-out-on-placement.yaml",
+   "category": "error",
+   "kind": "tool_timeout",
+   "title": "Order system times out on placement",
+   "why": "If place_order times out the agent must not tell the caller the order went through.",
+   "intent": "order_sushi",
+   "rules": [
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    },
+    {
+     "id": "R18",
+     "text": "After placing the order, thank the caller and end the conversation politely and concisely.",
+     "kind": "must"
+    }
+   ],
+   "persona": "clear-caller",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.tool-timeout.order-system-times-out-on-placement",
+    "title": "Order system times out on placement",
+    "description": "If place_order times out the agent must not tell the caller the order went through. Tests rule R13. Tests rule R18.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "error",
+     "tool-timeout"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ],
+     "faults": [
+      {
+       "tool": "place_order",
+       "type": "timeout",
+       "delay_ms": 8000
+      }
+     ]
+    },
+    "caller": {
+     "persona": "clear-caller",
+     "goal": "Order two dragon rolls and confirm the read-back. If the agent says there was a problem, ask whether your order went through or not.",
+     "facts": {
+      "food": "sushi",
+      "count": "2",
+      "roll_type": "dragon"
+     },
+     "end_when": "The agent tells you whether the order went through and the call ends, or max turns reached.",
+     "max_turns": 10
+    },
+    "outcome": {
+     "expected": "honest_failure",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 0
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent tell the caller the order could not be confirmed instead of saying it was placed?",
+      "title": "Honest about failure",
+      "pass_when": "The agent says there was a problem and the order may not have gone through.",
+      "fail_when": "The agent claims the order is placed or on its way."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 13,
+   "id": "gen.tool-slow.order-system-responds-slowly-but-succeed",
+   "file": "scenarios/gen-tool-slow-order-system-responds-slowly-but-succeed.yaml",
+   "category": "error",
+   "kind": "tool_slow",
+   "title": "Order system responds slowly but succeeds",
+   "why": "A slow place_order must still result in exactly one order, not duplicates or a false failure.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    },
+    {
+     "id": "R15",
+     "text": "Take only one order per call.",
+     "kind": "must"
+    },
+    {
+     "id": "R18",
+     "text": "After placing the order, thank the caller and end the conversation politely and concisely.",
+     "kind": "must"
+    }
+   ],
+   "persona": "impatient-caller",
+   "persona_new": false,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.tool-slow.order-system-responds-slowly-but-succeed",
+    "title": "Order system responds slowly but succeeds",
+    "description": "A slow place_order must still result in exactly one order, not duplicates or a false failure. Tests rule R13. Tests rule R15. Tests rule R18.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "error",
+     "tool-slow"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ],
+     "faults": [
+      {
+       "tool": "place_order",
+       "type": "slow",
+       "delay_ms": 4000
+      }
+     ]
+    },
+    "caller": {
+     "persona": "impatient-caller",
+     "goal": "Order a large cheese pizza and confirm the read-back. If there's a pause, say 'hello, is it done?'. Don't confirm a second time unless asked about a new order.",
+     "facts": {
+      "food": "pizza",
+      "size": "large",
+      "pizza_type": "cheese"
+     },
+     "end_when": "The agent confirms the order and ends the call, or max turns reached.",
+     "max_turns": 10
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "large",
+       "pizza_type": "cheese",
+       "price": "20"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent avoid placing the order twice while waiting?",
+      "title": "Single order",
+      "pass_when": "Exactly one placement happens and the agent confirms once.",
+      "fail_when": "The agent places the order again or says it failed when it succeeded."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 14,
+   "id": "gen.pressure.caller-pressures-for-a-large-at-the-smal",
+   "file": "scenarios/gen-pressure-caller-pressures-for-a-large-at-the-smal.yaml",
+   "category": "adversarial",
+   "kind": "pressure",
+   "title": "Caller pressures for a large at the small price",
+   "why": "The agent has no deals and must not change prices under pressure; a wrong price hurts the business.",
+   "intent": "order_pizza",
+   "rules": [
+    {
+     "id": "R6",
+     "text": "Pizza pricing: small $10, medium $15, large $20.",
+     "kind": "fact"
+    },
+    {
+     "id": "R17",
+     "text": "For other menu items, opening hours, allergens or deals, say it has no information rather than guess.",
+     "kind": "must"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    }
+   ],
+   "persona": "angry-caller",
+   "persona_new": true,
+   "criticality": "critical",
+   "duplicate_of": null,
+   "notes": [],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.pressure.caller-pressures-for-a-large-at-the-smal",
+    "title": "Caller pressures for a large at the small price",
+    "description": "The agent has no deals and must not change prices under pressure; a wrong price hurts the business. Tests rule R6. Tests rule R17. Tests rule R13.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "adversarial",
+     "pressure"
+    ],
+    "criticality": "critical",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "angry-caller",
+     "goal": "Order a large pepperoni. Insist you were promised a large for 10 dollars last time and demand that price. Push twice. If the agent politely holds at 20 dollars, grudgingly accept and confirm the order at 20 dollars.",
+     "facts": {
+      "food": "pizza",
+      "size": "large",
+      "pizza_type": "pepperoni",
+      "demanded_price": "10"
+     },
+     "end_when": "The order is placed at the correct price or the call ends, or max turns reached.",
+     "max_turns": 12
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "pizza",
+       "size": "large",
+       "pizza_type": "pepperoni",
+       "price": "20"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "checks": [
+     {
+      "id": "ask-1",
+      "type": "judge",
+      "intent": "Did the agent keep the large price at 20 dollars and avoid promising a discount?",
+      "title": "Price held",
+      "pass_when": "The agent politely says the large is 20 dollars and it has no deals.",
+      "fail_when": "The agent agrees to 10 dollars or invents any discount."
+     }
+    ]
+   },
+   "accepted": true
+  },
+  {
+   "n": 15,
+   "id": "gen.noise.sushi-order-from-a-noisy-car",
+   "file": "scenarios/gen-noise-sushi-order-from-a-noisy-car.yaml",
+   "category": "audio",
+   "kind": "noise",
+   "title": "Sushi order from a noisy car",
+   "why": "Background noise can cause misheard counts or types; the agent must read back and confirm correctly.",
+   "intent": "order_sushi",
+   "rules": [
+    {
+     "id": "R10",
+     "text": "Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per order.",
+     "kind": "fact"
+    },
+    {
+     "id": "R11",
+     "text": "Read back the complete order details and ask if the caller wants anything else or to make changes.",
+     "kind": "must"
+    },
+    {
+     "id": "R13",
+     "text": "Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.",
+     "kind": "must"
+    }
+   ],
+   "persona": "calm-adult",
+   "persona_new": false,
+   "criticality": "normal",
+   "duplicate_of": null,
+   "notes": [
+    "Voice runs only (noise and interruptions need real audio)."
+   ],
+   "problems": [],
+   "selected": true,
+   "scenario": {
+    "schema_version": "0.1",
+    "kind": "scenario",
+    "id": "gen.noise.sushi-order-from-a-noisy-car",
+    "title": "Sushi order from a noisy car",
+    "description": "Background noise can cause misheard counts or types; the agent must read back and confirm correctly. Tests rule R10. Tests rule R11. Tests rule R13.",
+    "profile": "pipecat-food",
+    "tags": [
+     "generated",
+     "audio",
+     "noise"
+    ],
+    "criticality": "normal",
+    "style": "simulated",
+    "setup": {
+     "now": "2026-11-02T18:00:00+00:00",
+     "fixtures": [
+      "targets/pipecat-food/fixtures/base.sql"
+     ]
+    },
+    "caller": {
+     "persona": "calm-adult",
+     "goal": "You're calling from your car. Order five california rolls. If the agent mishears, correct it. Confirm only when the read-back says five california rolls for 40 dollars.",
+     "facts": {
+      "food": "sushi",
+      "count": "5",
+      "roll_type": "california"
+     },
+     "end_when": "The order is placed and the call ends, or max turns reached.",
+     "max_turns": 12
+    },
+    "outcome": {
+     "expected": "success",
+     "action": {
+      "tool": "place_order"
+     },
+     "record": {
+      "probe": "orders_for_test",
+      "expect_count": 1,
+      "expect_fields": {
+       "food": "sushi",
+       "count": "5",
+       "roll_type": "california"
+      }
+     },
+     "claim": {
+      "method": "patterns",
+      "success_patterns": [
+       "\\b(placed|confirmed|on its way|all set|thank you for your order|order number)\\b"
+      ],
+      "failure_patterns": [
+       "\\b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\\b",
+       "\\btry again\\b"
+      ]
+     }
+    },
+    "audio": {
+     "noise": "car",
+     "snr_db": 10
+    },
+    "modes": [
+     "voice"
+    ]
+   },
+   "accepted": true
+  }
+ ],
+ "cost_usd": 0.2765
+}

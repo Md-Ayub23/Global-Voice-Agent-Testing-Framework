@@ -1,0 +1,16 @@
+# From Vocto's persona library: Clear, polite caller.
+schema_version: '0.1'
+kind: persona
+id: clear-caller
+description: A polite caller who says what they want plainly, answers each question once and waits for the agent
+  to finish.
+traits:
+  patience: medium
+  verbosity: normal
+  mood: calm
+  clarity: high
+speech:
+  tts_voice: en_US-lessac-medium
+  speaking_rate: 1.0
+behaviour:
+  interrupts: false

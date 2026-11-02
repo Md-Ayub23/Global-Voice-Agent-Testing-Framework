@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { LatencyDots, Ring } from "../components/charts";
 import { Tip } from "../components/feedback";
 import { Icon } from "../components/Icon";
+import { ConditionsTable, QualityTiles } from "../components/quality";
 import { EvRef, Hero, OptionChips, heroToneOf } from "../components/runbits";
 import { Help } from "../components/form";
 import { Badge, Button, Card, CardHead, Chip, EmptyState, Legend, Notice, Skeleton, Table, Tabs, rowLink } from "../components/ui";
@@ -114,10 +115,12 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
   ));
 
   const heard = !!(d?.heard_numbers && d.heard_numbers.numbers > 0);
+  const qualityBad = (d?.quality || []).filter((q) => q.band === "bad").length;
   const tabs: { value: string; label: ReactNode }[] = [
     { value: "calls", label: <>Calls <Count n={finals.length} /></> },
     ...(d && reliability.length ? [{ value: "reliability", label: "Reliability" }] : []),
     ...(timed || heard ? [{ value: "times", label: "Response times" }] : []),
+    ...(d?.quality?.length ? [{ value: "quality", label: <>Call quality {qualityBad ? <Count n={qualityBad} bad /> : null}</> }] : []),
     ...(d?.judges?.length ? [{ value: "judges", label: "AI judges" }] : []),
     ...(d?.safety ? [{ value: "safety", label: <>Safety {d.safety.failed ? <Count n={d.safety.failed} bad /> : null}</> }] : []),
     ...(info ? [{ value: "setup", label: "Run setup" }] : []),
@@ -198,6 +201,9 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
         </div>
 
         {shown === "times" && d?.heard_numbers && d.heard_numbers.numbers > 0 && <HeardCard heard={d.heard_numbers} callLink={callLink} />}
+
+        {shown === "quality" && d?.quality && <QualityTiles rows={d.quality} />}
+        {shown === "quality" && d?.by_condition && d.by_condition.length > 0 && <ConditionsTable rows={d.by_condition} />}
 
         {shown === "safety" && d?.safety && <SafetyRunCard safety={d.safety} callLink={callLink} projectKey={project.key} />}
 

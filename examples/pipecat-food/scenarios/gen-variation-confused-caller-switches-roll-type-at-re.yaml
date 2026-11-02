@@ -1,0 +1,61 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Normal calls: variation); reviewed and added from
+# the dashboard.
+# Revision on a sushi order: the saved order must reflect the corrected roll type only.
+# Rule R11: Read back the complete order details and ask if the caller wants anything else or to make
+# changes.
+# Rule R12: Use revise_order if the caller wants to change something.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+schema_version: '0.1'
+kind: scenario
+id: gen.variation.confused-caller-switches-roll-type-at-re
+title: Confused caller switches roll type at read-back
+description: 'Revision on a sushi order: the saved order must reflect the corrected roll type only. Tests rule R11.
+  Tests rule R12. Tests rule R13.'
+profile: pipecat-food
+tags:
+- generated
+- happy
+- variation
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: confused-caller
+  goal: You want sushi. Ask for three california rolls. When the agent reads it back, say wait, actually you meant
+    the dragon ones, three dragon rolls. Confirm only once the agent reads back three dragon rolls for 24 dollars.
+  facts:
+    food: sushi
+    count: '3'
+    roll_type: dragon
+    first_choice: california
+  end_when: The agent places the corrected order and ends the call, or max turns reached.
+  max_turns: 14
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: sushi
+      count: '3'
+      roll_type: dragon
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent read back the updated order with three dragon rolls before placing it?
+  title: Updated read-back
+  pass_when: A second read-back with dragon rolls and 24 dollars happens before placement.
+  fail_when: The agent places the order without re-reading it, or places california rolls.

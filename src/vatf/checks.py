@@ -408,13 +408,17 @@ def barge_in_checks(scenario: Mapping[str, Any], events: Events) -> list[CheckRe
         cid = "agent-stops-when-interrupted" + (f"-{i}" if len(plan) > 1 else "")
         limit = b.get("stop_within_ms", 1000)
         n = b["agent_turn"]
-        if len(agent_turns) < n:
+        # The agent's n-th turn counts the turns the caller listened to; "went on" parts of a turn are not
+        # turns of their own. A call written down since Phase 5 also names the cut-in it made (barge_in_plan).
+        main = [e for e in agent_turns if not e.data.get("went_on")]
+        named = [e for e in agent_turns if e.data.get("barge_in_plan") == i]
+        if not named and len(main) < n:
             out.append(_result(check, cid, Result.NOT_VERIFIED,
                                f"The call ended before the agent's turn {n}, so the caller never cut in.", (),
                                EvidenceLevel.NONE))
             continue
-        turn = agent_turns[n - 1]
-        if not turn.data.get("interrupted"):
+        turn = named[0] if named else main[n - 1]
+        if not turn.data.get("interrupted") or turn.data.get("barge_in_auto"):
             out.append(_result(check, cid, Result.NOT_VERIFIED,
                                f"The agent had finished turn {n} before the caller was due to cut in "
                                f"({b['offset_ms']} ms in), so barge-in was not tested.",

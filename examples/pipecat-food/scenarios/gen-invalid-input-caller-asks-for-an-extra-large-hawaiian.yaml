@@ -1,0 +1,60 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Edge cases: invalid input); reviewed and added
+# from the dashboard.
+# Neither the size nor type exists; the agent must offer real options and not place an invalid order.
+# Rule R5: Only call select_pizza_order once the caller has specified both size and type.
+# Rule R6: Pizza pricing: small $10, medium $15, large $20.
+# Rule R7: Pizza types available: pepperoni, cheese, supreme, vegetarian.
+schema_version: '0.1'
+kind: scenario
+id: gen.invalid-input.caller-asks-for-an-extra-large-hawaiian
+title: Caller asks for an extra large hawaiian pizza
+description: Neither the size nor type exists; the agent must offer real options and not place an invalid order.
+  Tests rule R5. Tests rule R6. Tests rule R7.
+profile: pipecat-food
+tags:
+- generated
+- edge
+- invalid-input
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: repeater
+  goal: Ask for an extra large hawaiian pizza. When told it's not available, ask again in other words if they really
+    don't do hawaiian or a bigger size. Then settle on a large vegetarian and confirm the read-back.
+  facts:
+    food: pizza
+    requested: extra large hawaiian
+    size: large
+    pizza_type: vegetarian
+  end_when: The large vegetarian order is placed and the call ends, or max turns reached.
+  max_turns: 14
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: pizza
+      size: large
+      pizza_type: vegetarian
+      price: '20'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent list the real sizes or types instead of accepting hawaiian or extra large?
+  title: Valid options offered
+  pass_when: The agent names small, medium, large and/or pepperoni, cheese, supreme, vegetarian.
+  fail_when: The agent accepts hawaiian or extra large, or invents a price for them.

@@ -121,8 +121,9 @@ class Line:
     """
 
     def __init__(self, recorder: Recorder, send: Callable[[np.ndarray], Awaitable[None]],
-                 noise: np.ndarray | None = None):
+                 noise: np.ndarray | None = None, effects=None):
         self.rec = recorder
+        self._fx = effects if effects is not None and effects.active else None   # audio/line.py LineEffects
         self._send = send
         self._noise = noise
         self.frame = recorder.sr * FRAME_MS // 1000
@@ -163,6 +164,8 @@ class Line:
                 if delay > 0:
                     await asyncio.sleep(delay)
                 x = self._frame(start)
+                if self._fx is not None:
+                    x = self._fx.process(x)        # the phone line: what the agent really receives
                 self.rec.caller.write(start, x)
                 self.next_sample = start + self.frame
                 await self._send(x)

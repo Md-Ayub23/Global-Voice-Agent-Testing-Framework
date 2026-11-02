@@ -8,6 +8,7 @@ be replayed exactly. For real recordings, give audio.noise_file (a WAV file).
   street  brown and pink noise with slow swells (traffic passing)
   cafe    babble: noise shaped and pulsed at syllable rate like many voices
   car     low engine rumble with a faint hum
+  tv      a TV or radio in the room: one speech-like voice in phrases, with quiet music under it
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ import numpy as np
 
 from .pcm import SPEECH_DBFS, read_wav, rms_dbfs
 
-KINDS = ("office", "street", "cafe", "car")
+KINDS = ("office", "street", "cafe", "car", "tv")
 
 
 def _pink(rng: np.random.Generator, n: int) -> np.ndarray:
@@ -59,6 +60,15 @@ def make_noise(kind: str, seconds: float, sample_rate: int, seed: str) -> np.nda
         t = np.arange(n) / sample_rate
         x = _brown(rng, n) / 40 + 0.3 * np.sin(2 * np.pi * 95 * t) * _pink(rng, n) * 0.2
         x = np.convolve(x, np.ones(16) / 16, mode="same")
+    elif kind == "tv":
+        # One talker: speech-band noise pulsed at syllable rate, in phrases of a few seconds with gaps,
+        # over a soft chord that drifts like background music.
+        t = np.arange(n) / sample_rate
+        voice = np.convolve(_pink(rng, n), np.ones(6) / 6, mode="same")
+        voice *= _swell(rng, n, sample_rate, rng.uniform(4, 5), 0.95)
+        voice *= np.clip(_swell(rng, n, sample_rate, 0.3, 1.0) * 1.6 - 0.3, 0, 1)   # phrases and pauses
+        chord = sum(np.sin(2 * np.pi * f * t + rng.uniform(0, 6.3)) for f in (220.0, 277.2, 329.6))
+        x = voice + 0.08 * chord * _swell(rng, n, sample_rate, 0.07, 0.5)
     else:
         raise ValueError(f"unknown noise {kind!r} (use one of {', '.join(KINDS)} or audio.noise_file)")
     x = x - x.mean()

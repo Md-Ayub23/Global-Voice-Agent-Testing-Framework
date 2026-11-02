@@ -60,6 +60,7 @@ interface Form {
   safety: boolean;
   start_agent: boolean;    // Vocto starts the agent itself (agent_process)
   planted_bug: string;
+  conditions: string;      // voice: caller conditions preset over every test (Phase 5)
 }
 
 export function NewRun({ project, query }: { project: Project; query: URLSearchParams }) {
@@ -135,8 +136,9 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
       repeats: f.repeats || null, agent_options, offline: f.offline, model: f.model, judges: f.judges, safety: safetyOn,
       speech: f.speech, stt_model: f.stt_model, stt_check_model: f.stt_check_model, show_pii: f.show_pii,
       start_agent: f.command === "run" && startAgent, planted_bug: f.command === "run" && startAgent ? f.planted_bug : "",
+      conditions: voice ? f.conditions : "as_written",
     };
-  }, [f, profile, d, inMode, safetyOn, startAgent]);
+  }, [f, profile, d, inMode, safetyOn, startAgent, voice]);
 
   const planned = useMemo(() => {
     const sc = inMode.filter((x) => exit || f.scenarios.has(x.id));
@@ -357,6 +359,18 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
                   <div className="text-ink-2 text-[12.5px]">Only for testing Vocto itself: never use it to judge an agent.</div>
                 </Choice>
               </div>
+              <div className="mt-4">
+                <div className="font-semibold text-[13px] mb-1">Caller conditions</div>
+                <div className="text-muted text-xs mb-2">Laid over every test, without editing them. Each call keeps its own caller's voice and behaviour; the report splits results by condition.</div>
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="conditions">
+                  {(system?.conditions || [{ id: "as_written", title: "As written", about: "Each test's own audio." }]).map((c) => (
+                    <Choice key={c.id} radio on={f.conditions === c.id} data-conditions={c.id} onClick={() => set({ conditions: c.id })}>
+                      <b className="block font-semibold">{c.title}</b>
+                      <div className="text-ink-2 text-[12.5px]">{c.about}</div>
+                    </Choice>
+                  ))}
+                </div>
+              </div>
               {f.speech === "local" && (
                 <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mt-3.5">
                   <Field label="Caller hears with" hint="Fast model for the live call.">
@@ -418,6 +432,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
               <Row label="Planned calls"><b className="tabular-nums">{planned}</b></Row>
               <Row label="Caller"><b>{f.offline ? "rules (free)" : "Claude"}</b></Row>
               <Row label="AI judges"><b>{judgesOn ? "on" : "off"}</b></Row>
+              {voice && <Row label="Caller conditions"><b>{system?.conditions?.find((c) => c.id === f.conditions)?.title || "As written"}</b></Row>}
               {profile.safety?.enabled && <Row label="Safety tests"><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
               {!exit && startAgent && <Row label="Agent"><b>{f.planted_bug ? <Chip tone="bad">{f.planted_bug}</Chip> : "started by Vocto"}</b></Row>}
               {!exit && startAgent && f.planted_bug && (
@@ -461,7 +476,7 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     scenarios: new Set(profile.scenarios.filter((s) => s.in_mode).map((s) => s.id)),
     options: {}, bugs: new Set(splitBugs(defaultsOf(profile, offline).bugs)),
     offline, model, speech: "local", stt_model: "base.en", stt_check_model: "small.en", repeats: "", show_pii: false, judges: true, safety: true,
-    start_agent: true, planted_bug: "",
+    start_agent: true, planted_bug: "", conditions: "as_written",
   };
   if (prefill) {
     f.offline = !!prefill.offline;
@@ -472,6 +487,7 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     f.show_pii = prefill.pii_masked === false;
     f.judges = prefill.judges?.why !== "Judges were switched off for this run.";
     f.safety = !!prefill.safety;
+    f.conditions = prefill.conditions || "as_written";
     const d = defaultsOf(profile, f.offline);
     f.bugs = new Set(splitBugs(d.bugs));
     for (const [k, v] of Object.entries(prefill.agent_options || {})) {

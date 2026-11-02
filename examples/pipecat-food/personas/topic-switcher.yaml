@@ -1,0 +1,16 @@
+# From Vocto's persona library: Caller who changes topic.
+schema_version: '0.1'
+kind: persona
+id: topic-switcher
+description: Starts with one request, switches to a different question halfway through, then comes back to the first
+  one.
+traits:
+  patience: medium
+  verbosity: normal
+  mood: calm
+  clarity: medium
+speech:
+  tts_voice: en_GB-alba-medium
+  speaking_rate: 1.0
+behaviour:
+  interrupts: false

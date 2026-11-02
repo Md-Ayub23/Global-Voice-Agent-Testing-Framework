@@ -1,0 +1,64 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Normal calls: variation); reviewed and added from
+# the dashboard.
+# Sushi flow with a mid-range count, checking the total of 32 dollars and patience with pauses.
+# Rule R8: Only call select_sushi_order once the caller has specified both count and roll type.
+# Rule R9: Sushi pricing: $8 per roll.
+# Rule R10: Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per
+# order.
+# Rule R11: Read back the complete order details and ask if the caller wants anything else or to make
+# changes.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+schema_version: '0.1'
+kind: scenario
+id: gen.variation.slow-speaker-orders-four-rainbow-rolls
+title: Slow speaker orders four rainbow rolls
+description: Sushi flow with a mid-range count, checking the total of 32 dollars and patience with pauses. Tests
+  rule R8. Tests rule R9. Tests rule R10. Tests rule R11. Tests rule R13.
+profile: pipecat-food
+tags:
+- generated
+- happy
+- variation
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: slow-speaker
+  goal: You want sushi. Speak slowly with pauses. Say you want... four... rainbow rolls. Ask the agent to repeat
+    the total once. When the read-back says four rainbow rolls for 32 dollars, confirm it's right and you want nothing
+    else.
+  facts:
+    food: sushi
+    count: '4'
+    roll_type: rainbow
+  end_when: The agent confirms the order is placed and says goodbye, or max turns reached.
+  max_turns: 12
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: sushi
+      count: '4'
+      roll_type: rainbow
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent state the total as 32 dollars for four rolls?
+  title: Correct sushi total
+  pass_when: The agent says 32 dollars (four at 8 dollars each).
+  fail_when: The agent gives any other total or no total.

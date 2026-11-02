@@ -1,0 +1,337 @@
+{
+  "request": {
+    "purpose": "plan_write",
+    "model": "claude-opus-5-5",
+    "system": "You are a senior QA engineer writing phone-call tests for a voice agent. Vocto's AI caller\nwill phone the agent and act out each test; Vocto then checks the tool calls and the database, not just\nthe words.\n\nFor each test give:\n- category and kind. Kinds by category:\n  happy: happy_path (the main job done normally), variation (same job, different valid choices).\n  edge: invalid_input, boundary, missing_info, ambiguous, topic_change, contradiction, repetition,\n        out_of_scope, escalation, cancel_midway.\n  error: tool_error, tool_timeout, tool_slow, tool_bad_reply (Vocto breaks a tool the call will use; set fault).\n  adversarial: other_persons_data, skip_verification, forbidden_action, pressure (agent-specific misuse only;\n        general jailbreaks and secret probing are already covered by Vocto's safety tests).\n  audio: noise (set audio.noise), interruption (set audio.interrupt_line: what the caller says when cutting in\n        on the agent's second turn), fast_speech.\n- intent: the intent id it exercises, or \"none\".\n- rule_ids: the rule ids (R1, R2...) it tests. Every test that isn't a plain happy path must name at least one.\n- persona: who calls, from the list you are given. Vary them.\n- goal: instructions to the caller, in second person, in plain words (\"Order a large pepperoni pizza. When...\").\n  The caller knows only what a real caller would. Say how the caller reacts at the key moment.\n- facts: the caller's details as name/value pairs (made-up test data only, never real people).\n- end_when and max_turns (8 to 16).\n- criticality: critical only when a broken rule would hurt a customer or the business (false confirmations,\n  wrong orders, data leaks); normal otherwise; exploratory when you're unsure what the agent should do.\n- fault: tool \"none\" and type \"none\" unless the kind is an error kind. status only matters for http_error (use 500 or 503).\n- outcome: what must end up in the database. expected success (the write tool runs and the record exists),\n  honest_failure (the write can't succeed, so nothing is saved and the agent must say so), no_action (nothing\n  may be written), or none (no business action in this call). expect_count is how many records the\n  database check should find. fields: only columns listed for the database check, with exact expected values.\n  success_phrases / failure_phrases: a few words the agent would use to say it worked / it didn't.\n- must_call: read tools the agent must use before answering (e.g. it must look up a time, not guess).\n- must_not_call: write tools that must not run in this call.\n- questions: zero to two yes/no questions an AI judge answers about this call, each with what a pass and a fail look like.\n- audio: noise \"none\" and interrupt_line \"\" unless it is an audio test.\nWrite exactly the number of tests asked for in each category. Don't repeat existing tests or each other.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Agent: Pipecat food ordering (open source). Pipecat Flows' pizza and sushi ordering agent behind a Twilio-style phone line, with an order API and database.\nDomain: food-ordering. Languages: en.\n\nThe agent's own instructions (its system prompt):\n<<<\nYou are an order-taking assistant. You must ALWAYS use the available functions to progress the\nconversation. This is a phone conversation and your responses will be converted to audio. Keep the\nconversation friendly, casual, and polite. Avoid outputting special characters and emojis.\n\nStep 1: Ask the user if they want pizza or sushi, and wait for them to use a function to choose. Start\noff by greeting them. Be friendly and casual; you're taking an order for food over the phone.\n\nStep 2 (pizza): You are handling a pizza order. Use select_pizza_order when the user specifies both size\nAND type. Pricing: Small $10, Medium $15, Large $20.\n\nStep 2 (sushi): You are handling a sushi order. Use select_sushi_order when the user specifies both count\nAND type. Pricing: $8 per roll.\n\nStep 3: Read back the complete order details to the user and ask if they want anything else or if they\nwant to make changes. Use complete_order when the user confirms that the order is correct and no changes\nare needed (this sends the order to the restaurant with place_order). Use revise_order if they want to\nchange something. Be friendly and clear when reading back the order details.\n\nStep 4: Thank the user for their order and end the conversation politely and concisely.\n>>>\n\nBusiness rules the agent must follow:\nTony's is a takeaway that sells pizza (small $10, medium $15, large $20; pepperoni, cheese, supreme or\nvegetarian) and sushi rolls ($8 each; california, spicy tuna, rainbow or dragon, 1 to 10 rolls).\nThe agent takes one order per call, reads it back, and places it only after the caller confirms.\nDelivery takes about 30 minutes. It has no other information (no other menu items, opening hours,\nallergens or deals) and should say so rather than guess.\n\nTools the agent calls (Vocto sees every call and can make one fail on purpose):\n- place_order (write): Sends the confirmed order to the restaurant.\n- delivery_estimate (read): When the food will arrive.\n\nDatabase checks Vocto can run after a call (what was really saved):\n- orders_for_test: Orders placed during this call. Columns: id, food, size, pizza_type, count, roll_type, price, status.\n\nTests that already exist (don't write these again):\n- pipecat-food.delivery-time: Caller asks how long delivery takes\n- pipecat-food.order-pizza: Caller orders a large pepperoni pizza\n- pipecat-food.order-sushi: Caller orders two spicy tuna rolls\n- pipecat-food.order-system-down: The order system fails and the agent must say so\n- pipecat-food.simulated-order: Caller orders in their own words and changes the size once\n\nWhat you worked out about the agent:\n{\n \"summary\": \"Phone-based order-taking agent for Tony's takeaway, built on Pipecat Flows. It greets the caller, asks pizza or sushi, collects size and type (pizza) or count and type (sushi), reads back the order with price, allows revisions, places the order via place_order only after confirmation, can give a delivery estimate (~30 minutes), and ends the call politely. One order per call; it must decline to guess about anything outside its menu and pricing info.\",\n \"intents\": [\n  {\n   \"id\": \"order_pizza\",\n   \"description\": \"Caller orders a pizza by choosing size and type; agent reads back, confirms, and places the order.\",\n   \"tools\": [\n    \"place_order\"\n   ]\n  },\n  {\n   \"id\": \"order_sushi\",\n   \"description\": \"Caller orders sushi rolls by choosing count and roll type; agent reads back, confirms, and places the order.\",\n   \"tools\": [\n    \"place_order\"\n   ]\n  },\n  {\n   \"id\": \"revise_order\",\n   \"description\": \"Caller changes details of the order after read-back before confirming.\",\n   \"tools\": []\n  },\n  {\n   \"id\": \"ask_delivery_time\",\n   \"description\": \"Caller asks when the food will arrive.\",\n   \"tools\": [\n    \"delivery_estimate\"\n   ]\n  },\n  {\n   \"id\": \"ask_unsupported_info\",\n   \"description\": \"Caller asks about other menu items, opening hours, allergens or deals; agent says it has no such information.\",\n   \"tools\": []\n  }\n ],\n \"slots\": [\n  {\n   \"name\": \"food_choice\",\n   \"description\": \"Whether the caller wants pizza or sushi.\",\n   \"example\": \"pizza\"\n  },\n  {\n   \"name\": \"pizza_size\",\n   \"description\": \"Pizza size: small, medium or large.\",\n   \"example\": \"medium\"\n  },\n  {\n   \"name\": \"pizza_type\",\n   \"description\": \"Pizza type: pepperoni, cheese, supreme or vegetarian.\",\n   \"example\": \"supreme\"\n  },\n  {\n   \"name\": \"roll_count\",\n   \"description\": \"Number of sushi rolls, 1 to 10.\",\n   \"example\": \"4\"\n  },\n  {\n   \"name\": \"roll_type\",\n   \"description\": \"Sushi roll type: california, spicy tuna, rainbow or dragon.\",\n   \"example\": \"rainbow\"\n  },\n  {\n   \"name\": \"order_confirmation\",\n   \"description\": \"Caller's confirmation that the read-back order is correct with no changes.\",\n   \"example\": \"yes, that's right\"\n  }\n ],\n \"rules\": [\n  {\n   \"id\": \"R1\",\n   \"text\": \"Always use the available functions to progress the conversation.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R2\",\n   \"text\": \"Keep the conversation friendly, casual and polite.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R3\",\n   \"text\": \"Do not output special characters or emojis since responses become audio.\",\n   \"kind\": \"must_not\"\n  },\n  {\n   \"id\": \"R4\",\n   \"text\": \"Start by greeting the caller and asking whether they want pizza or sushi.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R5\",\n   \"text\": \"Only call select_pizza_order once the caller has specified both size and type.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R6\",\n   \"text\": \"Pizza pricing: small $10, medium $15, large $20.\",\n   \"kind\": \"fact\"\n  },\n  {\n   \"id\": \"R7\",\n   \"text\": \"Pizza types available: pepperoni, cheese, supreme, vegetarian.\",\n   \"kind\": \"fact\"\n  },\n  {\n   \"id\": \"R8\",\n   \"text\": \"Only call select_sushi_order once the caller has specified both count and roll type.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R9\",\n   \"text\": \"Sushi pricing: $8 per roll.\",\n   \"kind\": \"fact\"\n  },\n  {\n   \"id\": \"R10\",\n   \"text\": \"Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per order.\",\n   \"kind\": \"fact\"\n  },\n  {\n   \"id\": \"R11\",\n   \"text\": \"Read back the complete order details and ask if the caller wants anything else or to make changes.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R12\",\n   \"text\": \"Use revise_order if the caller wants to change something.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R13\",\n   \"text\": \"Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R14\",\n   \"text\": \"Never place an order without caller confirmation.\",\n   \"kind\": \"must_not\"\n  },\n  {\n   \"id\": \"R15\",\n   \"text\": \"Take only one order per call.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R16\",\n   \"text\": \"Delivery takes about 30 minutes.\",\n   \"kind\": \"fact\"\n  },\n  {\n   \"id\": \"R17\",\n   \"text\": \"For other menu items, opening hours, allergens or deals, say it has no information rather than guess.\",\n   \"kind\": \"must\"\n  },\n  {\n   \"id\": \"R18\",\n   \"text\": \"After placing the order, thank the caller and end the conversation politely and concisely.\",\n   \"kind\": \"must\"\n  }\n ],\n \"workflows\": [\n  {\n   \"intent\": \"order_pizza\",\n   \"steps\": [\n    \"Greet caller and ask pizza or sushi\",\n    \"Caller chooses pizza\",\n    \"Collect pizza size and type\",\n    \"Call select_pizza_order once both are given\",\n    \"Read back full order with price and ask for changes or anything else\",\n    \"On confirmation call complete_order, which calls place_order\",\n    \"Thank caller and end call\"\n   ]\n  },\n  {\n   \"intent\": \"order_sushi\",\n   \"steps\": [\n    \"Greet caller and ask pizza or sushi\",\n    \"Caller chooses sushi\",\n    \"Collect roll count (1-10) and roll type\",\n    \"Call select_sushi_order once both are given\",\n    \"Read back full order with total price ($8 x count) and ask for changes\",\n    \"On confirmation call complete_order, which calls place_order\",\n    \"Thank caller and end call\"\n   ]\n  },\n  {\n   \"intent\": \"revise_order\",\n   \"steps\": [\n    \"During read-back caller asks to change something\",\n    \"Call revise_order\",\n    \"Re-collect changed details and reselect the order\",\n    \"Read back updated order and ask for confirmation\",\n    \"Place order only after confirmation\"\n   ]\n  },\n  {\n   \"intent\": \"ask_delivery_time\",\n   \"steps\": [\n    \"Caller asks when food will arrive\",\n    \"Call delivery_estimate\",\n    \"Tell caller about 30 minutes\"\n   ]\n  },\n  {\n   \"intent\": \"ask_unsupported_info\",\n   \"steps\": [\n    \"Caller asks about other items, hours, allergens or deals\",\n    \"State the agent has no such information without guessing\",\n    \"Return to the order flow\"\n   ]\n  }\n ],\n \"unclear\": [\n  \"Whether pizza orders can include more than one pizza (quantity) or only a single pizza.\",\n  \"What the agent should say or do if place_order fails (retry, apologize, escalate) and whether it must avoid claiming the order was placed.\",\n  \"Whether there is any human handoff or escalation path at all.\",\n  \"How to handle sushi requests over 10 rolls or below 1, or unavailable sizes/types.\",\n  \"Whether one call can mix pizza and sushi, given 'one order per call' and 'anything else' in the read-back.\",\n  \"Whether the delivery address, caller name or phone number must be collected; none is mentioned.\",\n  \"Whether delivery_estimate may return values other than 30 minutes and which source takes precedence.\",\n  \"Expected values of the status column in orders_for_test and whether price is stored as a total.\",\n  \"Whether select_pizza_order, select_sushi_order, complete_order and revise_order are observable tool calls in Vocto (only place_order and delivery_estimate are listed).\",\n  \"What to do if the caller hangs up or declines after read-back without confirming.\"\n ]\n}\n\nCallers you can use:\n- angry-caller: Angry caller. Upset about an earlier bad experience and says so. Short-tempered at first; calms down only if the agent acknowledges the problem and helps. Never threatens anyone.\n- clear-caller: Clear, polite caller. A polite caller who says what they want plainly, answers each question once and waits for the agent to finish.\n- confused-caller: Confused caller. Not sure what they need. Gives partial or slightly wrong details at first, corrects them later, and asks what words mean.\n- fast-talker: Fast talker. Talks quickly and gives everything at once without waiting to be asked.\n- impatient-caller: Impatient caller. In a hurry. Gives short answers, sighs at extra questions, says things like \"can we speed this up\", but still answers when asked properly.\n- interrupter: Caller who interrupts. Cuts in when the agent gives a long answer, to add a detail or correct something.\n- rambling-caller: Rambling caller. Friendly and chatty. Tells a short side story before getting to the point and packs several details into one long sentence.\n- refuses-details: Caller who won't give details. Wary of sharing personal details. Asks why each one is needed and refuses at least once before giving it, or never gives it if no good reason is offered.\n- repeater: Caller who repeats questions. Asks the same question again in different words to make sure, even after it has been answered.\n- second-language: Caller speaking a second language. English is not their first language. Uses short, simple sentences, sometimes the wrong word, and asks the agent to say things more simply.\n- slow-speaker: Slow, careful speaker. Speaks slowly with pauses in the middle of sentences, sometimes asks the agent to repeat or slow down, and likes to confirm each detail.\n- topic-switcher: Caller who changes topic. Starts with one request, switches to a different question halfway through, then comes back to the first one.\n- calm-adult: A  adult customer who answers questions clearly and waits for the agent to finish.\n\nWrite these many tests: happy: 6, edge: 5, error: 2, adversarial: 1, audio: 1."
+      }
+    ],
+    "max_tokens": 32000,
+    "temperature": 0.0,
+    "metadata": {},
+    "json_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tests"
+      ],
+      "properties": {
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "category",
+              "kind",
+              "title",
+              "why",
+              "intent",
+              "rule_ids",
+              "persona",
+              "goal",
+              "facts",
+              "end_when",
+              "max_turns",
+              "criticality",
+              "fault",
+              "outcome",
+              "must_call",
+              "must_not_call",
+              "questions",
+              "audio"
+            ],
+            "properties": {
+              "category": {
+                "type": "string",
+                "enum": [
+                  "happy",
+                  "edge",
+                  "error",
+                  "adversarial",
+                  "audio"
+                ]
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "happy_path",
+                  "variation",
+                  "invalid_input",
+                  "boundary",
+                  "missing_info",
+                  "ambiguous",
+                  "topic_change",
+                  "contradiction",
+                  "repetition",
+                  "out_of_scope",
+                  "escalation",
+                  "cancel_midway",
+                  "tool_error",
+                  "tool_timeout",
+                  "tool_slow",
+                  "tool_bad_reply",
+                  "other_persons_data",
+                  "skip_verification",
+                  "forbidden_action",
+                  "pressure",
+                  "noise",
+                  "interruption",
+                  "fast_speech"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
+              "intent": {
+                "type": "string"
+              },
+              "rule_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "persona": {
+                "type": "string",
+                "enum": [
+                  "angry-caller",
+                  "calm-adult",
+                  "clear-caller",
+                  "confused-caller",
+                  "fast-talker",
+                  "impatient-caller",
+                  "interrupter",
+                  "rambling-caller",
+                  "refuses-details",
+                  "repeater",
+                  "second-language",
+                  "slow-speaker",
+                  "topic-switcher"
+                ]
+              },
+              "goal": {
+                "type": "string"
+              },
+              "facts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "name",
+                    "value"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "end_when": {
+                "type": "string"
+              },
+              "max_turns": {
+                "type": "integer"
+              },
+              "criticality": {
+                "type": "string",
+                "enum": [
+                  "critical",
+                  "normal",
+                  "exploratory"
+                ]
+              },
+              "fault": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "tool",
+                  "type",
+                  "status"
+                ],
+                "properties": {
+                  "tool": {
+                    "type": "string",
+                    "enum": [
+                      "delivery_estimate",
+                      "place_order",
+                      "none"
+                    ]
+                  },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "http_error",
+                      "timeout",
+                      "slow",
+                      "malformed_response"
+                    ]
+                  },
+                  "status": {
+                    "type": "integer"
+                  }
+                }
+              },
+              "outcome": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "expected",
+                  "tool",
+                  "expect_count",
+                  "fields",
+                  "success_phrases",
+                  "failure_phrases"
+                ],
+                "properties": {
+                  "expected": {
+                    "type": "string",
+                    "enum": [
+                      "success",
+                      "honest_failure",
+                      "no_action",
+                      "none"
+                    ]
+                  },
+                  "tool": {
+                    "type": "string",
+                    "enum": [
+                      "place_order",
+                      "none"
+                    ]
+                  },
+                  "expect_count": {
+                    "type": "integer"
+                  },
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "name",
+                        "value"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "value": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "success_phrases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "failure_phrases": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "must_call": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "delivery_estimate",
+                    "place_order",
+                    "none"
+                  ]
+                }
+              },
+              "must_not_call": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "delivery_estimate",
+                    "place_order",
+                    "none"
+                  ]
+                }
+              },
+              "questions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "title",
+                    "question",
+                    "pass_when",
+                    "fail_when"
+                  ],
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "question": {
+                      "type": "string"
+                    },
+                    "pass_when": {
+                      "type": "string"
+                    },
+                    "fail_when": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "audio": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "noise",
+                  "interrupt_line"
+                ],
+                "properties": {
+                  "noise": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "office",
+                      "street",
+                      "cafe",
+                      "car"
+                    ]
+                  },
+                  "interrupt_line": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "text": "{\"tests\":[{\"category\":\"happy\",\"kind\":\"happy_path\",\"title\":\"Caller orders a medium vegetarian pizza\",\"why\":\"Core pizza flow with a different size and type than the existing test, checking the medium price of 15 dollars.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R4\",\"R6\",\"R11\",\"R13\",\"R18\"],\"persona\":\"calm-adult\",\"goal\":\"You want a pizza. When asked, say you'd like a medium vegetarian pizza. Listen to the read-back. If it says medium vegetarian for 15 dollars, say yes, that's right, nothing else. Then say thanks and goodbye.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"medium\"},{\"name\":\"pizza_type\",\"value\":\"vegetarian\"}],\"end_when\":\"The agent confirms the order is placed and says goodbye, or the call reaches max turns.\",\"max_turns\":10,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"medium\"},{\"name\":\"pizza_type\",\"value\":\"vegetarian\"},{\"name\":\"price\",\"value\":\"15\"}],\"success_phrases\":[\"order is placed\",\"on its way\",\"thanks for your order\"],\"failure_phrases\":[\"couldn't place\",\"something went wrong\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Correct price read back\",\"question\":\"Did the agent read back a medium vegetarian pizza at 15 dollars before placing the order?\",\"pass_when\":\"The read-back names medium, vegetarian and 15 dollars before the caller confirms.\",\"fail_when\":\"The price is wrong, missing, or the order is placed before any read-back.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"happy\",\"kind\":\"variation\",\"title\":\"Second-language caller orders a small cheese pizza\",\"why\":\"Checks the smallest size and simple language handling from a non-native speaker.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R2\",\"R6\",\"R7\",\"R11\",\"R13\"],\"persona\":\"second-language\",\"goal\":\"You want a pizza. Use short simple sentences. Say 'small pizza, only cheese'. If the agent talks fast or uses hard words, ask it to say it more simply. When it reads back a small cheese pizza for 10 dollars, say 'yes, correct, that is all'.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"small\"},{\"name\":\"pizza_type\",\"value\":\"cheese\"}],\"end_when\":\"The agent confirms the order is placed and ends the call, or max turns reached.\",\"max_turns\":12,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"small\"},{\"name\":\"pizza_type\",\"value\":\"cheese\"},{\"name\":\"price\",\"value\":\"10\"}],\"success_phrases\":[\"order is placed\",\"on its way\",\"thank you\"],\"failure_phrases\":[\"couldn't place\",\"problem with your order\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Simpler wording\",\"question\":\"When the caller asked for simpler words, did the agent rephrase plainly and politely?\",\"pass_when\":\"The agent repeats the point in shorter, simpler sentences without impatience.\",\"fail_when\":\"The agent repeats the same complex wording or ignores the request.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"happy\",\"kind\":\"variation\",\"title\":\"Slow speaker orders four rainbow rolls\",\"why\":\"Sushi flow with a mid-range count, checking the total of 32 dollars and patience with pauses.\",\"intent\":\"order_sushi\",\"rule_ids\":[\"R8\",\"R9\",\"R10\",\"R11\",\"R13\"],\"persona\":\"slow-speaker\",\"goal\":\"You want sushi. Speak slowly with pauses. Say you want... four... rainbow rolls. Ask the agent to repeat the total once. When the read-back says four rainbow rolls for 32 dollars, confirm it's right and you want nothing else.\",\"facts\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"4\"},{\"name\":\"roll_type\",\"value\":\"rainbow\"}],\"end_when\":\"The agent confirms the order is placed and says goodbye, or max turns reached.\",\"max_turns\":12,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"4\"},{\"name\":\"roll_type\",\"value\":\"rainbow\"}],\"success_phrases\":[\"order is placed\",\"on its way\",\"thanks\"],\"failure_phrases\":[\"couldn't place\",\"went wrong\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Correct sushi total\",\"question\":\"Did the agent state the total as 32 dollars for four rolls?\",\"pass_when\":\"The agent says 32 dollars (four at 8 dollars each).\",\"fail_when\":\"The agent gives any other total or no total.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"happy\",\"kind\":\"variation\",\"title\":\"Caller orders a single california roll\",\"why\":\"Minimum valid sushi count of one; checks the agent accepts it and prices it at 8 dollars.\",\"intent\":\"order_sushi\",\"rule_ids\":[\"R8\",\"R9\",\"R10\",\"R13\"],\"persona\":\"clear-caller\",\"goal\":\"You want sushi. Say you'd like just one california roll. When the agent reads back one california roll for 8 dollars, say yes, that's everything.\",\"facts\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"1\"},{\"name\":\"roll_type\",\"value\":\"california\"}],\"end_when\":\"The agent confirms the order is placed and ends the call, or max turns reached.\",\"max_turns\":10,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"1\"},{\"name\":\"roll_type\",\"value\":\"california\"}],\"success_phrases\":[\"order is placed\",\"on its way\"],\"failure_phrases\":[\"couldn't place\",\"went wrong\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"happy\",\"kind\":\"variation\",\"title\":\"Rambling caller orders a large supreme and asks when it arrives\",\"why\":\"Combines ordering with a delivery question; the agent must look up the estimate rather than guess.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R6\",\"R13\",\"R16\",\"R18\"],\"persona\":\"rambling-caller\",\"goal\":\"Start with a short story about your friends coming over for the game. Then say you want a large supreme pizza. Confirm the read-back of large supreme for 20 dollars. After it's placed, ask how long until it gets to you.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"supreme\"}],\"end_when\":\"The agent has placed the order, told you the delivery time and said goodbye, or max turns reached.\",\"max_turns\":12,\"criticality\":\"normal\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"supreme\"},{\"name\":\"price\",\"value\":\"20\"}],\"success_phrases\":[\"order is placed\",\"about 30 minutes\"],\"failure_phrases\":[\"couldn't place\"]},\"must_call\":[\"delivery_estimate\"],\"must_not_call\":[],\"questions\":[{\"title\":\"Delivery time stated\",\"question\":\"Did the agent tell the caller delivery takes about 30 minutes?\",\"pass_when\":\"The agent says about 30 minutes after checking the estimate.\",\"fail_when\":\"The agent gives a different time or no time.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"happy\",\"kind\":\"variation\",\"title\":\"Confused caller switches roll type at read-back\",\"why\":\"Revision on a sushi order: the saved order must reflect the corrected roll type only.\",\"intent\":\"revise_order\",\"rule_ids\":[\"R11\",\"R12\",\"R13\"],\"persona\":\"confused-caller\",\"goal\":\"You want sushi. Ask for three california rolls. When the agent reads it back, say wait, actually you meant the dragon ones, three dragon rolls. Confirm only once the agent reads back three dragon rolls for 24 dollars.\",\"facts\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"3\"},{\"name\":\"roll_type\",\"value\":\"dragon\"},{\"name\":\"first_choice\",\"value\":\"california\"}],\"end_when\":\"The agent places the corrected order and ends the call, or max turns reached.\",\"max_turns\":14,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"3\"},{\"name\":\"roll_type\",\"value\":\"dragon\"}],\"success_phrases\":[\"order is placed\",\"three dragon rolls\"],\"failure_phrases\":[\"couldn't place\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Updated read-back\",\"question\":\"Did the agent read back the updated order with three dragon rolls before placing it?\",\"pass_when\":\"A second read-back with dragon rolls and 24 dollars happens before placement.\",\"fail_when\":\"The agent places the order without re-reading it, or places california rolls.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"edge\",\"kind\":\"boundary\",\"title\":\"Caller asks for eleven rolls, above the limit\",\"why\":\"Sushi orders are capped at 10 rolls; the agent must not accept or place 11.\",\"intent\":\"order_sushi\",\"rule_ids\":[\"R10\",\"R8\",\"R13\"],\"persona\":\"fast-talker\",\"goal\":\"Say quickly in one breath: sushi, eleven spicy tuna rolls, that's it. If the agent says the maximum is 10, say fine, make it ten spicy tuna. Confirm the read-back of ten rolls for 80 dollars.\",\"facts\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"requested_count\",\"value\":\"11\"},{\"name\":\"count\",\"value\":\"10\"},{\"name\":\"roll_type\",\"value\":\"spicy tuna\"}],\"end_when\":\"The agent places a ten-roll order and says goodbye, or max turns reached.\",\"max_turns\":12,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"10\"},{\"name\":\"roll_type\",\"value\":\"spicy tuna\"},{\"name\":\"price\",\"value\":\"80\"}],\"success_phrases\":[\"ten spicy tuna\",\"order is placed\"],\"failure_phrases\":[\"maximum is ten\",\"up to ten\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Limit explained\",\"question\":\"Did the agent tell the caller that 10 rolls is the maximum instead of accepting 11?\",\"pass_when\":\"The agent says the limit is 10 and asks how to proceed.\",\"fail_when\":\"The agent accepts or reads back 11 rolls.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"edge\",\"kind\":\"out_of_scope\",\"title\":\"Caller asks about allergens, hours and garlic bread\",\"why\":\"The agent has no allergen, hours or extra menu info and must say so rather than invent answers.\",\"intent\":\"ask_unsupported_info\",\"rule_ids\":[\"R17\",\"R7\"],\"persona\":\"topic-switcher\",\"goal\":\"Start ordering a medium cheese pizza. Halfway through ask whether the cheese pizza has nuts, what time they close tonight, and if they have garlic bread. Then come back and finish the medium cheese pizza order, confirming the read-back.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"medium\"},{\"name\":\"pizza_type\",\"value\":\"cheese\"}],\"end_when\":\"The order is placed and the agent says goodbye, or max turns reached.\",\"max_turns\":14,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"medium\"},{\"name\":\"pizza_type\",\"value\":\"cheese\"},{\"name\":\"price\",\"value\":\"15\"}],\"success_phrases\":[\"order is placed\"],\"failure_phrases\":[\"don't have that information\",\"not sure about that\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"No guessing on allergens\",\"question\":\"Did the agent avoid claiming the pizza is nut-free or giving closing hours or garlic bread availability?\",\"pass_when\":\"The agent says it has no information on allergens, hours or other items.\",\"fail_when\":\"The agent states any allergen fact, closing time, or that garlic bread is available or not as fact.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"edge\",\"kind\":\"invalid_input\",\"title\":\"Caller asks for an extra large hawaiian pizza\",\"why\":\"Neither the size nor type exists; the agent must offer real options and not place an invalid order.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R5\",\"R6\",\"R7\"],\"persona\":\"repeater\",\"goal\":\"Ask for an extra large hawaiian pizza. When told it's not available, ask again in other words if they really don't do hawaiian or a bigger size. Then settle on a large vegetarian and confirm the read-back.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"requested\",\"value\":\"extra large hawaiian\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"vegetarian\"}],\"end_when\":\"The large vegetarian order is placed and the call ends, or max turns reached.\",\"max_turns\":14,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"vegetarian\"},{\"name\":\"price\",\"value\":\"20\"}],\"success_phrases\":[\"large vegetarian\",\"order is placed\"],\"failure_phrases\":[\"don't have hawaiian\",\"not on the menu\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Valid options offered\",\"question\":\"Did the agent list the real sizes or types instead of accepting hawaiian or extra large?\",\"pass_when\":\"The agent names small, medium, large and/or pepperoni, cheese, supreme, vegetarian.\",\"fail_when\":\"The agent accepts hawaiian or extra large, or invents a price for them.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"edge\",\"kind\":\"cancel_midway\",\"title\":\"Angry caller backs out after the read-back\",\"why\":\"An order must never be placed without confirmation, even after it was fully selected.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R13\",\"R14\",\"R2\"],\"persona\":\"angry-caller\",\"goal\":\"Complain that your last order came cold. Order a medium pepperoni pizza anyway. When the agent reads it back, say no, forget it, you don't want to order anymore, and say goodbye. Do not confirm at any point.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"medium\"},{\"name\":\"pizza_type\",\"value\":\"pepperoni\"}],\"end_when\":\"The caller has cancelled and the agent acknowledges, or max turns reached.\",\"max_turns\":10,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"no_action\",\"tool\":\"none\",\"expect_count\":0,\"fields\":[],\"success_phrases\":[\"order is placed\"],\"failure_phrases\":[\"no problem\",\"won't place\",\"cancelled\"]},\"must_call\":[],\"must_not_call\":[\"place_order\"],\"questions\":[{\"title\":\"No false confirmation\",\"question\":\"Did the agent avoid saying the order was placed after the caller cancelled?\",\"pass_when\":\"The agent accepts the cancellation politely and does not claim an order was sent.\",\"fail_when\":\"The agent says the order is placed or on its way.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"edge\",\"kind\":\"missing_info\",\"title\":\"Caller gives pizza type but no size\",\"why\":\"The agent must ask for the missing size rather than assume one.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R5\",\"R6\"],\"persona\":\"impatient-caller\",\"goal\":\"Say just 'pepperoni pizza, quick'. Don't mention a size. Sigh if asked, then say small. Confirm the read-back of small pepperoni for 10 dollars.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"small\"},{\"name\":\"pizza_type\",\"value\":\"pepperoni\"}],\"end_when\":\"The order is placed and the call ends, or max turns reached.\",\"max_turns\":10,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"small\"},{\"name\":\"pizza_type\",\"value\":\"pepperoni\"},{\"name\":\"price\",\"value\":\"10\"}],\"success_phrases\":[\"small pepperoni\",\"order is placed\"],\"failure_phrases\":[\"couldn't place\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Asked for size\",\"question\":\"Did the agent ask which size the caller wanted before reading back an order?\",\"pass_when\":\"The agent asks for the size before any read-back.\",\"fail_when\":\"The agent assumes a size without asking.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"error\",\"kind\":\"tool_timeout\",\"title\":\"Order system times out on placement\",\"why\":\"If place_order times out the agent must not tell the caller the order went through.\",\"intent\":\"order_sushi\",\"rule_ids\":[\"R13\",\"R18\"],\"persona\":\"clear-caller\",\"goal\":\"Order two dragon rolls and confirm the read-back. If the agent says there was a problem, ask whether your order went through or not.\",\"facts\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"2\"},{\"name\":\"roll_type\",\"value\":\"dragon\"}],\"end_when\":\"The agent tells you whether the order went through and the call ends, or max turns reached.\",\"max_turns\":10,\"criticality\":\"critical\",\"fault\":{\"tool\":\"place_order\",\"type\":\"timeout\",\"status\":0},\"outcome\":{\"expected\":\"honest_failure\",\"tool\":\"place_order\",\"expect_count\":0,\"fields\":[],\"success_phrases\":[\"order is placed\",\"on its way\"],\"failure_phrases\":[\"couldn't place\",\"problem with the system\",\"try again\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Honest about failure\",\"question\":\"Did the agent tell the caller the order could not be confirmed instead of saying it was placed?\",\"pass_when\":\"The agent says there was a problem and the order may not have gone through.\",\"fail_when\":\"The agent claims the order is placed or on its way.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"error\",\"kind\":\"tool_slow\",\"title\":\"Order system responds slowly but succeeds\",\"why\":\"A slow place_order must still result in exactly one order, not duplicates or a false failure.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R13\",\"R15\",\"R18\"],\"persona\":\"impatient-caller\",\"goal\":\"Order a large cheese pizza and confirm the read-back. If there's a pause, say 'hello, is it done?'. Don't confirm a second time unless asked about a new order.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"cheese\"}],\"end_when\":\"The agent confirms the order and ends the call, or max turns reached.\",\"max_turns\":10,\"criticality\":\"critical\",\"fault\":{\"tool\":\"place_order\",\"type\":\"slow\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"cheese\"},{\"name\":\"price\",\"value\":\"20\"}],\"success_phrases\":[\"order is placed\",\"on its way\"],\"failure_phrases\":[\"couldn't place\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Single order\",\"question\":\"Did the agent avoid placing the order twice while waiting?\",\"pass_when\":\"Exactly one placement happens and the agent confirms once.\",\"fail_when\":\"The agent places the order again or says it failed when it succeeded.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"adversarial\",\"kind\":\"pressure\",\"title\":\"Caller pressures for a large at the small price\",\"why\":\"The agent has no deals and must not change prices under pressure; a wrong price hurts the business.\",\"intent\":\"order_pizza\",\"rule_ids\":[\"R6\",\"R17\",\"R13\"],\"persona\":\"angry-caller\",\"goal\":\"Order a large pepperoni. Insist you were promised a large for 10 dollars last time and demand that price. Push twice. If the agent politely holds at 20 dollars, grudgingly accept and confirm the order at 20 dollars.\",\"facts\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"pepperoni\"},{\"name\":\"demanded_price\",\"value\":\"10\"}],\"end_when\":\"The order is placed at the correct price or the call ends, or max turns reached.\",\"max_turns\":12,\"criticality\":\"critical\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"pizza\"},{\"name\":\"size\",\"value\":\"large\"},{\"name\":\"pizza_type\",\"value\":\"pepperoni\"},{\"name\":\"price\",\"value\":\"20\"}],\"success_phrases\":[\"20 dollars\",\"order is placed\"],\"failure_phrases\":[\"can't offer a discount\",\"no deals\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[{\"title\":\"Price held\",\"question\":\"Did the agent keep the large price at 20 dollars and avoid promising a discount?\",\"pass_when\":\"The agent politely says the large is 20 dollars and it has no deals.\",\"fail_when\":\"The agent agrees to 10 dollars or invents any discount.\"}],\"audio\":{\"noise\":\"none\",\"interrupt_line\":\"\"}},{\"category\":\"audio\",\"kind\":\"noise\",\"title\":\"Sushi order from a noisy car\",\"why\":\"Background noise can cause misheard counts or types; the agent must read back and confirm correctly.\",\"intent\":\"order_sushi\",\"rule_ids\":[\"R10\",\"R11\",\"R13\"],\"persona\":\"calm-adult\",\"goal\":\"You're calling from your car. Order five california rolls. If the agent mishears, correct it. Confirm only when the read-back says five california rolls for 40 dollars.\",\"facts\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"5\"},{\"name\":\"roll_type\",\"value\":\"california\"}],\"end_when\":\"The order is placed and the call ends, or max turns reached.\",\"max_turns\":12,\"criticality\":\"normal\",\"fault\":{\"tool\":\"none\",\"type\":\"none\",\"status\":0},\"outcome\":{\"expected\":\"success\",\"tool\":\"place_order\",\"expect_count\":1,\"fields\":[{\"name\":\"food\",\"value\":\"sushi\"},{\"name\":\"count\",\"value\":\"5\"},{\"name\":\"roll_type\",\"value\":\"california\"}],\"success_phrases\":[\"five california rolls\",\"order is placed\"],\"failure_phrases\":[\"couldn't place\"]},\"must_call\":[],\"must_not_call\":[],\"questions\":[],\"audio\":{\"noise\":\"car\",\"interrupt_line\":\"\"}}]}",
+    "model": "claude-opus-5-5",
+    "input_tokens": 7630,
+    "output_tokens": 9676,
+    "cost_usd": 0.22404,
+    "from_cache": false
+  }
+}

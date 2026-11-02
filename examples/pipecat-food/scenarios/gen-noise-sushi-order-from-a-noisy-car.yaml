@@ -1,0 +1,59 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Noise and interruptions: noise); reviewed and
+# added from the dashboard.
+# Background noise can cause misheard counts or types; the agent must read back and confirm correctly.
+# Rule R10: Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per
+# order.
+# Rule R11: Read back the complete order details and ask if the caller wants anything else or to make
+# changes.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+schema_version: '0.1'
+kind: scenario
+id: gen.noise.sushi-order-from-a-noisy-car
+title: Sushi order from a noisy car
+description: Background noise can cause misheard counts or types; the agent must read back and confirm correctly.
+  Tests rule R10. Tests rule R11. Tests rule R13.
+profile: pipecat-food
+tags:
+- generated
+- audio
+- noise
+criticality: normal
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: calm-adult
+  goal: You're calling from your car. Order five california rolls. If the agent mishears, correct it. Confirm only
+    when the read-back says five california rolls for 40 dollars.
+  facts:
+    food: sushi
+    count: '5'
+    roll_type: california
+  end_when: The order is placed and the call ends, or max turns reached.
+  max_turns: 12
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: sushi
+      count: '5'
+      roll_type: california
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+audio:
+  noise: car
+  snr_db: 10
+modes:
+- voice

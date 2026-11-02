@@ -32,7 +32,8 @@ from . import data
 PROJECTS_DIR = "projects"
 ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SECTIONS = {"name", "description", "agent_prompt", "domain", "languages", "connection", "test_id", "tools", "tool_gateway",
-            "backend", "logs", "judges", "safety", "thresholds", "limits", "pii", "agent_process", "planted_bugs"}
+            "backend", "logs", "judges", "safety", "thresholds", "limits", "metrics", "pii", "agent_process",
+            "planted_bugs"}
 
 # Framework defaults, shown in the forms as what an empty field means (client_profile.schema.yaml).
 DEFAULTS = {

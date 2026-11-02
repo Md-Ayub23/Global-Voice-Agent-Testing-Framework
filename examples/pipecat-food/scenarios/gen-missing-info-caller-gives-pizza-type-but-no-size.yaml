@@ -1,0 +1,57 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Edge cases: missing info); reviewed and added
+# from the dashboard.
+# The agent must ask for the missing size rather than assume one.
+# Rule R5: Only call select_pizza_order once the caller has specified both size and type.
+# Rule R6: Pizza pricing: small $10, medium $15, large $20.
+schema_version: '0.1'
+kind: scenario
+id: gen.missing-info.caller-gives-pizza-type-but-no-size
+title: Caller gives pizza type but no size
+description: The agent must ask for the missing size rather than assume one. Tests rule R5. Tests rule R6.
+profile: pipecat-food
+tags:
+- generated
+- edge
+- missing-info
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: impatient-caller
+  goal: Say just 'pepperoni pizza, quick'. Don't mention a size. Sigh if asked, then say small. Confirm the read-back
+    of small pepperoni for 10 dollars.
+  facts:
+    food: pizza
+    size: small
+    pizza_type: pepperoni
+  end_when: The order is placed and the call ends, or max turns reached.
+  max_turns: 10
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: pizza
+      size: small
+      pizza_type: pepperoni
+      price: '10'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent ask which size the caller wanted before reading back an order?
+  title: Asked for size
+  pass_when: The agent asks for the size before any read-back.
+  fail_when: The agent assumes a size without asking.

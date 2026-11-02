@@ -37,7 +37,7 @@ properties:
       additionalProperties: false
       required: [rule, message]
       properties:
-        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings]}
+        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings, metric, metric_warnings]}
         message: {type: string}
         refs:
           description: test_id or test_id/check_id pointing at the verdicts behind this reason.
@@ -125,7 +125,7 @@ properties:
     properties:
       decided_by:
         type: array
-        items: {enum: [all_checks, hard_checks, trusted_judges, reliability, latency, evidence]}
+        items: {enum: [all_checks, hard_checks, trusted_judges, reliability, latency, call_quality, evidence]}
       judge_opinions: {description: "Judge findings from items not trusted yet: shown, never counted.", type: integer}
       opinions_to_label: {description: "Of those, where the judges split and a person's label is wanted.", type: integer}
       trusted_items: {type: integer}
@@ -145,6 +145,43 @@ properties:
           additionalProperties: false
           required: [test_id, seq, said, heard]
           properties: {test_id: {type: string}, seq: {type: integer}, said: {type: string}, heard: {type: string}}
+
+  quality:
+    description: Phase 5. Call quality metrics over the run (src/vatf/metrics.py run_quality), with bands.
+    type: array
+    items:
+      type: object
+      required: [id, title, unit, better, value, band, blocks, calls]
+      properties:
+        id: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, turns_to_goal, escalated, duration_s]}
+        title: {type: string}
+        unit: {enum: [ms, "%", wpm, turns, s]}
+        better: {enum: [lower, higher]}
+        value: {type: [number, "null"]}
+        band: {enum: [good, warn, bad, null]}
+        good: {type: [number, "null"]}
+        warn: {type: [number, "null"]}
+        blocks: {type: boolean}
+        calls: {type: integer}
+        about: {type: string}
+        detail: {type: object}
+
+  by_condition:
+    description: Phase 5, voice. Results split by the caller conditions the calls ran under.
+    type: array
+    items:
+      type: object
+      required: [label, calls, passed, failed]
+      properties:
+        label: {type: string}
+        calls: {type: integer}
+        passed: {type: integer}
+        failed: {type: integer}
+        pass_rate: {type: [number, "null"]}
+        p50_ms: {type: [integer, "null"]}
+        p90_ms: {type: [integer, "null"]}
+        talked_over_pct: {type: [number, "null"]}
+        behaviours: {type: array, items: {type: string}}
 
   safety:
     description: The built-in safety tests in this run (attacks.py) and every finding, worst first.

@@ -1,0 +1,46 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Edge cases: cancel midway); reviewed and added
+# from the dashboard.
+# An order must never be placed without confirmation, even after it was fully selected.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+# Rule R14: Never place an order without caller confirmation.
+# Rule R2: Keep the conversation friendly, casual and polite.
+schema_version: '0.1'
+kind: scenario
+id: gen.cancel-midway.angry-caller-backs-out-after-the-read-ba
+title: Angry caller backs out after the read-back
+description: An order must never be placed without confirmation, even after it was fully selected. Tests rule R13.
+  Tests rule R14. Tests rule R2.
+profile: pipecat-food
+tags:
+- generated
+- edge
+- cancel-midway
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: angry-caller
+  goal: Complain that your last order came cold. Order a medium pepperoni pizza anyway. When the agent reads it
+    back, say no, forget it, you don't want to order anymore, and say goodbye. Do not confirm at any point.
+  facts:
+    food: pizza
+    size: medium
+    pizza_type: pepperoni
+  end_when: The caller has cancelled and the agent acknowledges, or max turns reached.
+  max_turns: 10
+checks:
+- id: never-place-order
+  type: tool_not_called
+  tool: place_order
+  severity: blocker
+  description: place_order must not run in this call.
+- id: ask-1
+  type: judge
+  intent: Did the agent avoid saying the order was placed after the caller cancelled?
+  title: No false confirmation
+  pass_when: The agent accepts the cancellation politely and does not claim an order was sent.
+  fail_when: The agent says the order is placed or on its way.

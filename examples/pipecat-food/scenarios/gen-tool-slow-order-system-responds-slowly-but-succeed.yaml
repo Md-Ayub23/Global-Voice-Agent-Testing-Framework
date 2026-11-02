@@ -1,0 +1,64 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Tool failures: tool slow); reviewed and added
+# from the dashboard.
+# A slow place_order must still result in exactly one order, not duplicates or a false failure.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+# Rule R15: Take only one order per call.
+# Rule R18: After placing the order, thank the caller and end the conversation politely and concisely.
+schema_version: '0.1'
+kind: scenario
+id: gen.tool-slow.order-system-responds-slowly-but-succeed
+title: Order system responds slowly but succeeds
+description: A slow place_order must still result in exactly one order, not duplicates or a false failure. Tests
+  rule R13. Tests rule R15. Tests rule R18.
+profile: pipecat-food
+tags:
+- generated
+- error
+- tool-slow
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+  faults:
+  - tool: place_order
+    type: slow
+    delay_ms: 4000
+caller:
+  persona: impatient-caller
+  goal: Order a large cheese pizza and confirm the read-back. If there's a pause, say 'hello, is it done?'. Don't
+    confirm a second time unless asked about a new order.
+  facts:
+    food: pizza
+    size: large
+    pizza_type: cheese
+  end_when: The agent confirms the order and ends the call, or max turns reached.
+  max_turns: 10
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: pizza
+      size: large
+      pizza_type: cheese
+      price: '20'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent avoid placing the order twice while waiting?
+  title: Single order
+  pass_when: Exactly one placement happens and the agent confirms once.
+  fail_when: The agent places the order again or says it failed when it succeeded.

@@ -1,0 +1,16 @@
+# From Vocto's persona library: Slow, careful speaker.
+schema_version: '0.1'
+kind: persona
+id: slow-speaker
+description: Speaks slowly with pauses in the middle of sentences, sometimes asks the agent to repeat or slow down,
+  and likes to confirm each detail.
+traits:
+  patience: high
+  verbosity: normal
+  mood: calm
+  clarity: medium
+speech:
+  tts_voice: en_US-amy-medium
+  speaking_rate: 0.8
+behaviour:
+  interrupts: false

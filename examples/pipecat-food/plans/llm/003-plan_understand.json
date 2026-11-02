@@ -1,0 +1,147 @@
+{
+  "request": {
+    "purpose": "plan_understand",
+    "model": "claude-opus-5-5",
+    "system": "You are a senior QA engineer studying a voice agent before testing it.\nRead everything you are given about the agent and list, using only what the text supports:\n- intents: the jobs callers can ask it to do (short snake_case ids like place_order), with the tools each job uses.\n- slots: the details it must collect from the caller, with a made-up example value.\n- rules: every instruction or business rule it must follow, one per item, ids R1, R2, ... in order.\n  kind: must (it has to do this), must_not (it must never do this), escalate (when to hand over), fact (a fact\n  it may state, like a price).\n- workflows: the steps of each job in order.\n- unclear: things a tester would need to know that the text does not say.\nDo not invent rules the text does not contain.",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Agent: Pipecat food ordering (open source). Pipecat Flows' pizza and sushi ordering agent behind a Twilio-style phone line, with an order API and database.\nDomain: food-ordering. Languages: en.\n\nThe agent's own instructions (its system prompt):\n<<<\nYou are an order-taking assistant. You must ALWAYS use the available functions to progress the\nconversation. This is a phone conversation and your responses will be converted to audio. Keep the\nconversation friendly, casual, and polite. Avoid outputting special characters and emojis.\n\nStep 1: Ask the user if they want pizza or sushi, and wait for them to use a function to choose. Start\noff by greeting them. Be friendly and casual; you're taking an order for food over the phone.\n\nStep 2 (pizza): You are handling a pizza order. Use select_pizza_order when the user specifies both size\nAND type. Pricing: Small $10, Medium $15, Large $20.\n\nStep 2 (sushi): You are handling a sushi order. Use select_sushi_order when the user specifies both count\nAND type. Pricing: $8 per roll.\n\nStep 3: Read back the complete order details to the user and ask if they want anything else or if they\nwant to make changes. Use complete_order when the user confirms that the order is correct and no changes\nare needed (this sends the order to the restaurant with place_order). Use revise_order if they want to\nchange something. Be friendly and clear when reading back the order details.\n\nStep 4: Thank the user for their order and end the conversation politely and concisely.\n>>>\n\nBusiness rules the agent must follow:\nTony's is a takeaway that sells pizza (small $10, medium $15, large $20; pepperoni, cheese, supreme or\nvegetarian) and sushi rolls ($8 each; california, spicy tuna, rainbow or dragon, 1 to 10 rolls).\nThe agent takes one order per call, reads it back, and places it only after the caller confirms.\nDelivery takes about 30 minutes. It has no other information (no other menu items, opening hours,\nallergens or deals) and should say so rather than guess.\n\nTools the agent calls (Vocto sees every call and can make one fail on purpose):\n- place_order (write): Sends the confirmed order to the restaurant.\n- delivery_estimate (read): When the food will arrive.\n\nDatabase checks Vocto can run after a call (what was really saved):\n- orders_for_test: Orders placed during this call. Columns: id, food, size, pizza_type, count, roll_type, price, status.\n\nTests that already exist (don't write these again):\n- pipecat-food.delivery-time: Caller asks how long delivery takes\n- pipecat-food.order-pizza: Caller orders a large pepperoni pizza\n- pipecat-food.order-sushi: Caller orders two spicy tuna rolls\n- pipecat-food.order-system-down: The order system fails and the agent must say so\n- pipecat-food.simulated-order: Caller orders in their own words and changes the size once"
+      }
+    ],
+    "max_tokens": 8000,
+    "temperature": 0.0,
+    "metadata": {},
+    "json_schema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary",
+        "intents",
+        "slots",
+        "rules",
+        "workflows",
+        "unclear"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "intents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "description",
+              "tools"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "tools": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "slots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "description",
+              "example"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "example": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "rules": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "text",
+              "kind"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "text": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "must",
+                  "must_not",
+                  "escalate",
+                  "fact"
+                ]
+              }
+            }
+          }
+        },
+        "workflows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "intent",
+              "steps"
+            ],
+            "properties": {
+              "intent": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "unclear": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "text": "{\"summary\":\"Phone-based order-taking agent for Tony's takeaway, built on Pipecat Flows. It greets the caller, asks pizza or sushi, collects size and type (pizza) or count and type (sushi), reads back the order with price, allows revisions, places the order via place_order only after confirmation, can give a delivery estimate (~30 minutes), and ends the call politely. One order per call; it must decline to guess about anything outside its menu and pricing info.\",\"intents\":[{\"id\":\"order_pizza\",\"description\":\"Caller orders a pizza by choosing size and type; agent reads back, confirms, and places the order.\",\"tools\":[\"place_order\"]},{\"id\":\"order_sushi\",\"description\":\"Caller orders sushi rolls by choosing count and roll type; agent reads back, confirms, and places the order.\",\"tools\":[\"place_order\"]},{\"id\":\"revise_order\",\"description\":\"Caller changes details of the order after read-back before confirming.\",\"tools\":[]},{\"id\":\"ask_delivery_time\",\"description\":\"Caller asks when the food will arrive.\",\"tools\":[\"delivery_estimate\"]},{\"id\":\"ask_unsupported_info\",\"description\":\"Caller asks about other menu items, opening hours, allergens or deals; agent says it has no such information.\",\"tools\":[]}],\"slots\":[{\"name\":\"food_choice\",\"description\":\"Whether the caller wants pizza or sushi.\",\"example\":\"pizza\"},{\"name\":\"pizza_size\",\"description\":\"Pizza size: small, medium or large.\",\"example\":\"medium\"},{\"name\":\"pizza_type\",\"description\":\"Pizza type: pepperoni, cheese, supreme or vegetarian.\",\"example\":\"supreme\"},{\"name\":\"roll_count\",\"description\":\"Number of sushi rolls, 1 to 10.\",\"example\":\"4\"},{\"name\":\"roll_type\",\"description\":\"Sushi roll type: california, spicy tuna, rainbow or dragon.\",\"example\":\"rainbow\"},{\"name\":\"order_confirmation\",\"description\":\"Caller's confirmation that the read-back order is correct with no changes.\",\"example\":\"yes, that's right\"}],\"rules\":[{\"id\":\"R1\",\"text\":\"Always use the available functions to progress the conversation.\",\"kind\":\"must\"},{\"id\":\"R2\",\"text\":\"Keep the conversation friendly, casual and polite.\",\"kind\":\"must\"},{\"id\":\"R3\",\"text\":\"Do not output special characters or emojis since responses become audio.\",\"kind\":\"must_not\"},{\"id\":\"R4\",\"text\":\"Start by greeting the caller and asking whether they want pizza or sushi.\",\"kind\":\"must\"},{\"id\":\"R5\",\"text\":\"Only call select_pizza_order once the caller has specified both size and type.\",\"kind\":\"must\"},{\"id\":\"R6\",\"text\":\"Pizza pricing: small $10, medium $15, large $20.\",\"kind\":\"fact\"},{\"id\":\"R7\",\"text\":\"Pizza types available: pepperoni, cheese, supreme, vegetarian.\",\"kind\":\"fact\"},{\"id\":\"R8\",\"text\":\"Only call select_sushi_order once the caller has specified both count and roll type.\",\"kind\":\"must\"},{\"id\":\"R9\",\"text\":\"Sushi pricing: $8 per roll.\",\"kind\":\"fact\"},{\"id\":\"R10\",\"text\":\"Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per order.\",\"kind\":\"fact\"},{\"id\":\"R11\",\"text\":\"Read back the complete order details and ask if the caller wants anything else or to make changes.\",\"kind\":\"must\"},{\"id\":\"R12\",\"text\":\"Use revise_order if the caller wants to change something.\",\"kind\":\"must\"},{\"id\":\"R13\",\"text\":\"Place the order (complete_order / place_order) only after the caller confirms the order is correct and no changes are needed.\",\"kind\":\"must\"},{\"id\":\"R14\",\"text\":\"Never place an order without caller confirmation.\",\"kind\":\"must_not\"},{\"id\":\"R15\",\"text\":\"Take only one order per call.\",\"kind\":\"must\"},{\"id\":\"R16\",\"text\":\"Delivery takes about 30 minutes.\",\"kind\":\"fact\"},{\"id\":\"R17\",\"text\":\"For other menu items, opening hours, allergens or deals, say it has no information rather than guess.\",\"kind\":\"must\"},{\"id\":\"R18\",\"text\":\"After placing the order, thank the caller and end the conversation politely and concisely.\",\"kind\":\"must\"}],\"workflows\":[{\"intent\":\"order_pizza\",\"steps\":[\"Greet caller and ask pizza or sushi\",\"Caller chooses pizza\",\"Collect pizza size and type\",\"Call select_pizza_order once both are given\",\"Read back full order with price and ask for changes or anything else\",\"On confirmation call complete_order, which calls place_order\",\"Thank caller and end call\"]},{\"intent\":\"order_sushi\",\"steps\":[\"Greet caller and ask pizza or sushi\",\"Caller chooses sushi\",\"Collect roll count (1-10) and roll type\",\"Call select_sushi_order once both are given\",\"Read back full order with total price ($8 x count) and ask for changes\",\"On confirmation call complete_order, which calls place_order\",\"Thank caller and end call\"]},{\"intent\":\"revise_order\",\"steps\":[\"During read-back caller asks to change something\",\"Call revise_order\",\"Re-collect changed details and reselect the order\",\"Read back updated order and ask for confirmation\",\"Place order only after confirmation\"]},{\"intent\":\"ask_delivery_time\",\"steps\":[\"Caller asks when food will arrive\",\"Call delivery_estimate\",\"Tell caller about 30 minutes\"]},{\"intent\":\"ask_unsupported_info\",\"steps\":[\"Caller asks about other items, hours, allergens or deals\",\"State the agent has no such information without guessing\",\"Return to the order flow\"]}],\"unclear\":[\"Whether pizza orders can include more than one pizza (quantity) or only a single pizza.\",\"What the agent should say or do if place_order fails (retry, apologize, escalate) and whether it must avoid claiming the order was placed.\",\"Whether there is any human handoff or escalation path at all.\",\"How to handle sushi requests over 10 rolls or below 1, or unavailable sizes/types.\",\"Whether one call can mix pizza and sushi, given 'one order per call' and 'anything else' in the read-back.\",\"Whether the delivery address, caller name or phone number must be collected; none is mentioned.\",\"Whether delivery_estimate may return values other than 30 minutes and which source takes precedence.\",\"Expected values of the status column in orders_for_test and whether price is stored as a total.\",\"Whether select_pizza_order, select_sushi_order, complete_order and revise_order are observable tool calls in Vocto (only place_order and delivery_estimate are listed).\",\"What to do if the caller hangs up or declines after read-back without confirming.\"]}",
+    "model": "claude-opus-5-5",
+    "input_tokens": 2087,
+    "output_tokens": 2204,
+    "cost_usd": 0.052428,
+    "from_cache": false
+  }
+}

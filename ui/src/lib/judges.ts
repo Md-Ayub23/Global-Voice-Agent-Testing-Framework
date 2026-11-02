@@ -28,7 +28,8 @@ export function judgeState(c: Check): JudgeState {
 
 export const LAYER_WORDS: Record<Layer, string> = {
   all_checks: "every check", hard_checks: "hard checks (tools, database, words said)", trusted_judges: "trusted AI judges",
-  reliability: "a critical scenario that failed a repeat", latency: "response time", evidence: "not enough evidence",
+  reliability: "a critical scenario that failed a repeat", latency: "response time",
+  call_quality: "a call quality metric set to block", evidence: "not enough evidence",
 };
 
 export const VOTE_LABEL: Record<Vote, string> = { PASS: "Pass", FAIL: "Fail", NOT_APPLICABLE: "Doesn't apply" };

@@ -12,6 +12,7 @@ import yaml
 from jsonschema import Draft202012Validator
 
 from . import attacks
+from .accents import ACCENTS
 from .rubrics import library, unknown_items
 from .util import sha256_file
 
@@ -111,6 +112,10 @@ def load_project(folder: str | Path, profile_file: str = "profile.yaml") -> Proj
     for path in sorted((folder / "personas").glob("*.yaml")):
         doc = _load_yaml(path)
         problems += [f"personas/{path.name}: {e}" for e in schema_errors("persona", doc)]
+        accent = ((doc or {}).get("speech") or {}).get("accent")
+        if accent and accent not in ACCENTS and not (doc.get("speech") or {}).get("tts_voice"):
+            problems.append(f"personas/{path.name}: unknown accent {accent!r} (use one of {', '.join(ACCENTS)}, "
+                            "or give speech.tts_voice)")
         personas[doc.get("id", path.stem)] = doc
 
     scenarios, hashes = [], {}

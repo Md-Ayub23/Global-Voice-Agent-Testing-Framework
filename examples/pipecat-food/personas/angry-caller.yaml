@@ -1,0 +1,16 @@
+# From Vocto's persona library: Angry caller.
+schema_version: '0.1'
+kind: persona
+id: angry-caller
+description: Upset about an earlier bad experience and says so. Short-tempered at first; calms down only if the
+  agent acknowledges the problem and helps. Never threatens anyone.
+traits:
+  patience: low
+  verbosity: normal
+  mood: angry
+  clarity: high
+speech:
+  tts_voice: en_GB-alba-medium
+  speaking_rate: 1.0
+behaviour:
+  interrupts: false

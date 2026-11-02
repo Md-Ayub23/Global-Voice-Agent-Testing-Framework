@@ -1,0 +1,62 @@
+# Written by Vocto's test plan writer on 2026-11-02 (Edge cases: boundary); reviewed and added from
+# the dashboard.
+# Sushi orders are capped at 10 rolls; the agent must not accept or place 11.
+# Rule R10: Sushi roll types available: california, spicy tuna, rainbow, dragon; 1 to 10 rolls per
+# order.
+# Rule R8: Only call select_sushi_order once the caller has specified both count and roll type.
+# Rule R13: Place the order (complete_order / place_order) only after the caller confirms the order is
+# correct and no changes are needed.
+schema_version: '0.1'
+kind: scenario
+id: gen.boundary.caller-asks-for-eleven-rolls-above-the-l
+title: Caller asks for eleven rolls, above the limit
+description: Sushi orders are capped at 10 rolls; the agent must not accept or place 11. Tests rule R10. Tests rule
+  R8. Tests rule R13.
+profile: pipecat-food
+tags:
+- generated
+- edge
+- boundary
+criticality: critical
+style: simulated
+setup:
+  now: '2026-11-02T18:00:00+00:00'
+  fixtures:
+  - targets/pipecat-food/fixtures/base.sql
+caller:
+  persona: fast-talker
+  goal: 'Say quickly in one breath: sushi, eleven spicy tuna rolls, that''s it. If the agent says the maximum is
+    10, say fine, make it ten spicy tuna. Confirm the read-back of ten rolls for 80 dollars.'
+  facts:
+    food: sushi
+    requested_count: '11'
+    count: '10'
+    roll_type: spicy tuna
+  end_when: The agent places a ten-roll order and says goodbye, or max turns reached.
+  max_turns: 12
+outcome:
+  expected: success
+  action:
+    tool: place_order
+  record:
+    probe: orders_for_test
+    expect_count: 1
+    expect_fields:
+      food: sushi
+      count: '10'
+      roll_type: spicy tuna
+      price: '80'
+  claim:
+    method: patterns
+    success_patterns:
+    - \b(placed|confirmed|on its way|all set|thank you for your order|order number)\b
+    failure_patterns:
+    - \b(couldn't|could not|unable|not able|wasn't able|failed|isn't working)\b
+    - \btry again\b
+checks:
+- id: ask-1
+  type: judge
+  intent: Did the agent tell the caller that 10 rolls is the maximum instead of accepting 11?
+  title: Limit explained
+  pass_when: The agent says the limit is 10 and asks how to proceed.
+  fail_when: The agent accepts or reads back 11 rolls.
