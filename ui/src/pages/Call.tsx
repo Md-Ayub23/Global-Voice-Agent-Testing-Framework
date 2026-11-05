@@ -134,6 +134,7 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
                 <Legend items={[["var(--caller)", "Caller"], ["var(--agent)", "Agent"]]} />
                 <span className="text-muted text-xs">Click the waveform or a ▶ time to jump there.</span>
               </div>
+              {c.phone && <PhoneLine p={c.phone} />}
             </Card>
           )}
           <Card>
@@ -239,4 +240,17 @@ function judgeSub(judged: Check[]): string {
   const opinions = judged.filter((x) => x.result === "FAIL" && !x.can_block && !x.judge?.human).length;
   const you = judged.filter((x) => x.result === "NEEDS_REVIEW").length;
   return [`${problems} problem(s)`, opinions ? `${opinions} opinion(s) not trusted yet` : "", you ? `${you} need you` : ""].filter(Boolean).join(" · ");
+}
+
+// A real phone call: what the phone provider itself recorded (the number rung, length, its price).
+function PhoneLine({ p }: { p: NonNullable<CallDetail["phone"]> }) {
+  const cost = p.price != null ? `${p.price.toFixed(4)} ${p.price_unit || ""}`.trim() : "not reported yet";
+  return (
+    <div id="phone-call" className="mt-3 text-[12.5px] text-muted flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2.5">
+      <span><b className="text-ink font-medium">Real phone call</b> from {p.from} to {p.to}</span>
+      <span>{p.duration_s != null ? `${p.duration_s} s on the line` : p.status}</span>
+      <span>{p.provider === "twilio" ? "Twilio" : p.provider} cost: {cost}</span>
+      <span className="font-mono">{p.call_sid}</span>
+    </div>
+  );
 }

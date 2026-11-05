@@ -668,6 +668,8 @@ class Orchestrator:
                                                "channels": ["caller", "agent"],
                                                "duration_ms": rec.ms(length),
                                                "agent_audio_cleared": len(rec.clears)}}
+            if getattr(session, "call_meta", None):        # a real phone call: its id, numbers, length, price
+                live["recording"]["phone"] = dict(session.call_meta)
             if getattr(session, "protocol_errors", None):
                 writer.emit("harness", "harness_event", {
                     "level": "warning", "code": "protocol_error",

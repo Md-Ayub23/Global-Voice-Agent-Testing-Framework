@@ -86,7 +86,8 @@ export function NewProject() {
   const [description, setDescription] = useState("");
   const [channel, setChannel] = useState<"voice" | "text">("voice");
   const [target, setTarget] = useState("");
-  const [voiceFormat, setVoiceFormat] = useState<"vocto" | "twilio">("twilio");
+  const [voiceFormat, setVoiceFormat] = useState<"phone" | "vocto" | "twilio">("phone");
+  const phoneNo = channel === "voice" && voiceFormat === "phone";
   const [busy, setBusy] = useState(false);
   const create = async () => {
     if (!name.trim()) { toast("Give the agent a name", "bad"); return; }
@@ -101,7 +102,7 @@ export function NewProject() {
   return (
     <>
       <PageHead title="New agent" sub="Tell Vocto about the agent. Tools, database, logs and test cases come next, step by step." />
-      <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,860px)_minmax(0,1fr)]">
+      <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] max-w-[1200px]">
         <Card>
           <div className="grid gap-5">
             <div>
@@ -129,7 +130,7 @@ export function NewProject() {
               <div className="grid gap-2 sm:grid-cols-2">
                 <Choice radio on={channel === "voice"} onClick={() => setChannel("voice")} data-channel="voice">
                   <b className="flex items-center gap-2"><Icon name="mic" size={15} />Voice</b>
-                  <div className="text-muted text-[12.5px] mt-0.5">Real speech both ways over a WebSocket. Response times, interruptions, noisy lines.</div>
+                  <div className="text-muted text-[12.5px] mt-0.5">Real speech both ways, on a phone number or a WebSocket. Response times, interruptions, noisy lines.</div>
                 </Choice>
                 <Choice radio on={channel === "text"} onClick={() => setChannel("text")} data-channel="text">
                   <b className="flex items-center gap-2"><Icon name="text" size={15} />Text</b>
@@ -137,9 +138,13 @@ export function NewProject() {
                 </Choice>
               </div>
               {channel === "voice" && (
-                <div className="grid gap-2 sm:grid-cols-2 mt-3" id="np-format">
+                <div className="grid gap-2 sm:grid-cols-3 mt-3" id="np-format">
+                  <Choice radio on={voiceFormat === "phone"} onClick={() => setVoiceFormat("phone")} data-format="phone">
+                    <b>Phone number</b>
+                    <div className="text-muted text-[12.5px] mt-0.5">The agent answers a real phone number. Vocto rings it through your Twilio or Plivo account, like a real caller.</div>
+                  </Choice>
                   <Choice radio on={voiceFormat === "twilio"} onClick={() => setVoiceFormat("twilio")} data-format="twilio">
-                    <b>Phone agent (Twilio Media Streams)</b>
+                    <b>Twilio Media Streams</b>
                     <div className="text-muted text-[12.5px] mt-0.5">The agent already takes phone calls from Twilio: Vocto calls the same WebSocket the way Twilio does. Pipecat, LiveKit, Vapi-style servers.</div>
                   </Choice>
                   <Choice radio on={voiceFormat === "vocto"} onClick={() => setVoiceFormat("vocto")} data-format="vocto">
@@ -148,8 +153,10 @@ export function NewProject() {
                   </Choice>
                 </div>
               )}
-              <Field label="Agent's address" hint="Optional now: you can add it on the next page." className="mt-4">
-                <Text id="np-target" mono value={target} onChange={setTarget} placeholder={channel === "voice" ? "wss://agent.example.com/call" : "https://agent.example.com/vocto"} />
+              <Field label={phoneNo ? "Agent's phone number" : "Agent's address"} className="mt-4"
+                hint={phoneNo ? "In international format, e.g. +14155550123. Optional now: your Twilio or Plivo details go on the next page." : "Optional now: you can add it on the next page."}>
+                <Text id="np-target" mono value={target} onChange={(v) => setTarget(phoneNo ? v.trim() : v)}
+                  placeholder={phoneNo ? "+14155550123" : channel === "voice" ? "wss://agent.example.com/call" : "https://agent.example.com/vocto"} />
               </Field>
             </div>
             <div className="flex items-center gap-3 flex-wrap">

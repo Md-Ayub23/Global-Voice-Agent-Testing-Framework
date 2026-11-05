@@ -117,7 +117,7 @@ def make_handler(app: App):
     @route("POST", r"/api/setup/test-connection")
     def post_test_connection(h, q):
         b = h.body()
-        return setup.test_connection(app.root, b["project"], b.get("file", "profile.yaml"))
+        return setup.test_connection(app.root, b["project"], b.get("file", "profile.yaml"), bool(b.get("call")))
 
     @route("POST", r"/api/setup/test-backend")
     def post_test_backend(h, q):

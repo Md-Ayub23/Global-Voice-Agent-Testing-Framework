@@ -7,7 +7,7 @@ import { owner, setupApi } from "../../lib/setup";
 import { asList, asObj, str, useDraft, type TabProps } from "./common";
 
 const DOMAINS = ["healthcare", "banking", "insurance", "trading", "retail", "travel", "telecom", "support", "general"];
-type Kind = "websocket_audio" | "text_http" | "in_repo";
+type Kind = "phone" | "websocket_audio" | "text_http" | "in_repo";
 
 function Identity({ detail, reload }: TabProps) {
   const file = owner(detail, "name");
@@ -36,9 +36,13 @@ function Identity({ detail, reload }: TabProps) {
 
 function kindOf(conn: Obj): Kind {
   if (conn.type === "text_python" || conn.launch) return "in_repo";
+  if (conn.type === "phone_call") return "phone";
   return conn.type === "text_http" ? "text_http" : "websocket_audio";
 }
 const VOICE_FORMATS: [string, string][] = [["twilio_media_stream", "Twilio Media Streams (phone agents)"], ["websocket_audio", "Vocto voice protocol (PCM16)"]];
+
+const KNOWN_OPTIONS = ["headers", "reply_field", "end_field", "timeout_s", "account_sid", "jitter_buffer_ms"];
+const PHONE_OPTIONS = ["provider", "auth_token", "from_number", "ring_timeout_s", "public_url"];
 
 function Connection({ detail, reload }: TabProps) {
   const conn0 = asObj(detail.merged.connection);
@@ -60,13 +64,14 @@ function Connection({ detail, reload }: TabProps) {
   const toggleProp = (p: string, on: boolean) =>
     d.setDraft({ ...d.draft, test_id: { ...tid, propagation: on ? [...new Set([...prop, p])] : prop.filter((x) => x !== p) } });
   const otherOptions = Object.fromEntries(Object.entries(options).filter(([k, v]) =>
-    !["headers", "reply_field", "end_field", "timeout_s", "account_sid", "jitter_buffer_ms"].includes(k) && (v == null || typeof v !== "object")));
+    ![...KNOWN_OPTIONS, ...(kindOf(conn) === "phone" ? PHONE_OPTIONS : [])].includes(k) && (v == null || typeof v !== "object")));
   const twilio = conn.type === "twilio_media_stream";
+  const phone = kind === "phone";
 
-  const runTest = async () => {
+  const runTest = async (call = false) => {
     if (d.dirty && !(await d.save())) return;
     setTesting(true);
-    try { setTest(await setupApi.testConnection(detail.project, detail.file)); }
+    try { setTest(await setupApi.testConnection(detail.project, detail.file, call)); }
     catch (e) { setTest({ ok: false, message: (e as Error).message }); }
     finally { setTesting(false); }
   };
@@ -77,14 +82,19 @@ function Connection({ detail, reload }: TabProps) {
   const pick = (k: Kind) => {
     if (k === kind) return;
     if (k === "websocket_audio") setConn({ type: "twilio_media_stream", launch: undefined as never, target: "", audio: undefined as never });
-    if (k === "text_http") setConn({ type: "text_http", launch: undefined as never, target: "" });
+    if (k === "text_http") setConn({ type: "text_http", launch: undefined as never, target: "", audio: undefined as never });
+    if (k === "phone") setConn({ type: "phone_call", launch: undefined as never, target: "", audio: undefined as never,
+      options: { provider: "twilio", account_sid: "${TWILIO_ACCOUNT_SID}", auth_token: "${TWILIO_AUTH_TOKEN}", from_number: "" } });
   };
   const clean = (c: Obj): Obj => Object.fromEntries(Object.entries(c).filter(([, v]) => v !== undefined));
 
   return (
     <Card>
       <Block title="How Vocto reaches the agent" sub="The address Vocto calls, and how it talks to the agent.">
-        <div className="grid gap-2 sm:grid-cols-3">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Choice radio on={kind === "phone"} onClick={() => pick("phone")} data-kind="phone">
+            <b>Phone number</b><div className="text-muted text-[12.5px]">Vocto rings the agent's real number through your Twilio or Plivo account. Tests the whole phone line.</div>
+          </Choice>
           <Choice radio on={kind === "websocket_audio"} onClick={() => pick("websocket_audio")} data-kind="websocket_audio">
             <b>Voice (phone-like)</b><div className="text-muted text-[12.5px]">Audio over a WebSocket. The caller really speaks and listens.</div>
           </Choice>
@@ -102,6 +112,8 @@ function Connection({ detail, reload }: TabProps) {
             </Field>
             <Help className="self-end">Vocto starts this agent itself for every call and passes it the tool proxy directly.</Help>
           </Grid>
+        ) : phone ? (
+          <PhoneFields conn={conn} options={options} setConn={setConn} setOpt={setOpt} />
         ) : (
           <>
             {kind === "websocket_audio" && (
@@ -157,17 +169,19 @@ function Connection({ detail, reload }: TabProps) {
         )}
         {Object.keys(otherOptions).length > 0 && (
           <Field label="Other agent options" hint="Passed to the agent as connection.options.">
-            <KeyValue key={`o${d.version}`} value={otherOptions} typed onChange={(v) => setConn({ options: { ...Object.fromEntries(Object.entries(options).filter(([k]) => !(k in otherOptions))), ...v } })} />
+            <KeyValue key={`o${d.version}${kind}`} value={otherOptions} typed onChange={(v) => setConn({ options: { ...Object.fromEntries(Object.entries(options).filter(([k]) => !(k in otherOptions))), ...v } })} />
           </Field>
         )}
         <div className="flex items-center gap-2 flex-wrap">
-          <Button id="test-connection" icon="phone" busy={testing} disabled={testing} onClick={() => void runTest()}>Test connection</Button>
-          <Help>Saves, then opens one short session the way a test call does{kind === "websocket_audio" ? " and listens for the greeting" : ""}.</Help>
+          <Button id="test-connection" icon={phone ? "check" : "phone"} busy={testing} disabled={testing} onClick={() => void runTest()}>{phone ? `Check ${str(options.provider) === "plivo" ? "Plivo" : "Twilio"} account` : "Test connection"}</Button>
+          {phone && <Button id="test-call" icon="phone" disabled={testing} onClick={() => void runTest(true)}>Make a test call</Button>}
+          <Help>{phone ? "The check rings no one. A test call really rings the agent (a few cents), listens for its greeting, then hangs up."
+            : <>Saves, then opens one short session the way a test call does{kind === "websocket_audio" ? " and listens for the greeting" : ""}.</>}</Help>
         </div>
         <TestResult result={test} />
       </Block>
 
-      <Block title="Linking calls to tool calls and records" sub="Every test call has a test id. The more places it reaches, the more exactly Vocto can find what the call did.">
+      {!phone && <Block title="Linking calls to tool calls and records" sub="Every test call has a test id. The more places it reaches, the more exactly Vocto can find what the call did.">
         <Check checked={prop.includes("proxy_header")} onChange={(v) => toggleProp("proxy_header", v)}
           label="Tool calls carry it as a header" hint={`Vocto's tool gateway adds ${str(tid.header_name) || "X-Test-Id"} to every request it forwards to the agent's tools, so the backend can store it.`} />
         <Check checked={prop.includes("session_metadata")} onChange={(v) => toggleProp("session_metadata", v)}
@@ -175,11 +189,66 @@ function Connection({ detail, reload }: TabProps) {
         <Field label="Header name" className="max-w-[320px]">
           <Text mono value={str(tid.header_name)} placeholder="X-Test-Id" onChange={(v) => d.setDraft({ ...d.draft, test_id: { ...tid, header_name: v } })} />
         </Field>
-      </Block>
-      {!str(conn.target) && kind !== "in_repo" && <Notice tone="warn">The agent's address is not set yet: runs can't start until it is.</Notice>}
+      </Block>}
+      {!str(conn.target) && kind !== "in_repo" && <Notice tone="warn">{phone ? "The agent's phone number is not set yet" : "The agent's address is not set yet"}: runs can't start until it is.</Notice>}
       <Problems items={d.problems} />
       <SaveBar id="save-connection" dirty={d.dirty} busy={d.busy} onSave={() => void d.save({ connection: clean(conn), test_id: d.draft.test_id })} onRevert={d.revert} />
     </Card>
+  );
+}
+
+// A real phone number: Vocto places the call through the team's own Twilio account (docs/phone-guide.md).
+function PhoneFields({ conn, options, setConn, setOpt }: { conn: Obj; options: Obj; setConn: (p: Obj) => void; setOpt: (k: string, v: unknown) => void }) {
+  const plivo = str(options.provider) === "plivo";
+  const name = plivo ? "Plivo" : "Twilio";
+  const P = plivo ? "PLIVO" : "TWILIO";
+  const idName = plivo ? "PLIVO_AUTH_ID" : "TWILIO_ACCOUNT_SID";
+  // Switching provider swaps the secret names too, unless the team already wrote their own.
+  const pickProvider = (v: string) => {
+    const usual = ["", "${TWILIO_ACCOUNT_SID}", "${TWILIO_AUTH_TOKEN}", "${PLIVO_AUTH_ID}", "${PLIVO_AUTH_TOKEN}"];
+    const next: Obj = { ...options, provider: v };
+    if (usual.includes(str(options.account_sid))) next.account_sid = v === "plivo" ? "${PLIVO_AUTH_ID}" : "${TWILIO_ACCOUNT_SID}";
+    if (usual.includes(str(options.auth_token))) next.auth_token = v === "plivo" ? "${PLIVO_AUTH_TOKEN}" : "${TWILIO_AUTH_TOKEN}";
+    setConn({ options: next });
+  };
+  return (
+    <>
+      <Grid>
+        <Field label="Agent's phone number" hint="The number callers dial, in international format: + then the country code, e.g. +14155550123 or +919876543210.">
+          <Text id="conn-target" mono value={str(conn.target)} placeholder="+14155550123" onChange={(v) => setConn({ target: v.trim() })} />
+        </Field>
+        <Field label="Phone provider" hint="Your own account that Vocto places the test calls with.">
+          <Select id="phone-provider" value={plivo ? "plivo" : "twilio"} options={[["twilio", "Twilio"], ["plivo", "Plivo"]]} onChange={pickProvider} />
+        </Field>
+      </Grid>
+      <Grid>
+        <Field label={`Your ${name} number`} hint={plivo ? "The number test calls come from: one you rented in Plivo (Phone Numbers › Your Numbers)."
+          : "The number test calls come from: one you bought in Twilio (Phone Numbers › Manage › Active numbers)."}>
+          <Text id="phone-from" mono value={str(options.from_number)} placeholder="+14155550199" onChange={(v) => setOpt("from_number", v.trim())} />
+        </Field>
+        <Field label="Ring for (seconds)" hint="How long to let it ring before calling it unanswered. Default 30.">
+          <Num value={options.ring_timeout_s as number} placeholder={30} onChange={(v) => setOpt("ring_timeout_s", v)} />
+        </Field>
+      </Grid>
+      <Grid>
+        <Field label={plivo ? "Auth ID" : "Account SID"} hint={`Write it as \${${idName}} and set the value in Settings › Secrets (${plivo ? "Plivo console › Overview" : "Twilio console › Account info"}).`}>
+          <Text id="phone-sid" mono value={str(options.account_sid)} placeholder={`\${${idName}}`} onChange={(v) => setOpt("account_sid", v)} />
+        </Field>
+        <Field label="Auth token" hint={`Write it as \${${P}_AUTH_TOKEN} and set the value in Settings › Secrets. Never type the token itself here.`}>
+          <Text id="phone-token" mono value={str(options.auth_token)} placeholder={`\${${P}_AUTH_TOKEN}`} onChange={(v) => setOpt("auth_token", v)} />
+        </Field>
+      </Grid>
+      <Field label="Public address for Vocto's phone line (optional)" hint={`${name} streams each call's audio back to Vocto. Leave it empty and Vocto opens a free Cloudflare link by itself for each run. Fill it only if your team has its own: an https:// address that forwards to port 8766 on this computer.`}>
+        <Text id="phone-public" mono value={str(options.public_url)} placeholder="opened by Vocto" onChange={(v) => setOpt("public_url", v.trim())} />
+      </Field>
+      <Notice tone="warn" icon="info" className="text-[12.5px]">
+        Every test call is a real phone call billed by {name} (and by the agent's own provider).{" "}
+        {plivo ? "A free trial Plivo account may only call numbers you verified, so add credit before testing a client's number."
+          : "A Twilio trial account can't be used: it plays a message and waits for a key press at the start of each call."}{" "}
+        Response times include the real phone network, as your callers hear it. The agent's tool calls aren't visible over the
+        phone; use Tools &amp; data › Database or Logs to check what it really did.
+      </Notice>
+    </>
   );
 }
 

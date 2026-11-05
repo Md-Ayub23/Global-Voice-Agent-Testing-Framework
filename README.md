@@ -63,6 +63,7 @@ fill in its address, tools, backend and logs access, test plan and test settings
 - [docs/phase7-guide.md](docs/phase7-guide.md): load tests (ramp, spike, soak, steady), capacity, the load baseline
 - [docs/phase8-guide.md](docs/phase8-guide.md): monitoring real calls: import or receive them, privacy, scoring, trends, alerts
 - [docs/real-agents-guide.md](docs/real-agents-guide.md): testing a real open-source agent (Pipecat food ordering), planted bugs, agents Vocto starts itself
+- [docs/phone-guide.md](docs/phone-guide.md): testing a real phone number: Vocto rings the agent through your Twilio or Plivo account
 - [docs/twilio-protocol.md](docs/twilio-protocol.md): calling a phone agent the way Twilio Media Streams does
 - [docs/voice-protocol.md](docs/voice-protocol.md): how vatf talks to a voice agent over a WebSocket
 - [docs/text-http-protocol.md](docs/text-http-protocol.md): how vatf talks to an agent in text over HTTP

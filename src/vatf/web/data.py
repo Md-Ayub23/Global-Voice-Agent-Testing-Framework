@@ -518,8 +518,10 @@ def call_detail(root: Path, runs: Path, run_id: str, test_id: str) -> dict[str, 
     verdict = _safe_json(folder / "verdict.json")
     recording = next((e["data"]["recording"] for e in events
                       if e["type"] == "call_ended" and "recording" in e["data"]), None)
+    phone = next((e["data"]["phone"] for e in events if e["type"] == "call_ended" and "phone" in e["data"]), None)
     return {
         "record": record, "live": live, "pii_masked": masked, "events": events, "verdict": verdict,
+        "phone": phone,
         "story": [{"seq": n, "who": who, "text": text} for n, who, text in story_rows(events)],
         "judgement": [{"label": a, "text": b} for a, b in judgement(verdict, events)] if verdict else [],
         "database": [{"probe": p, "rows": rows} for p, rows in database_rows(events)],

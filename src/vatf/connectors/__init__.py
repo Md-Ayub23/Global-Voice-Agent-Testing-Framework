@@ -1,4 +1,5 @@
-"""L4 connectors: text_python and text_http (text mode), websocket_audio and twilio_media_stream (voice mode)."""
+"""L4 connectors: text_python and text_http (text mode); websocket_audio, twilio_media_stream and phone_call
+(a real phone number, voice mode)."""
 
 from __future__ import annotations
 
@@ -6,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-VOICE_TYPES = ("websocket_audio", "twilio_media_stream")
+VOICE_TYPES = ("websocket_audio", "twilio_media_stream", "phone_call")
 
 
 class ConnectError(Exception):
@@ -36,5 +37,9 @@ def build_connector(profile: Mapping[str, Any], root: Path, tools: Any):
         from .twilio_stream import TwilioStreamConnector
 
         return TwilioStreamConnector(profile, root, tools)
+    if kind == "phone_call":
+        from .phone_call import PhoneCallConnector
+
+        return PhoneCallConnector(profile, root, tools)
     raise ConnectError(f"connection type {kind!r} is not supported yet "
-                       "(text_python, text_http, websocket_audio and twilio_media_stream are)")
+                       "(text_python, text_http, websocket_audio, twilio_media_stream and phone_call are)")

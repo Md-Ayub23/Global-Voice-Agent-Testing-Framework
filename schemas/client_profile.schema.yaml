@@ -42,14 +42,15 @@ properties:
     required: [type]
     properties:
       type:
-        enum: [text_python, text_http, websocket_audio, twilio_media_stream, sip, webrtc, platform]
+        enum: [text_python, text_http, websocket_audio, twilio_media_stream, phone_call, sip, webrtc, platform]
       target:
         description: >
           What to connect to. text_python: "module:callable" that builds the agent (agents in this repo).
           text_http: the agent's http(s) URL (docs/text-http-protocol.md). websocket_audio: its ws(s)
           URL (docs/voice-protocol.md). twilio_media_stream: the ws(s) URL of the agent's Twilio Media Streams
           server, the one a TwiML <Stream url> would point at (docs/twilio-protocol.md).
-          sip: a phone number or SIP URI. platform: an agent id on the platform.
+          phone_call: the agent's real phone number in international format (+14155550123); Vocto rings it
+          through the team's Twilio or Plivo account (docs/phone-guide.md). sip: a phone number or SIP URI. platform: an agent id on the platform.
         type: string
       launch:
         description: >
@@ -71,6 +72,10 @@ properties:
           twilio_media_stream: custom_parameters (what TwiML <Parameter> would pass in the start message),
           account_sid (sent in the start message; a made-up one when not given), jitter_buffer_ms (default 60:
           agent audio that arrives up to this late plays on without a gap, like a phone line's playout buffer).
+          phone_call: provider (twilio or plivo), account_sid (Plivo: the Auth ID) and auth_token (as ${NAME}),
+          from_number (the team's Twilio or Plivo number), ring_timeout_s (default 30), public_url (the team's own
+          https address for Vocto's phone line, forwarding to line_port, default 8766; without it Vocto opens
+          a Cloudflare quick tunnel), jitter_buffer_ms.
         type: object
       offline_options:
         description: Merged into options for --offline runs (agents in this repo only), so nothing calls an API.

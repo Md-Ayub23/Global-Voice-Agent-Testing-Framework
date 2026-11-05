@@ -31,7 +31,7 @@ Inside an agent:
 | Group | Page | What it is for |
 |---|---|---|
 | | **Overview** | The agent, **Release readiness by test mode** (the latest result of each mode and its top finding), a set-up checklist with a link to each step, its numbers and recent runs. |
-| 1 Set up | **Connection** | Who the agent is and how Vocto reaches it (voice format, Twilio Media Streams or Vocto's protocol, *Starting the agent* and its planted bugs). |
+| 1 Set up | **Connection** | Who the agent is and how Vocto reaches it (a real phone number rung through your Twilio or Plivo account, see [phone-guide.md](phone-guide.md); voice format, Twilio Media Streams or Vocto's protocol; *Starting the agent* and its planted bugs). |
 | | **Tools & data** | Three tabs: **Tools** (the APIs the agent calls), **Database** (read-only access to check what really got saved) and **Logs**. |
 | | **Test cases** | The scenarios as a list and forms, and *Write tests for me* (Claude drafts a plan from the agent's instructions). *Advanced* opens the raw file editor. |
 | | **Callers** | Personas (who calls): accent, voice, speed, loudness and behaviour (cuts in, says "mm-hm", pauses mid-sentence, says um, goes quiet once), and *Add from library*. A test's own **Audio** block (Test cases) sets its noise and phone line (narrowband, lost packets). See [phase5-guide.md](phase5-guide.md). |

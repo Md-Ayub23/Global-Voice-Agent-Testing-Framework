@@ -28,7 +28,7 @@ export const setupApi = {
   doc: (project: string, file: string) => api.get<{ file: string; doc: Obj }>(`/api/setup/doc?${qs({ project, file })}`),
   saveDoc: (project: string, file: string, doc: Obj, create: boolean) => api.put<SaveResult>("/api/setup/doc", { project, file, doc, create }),
   deleteDoc: (project: string, file: string) => api.post<{ deleted: string }>("/api/setup/delete", { project, file }),
-  testConnection: (project: string, file: string) => api.post<TestOutcome>("/api/setup/test-connection", { project, file }),
+  testConnection: (project: string, file: string, call = false) => api.post<TestOutcome>("/api/setup/test-connection", { project, file, call }),
   testBackend: (project: string, file: string, probe?: string, binds?: Obj) => api.post<TestOutcome>("/api/setup/test-backend", { project, file, probe, binds }),
   testLogs: (project: string, file: string) => api.post<TestOutcome>("/api/setup/test-logs", { project, file }),
   newProject: (body: Obj) => api.post<{ path: string; id: string; key: string }>("/api/setup/new-project", body),

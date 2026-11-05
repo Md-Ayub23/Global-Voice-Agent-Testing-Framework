@@ -131,8 +131,14 @@ def new_project(root: Path, body: Mapping[str, Any]) -> dict[str, Any]:
     if folder.exists():
         raise ValueError(f"there is already a project called {pid!r}; pick another name")
     channel = body.get("channel", "voice")
-    if channel == "voice" and body.get("voice_format") == "twilio":
-        connection: dict[str, Any] = {"type": "twilio_media_stream", "target": str(body.get("target", ""))}
+    connection: dict[str, Any]
+    if channel == "voice" and body.get("voice_format") == "phone":
+        # A real phone number, rung through the team's own Twilio account (docs/phone-guide.md).
+        connection = {"type": "phone_call", "target": str(body.get("target", "")).strip(),
+                      "options": {"provider": "twilio", "account_sid": "${TWILIO_ACCOUNT_SID}",
+                                  "auth_token": "${TWILIO_AUTH_TOKEN}", "from_number": ""}}
+    elif channel == "voice" and body.get("voice_format") == "twilio":
+        connection = {"type": "twilio_media_stream", "target": str(body.get("target", ""))}
     elif channel == "voice":
         connection = {"type": "websocket_audio", "target": str(body.get("target", "")),
                       "audio": {"sample_rate_hz": 16000, "encoding": "pcm16"}}
@@ -315,8 +321,9 @@ def _merged(root: Path, project: str, file: str) -> dict[str, Any]:
     return profile
 
 
-def test_connection(root: Path, project: str, file: str) -> dict[str, Any]:
-    """Opens one short session with the agent, as a call would, and reports what came back."""
+def test_connection(root: Path, project: str, file: str, call: bool = False) -> dict[str, Any]:
+    """Opens one short session with the agent, as a call would, and reports what came back.
+    A phone number is only checked (account, numbers) unless `call`: then Vocto really rings it."""
     profile = _merged(root, project, file)
     conn = profile.get("connection", {})
     kind = conn.get("type")
@@ -330,6 +337,8 @@ def test_connection(root: Path, project: str, file: str) -> dict[str, Any]:
             return asyncio.run(_test_websocket(profile))
         if kind == "twilio_media_stream":
             return asyncio.run(_test_twilio(profile))
+        if kind == "phone_call":
+            return asyncio.run(_test_phone(profile, root, call))
         return {"ok": False, "message": f"connection type {kind!r} can't be tested yet"}
     except Exception as e:  # noqa: BLE001 - every failure is a plain answer for the form
         return {"ok": False, "message": str(e) or type(e).__name__}
@@ -450,6 +459,70 @@ async def _test_twilio(profile: Mapping[str, Any]) -> dict[str, Any]:
                 "details": details}
     return {"ok": True, "message": "Connected in the Twilio format. The agent spoke first, as a phone agent should.",
             "details": details}
+
+
+async def _test_phone(profile: Mapping[str, Any], root: Path, call: bool) -> dict[str, Any]:
+    """Checks the phone provider account (Twilio or Plivo) and both numbers; with `call`, rings the agent, listens for its
+    greeting for up to 12 seconds without saying anything, and hangs up (a real, billed call)."""
+    import numpy as np
+
+    from ..audio.recorder import Recorder, monotonic_clock
+    from ..connectors import ConnectError
+    from ..connectors.phone_call import SAMPLE_RATE, PhoneCallConnector, ProviderError, check_number
+    from ..contracts.models import CallContext
+
+    conn = PhoneCallConnector(profile, root)
+    try:
+        to = check_number(profile["connection"].get("target", ""), "The agent's phone number")
+        client = conn.client()
+        name = client.label
+        from_ = check_number(conn._options().get("from_number", ""), f"Your {name} number")
+        summary, trial = await asyncio.to_thread(client.account_summary)
+        kind = await asyncio.to_thread(client.number_kind, from_)
+    except (ConnectError, ProviderError) as e:
+        return {"ok": False, "message": str(e)}
+    details = [summary] + ([trial] if trial else [])
+    if kind is None and name == "Twilio":
+        return {"ok": False, "message": f"{from_} is not a number in this Twilio account (or a verified caller id).",
+                "details": details}
+    if kind is None:
+        details.append(f"{from_} is not one of the numbers rented in this {name} account: {name} may refuse to call from it.")
+    else:
+        details.append(f"Calls come from {from_} ({f'your {name} number' if kind == 'owned' else 'a verified caller id'}) to {to}.")
+    if not call:
+        return {"ok": not trial, "message": (f"{name} account and numbers are fine. Make a test call to hear the agent answer."
+                                             if not trial else "The account works, but it is a trial account."),
+                "details": details}
+    ctx = CallContext(test_id="t-vocto-connection-test", run_id="r-test", profile=profile, scenario={},
+                      repeat=1, attempt=1, mode="voice")
+    rec = Recorder(SAMPLE_RATE, monotonic_clock())
+    try:
+        session = await conn.open(ctx, rec)
+    except ConnectError as e:
+        return {"ok": False, "message": str(e), "details": details}
+    silence = np.zeros(SAMPLE_RATE // 50, dtype=np.float32)
+    start, first_ms, quiet_since, last = rec.clock(), None, None, 0
+    try:
+        while rec.clock() - start < 12 and not session.closed.is_set():
+            await session.send_frame(silence)
+            await asyncio.sleep(0.02)
+            if rec.chunks and first_ms is None and rec.agent_spans(0, rec.agent.length):
+                first_ms = int((rec.clock() - start) * 1000)
+            if rec.chunks != last:
+                last, quiet_since = rec.chunks, rec.clock()
+            elif first_ms is not None and quiet_since and rec.clock() - quiet_since > 1.5:
+                break
+    finally:
+        await session.close()
+    heard_s = sum(b - a for a, b in rec.agent_spans(0, rec.agent.length)) / SAMPLE_RATE
+    m = session.call_meta
+    details.append(f"Speech heard: {heard_s:.1f} s" + (f", first words {first_ms} ms after the call was answered" if first_ms is not None else ""))
+    if m.get("price") is not None:
+        details.append(f"This call cost {m['price']:.4f} {m.get('price_unit') or ''} on {name}.")
+    if not heard_s:
+        return {"ok": False, "message": "The call was answered, but the agent said nothing in 12 seconds (it should greet the caller).",
+                "details": details}
+    return {"ok": True, "message": "Vocto rang the agent's number and it answered and greeted the caller.", "details": details}
 
 
 def test_backend(root: Path, project: str, file: str, probe: str | None, binds: Mapping[str, Any]) -> dict[str, Any]:

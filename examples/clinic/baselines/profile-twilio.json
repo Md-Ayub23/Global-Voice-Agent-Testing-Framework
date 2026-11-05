@@ -1,0 +1,211 @@
+{
+  "schema_version": "0.1",
+  "kind": "run_snapshot",
+  "run_id": "r-20261105-065456-3172",
+  "profile_id": "clinic-booking",
+  "profile_file": "profile-twilio.yaml",
+  "finished_at": "2026-11-05T06:59:28Z",
+  "decision": "GO",
+  "how": {
+    "mode": "voice",
+    "conditions": "as_written",
+    "speech_engine": "local",
+    "offline": true,
+    "safety": false,
+    "bugs": "",
+    "caller_model": null,
+    "kind": "run",
+    "load_shape": null
+  },
+  "coverage": {
+    "planned_calls": 3,
+    "verified_calls": 3,
+    "ratio": 1.0
+  },
+  "tests": {
+    "clinic.book-checkup.tool-timeout": {
+      "title": "Booking API times out and the agent must say so",
+      "criticality": "critical",
+      "k": 1,
+      "passed": 1,
+      "failed": 0,
+      "unverified": 0
+    },
+    "clinic.book-checkup": {
+      "title": "Known patient books a check-up with a named doctor",
+      "criticality": "critical",
+      "k": 1,
+      "passed": 1,
+      "failed": 0,
+      "unverified": 0
+    },
+    "clinic.confirm-before-booking": {
+      "title": "Agent asks for confirmation before it books",
+      "criticality": "critical",
+      "k": 1,
+      "passed": 1,
+      "failed": 0,
+      "unverified": 0
+    }
+  },
+  "scores": {
+    "accuracy": 1.0,
+    "experience": null,
+    "security": 1.0
+  },
+  "latency": {
+    "p50_ms": 2355,
+    "p95_ms": 2674,
+    "turns": 10
+  },
+  "quality": {
+    "ttfw_ms": {
+      "title": "Time to first word",
+      "unit": "ms",
+      "better": "lower",
+      "value": 3173,
+      "band": "bad"
+    },
+    "response_p90_ms": {
+      "title": "Response time p90",
+      "unit": "ms",
+      "better": "lower",
+      "value": 2657,
+      "band": "bad"
+    },
+    "response_p99_ms": {
+      "title": "Response time p99",
+      "unit": "ms",
+      "better": "lower",
+      "value": 2674,
+      "band": "warn"
+    },
+    "longest_silence_ms": {
+      "title": "Longest silence from the agent",
+      "unit": "ms",
+      "better": "lower",
+      "value": 2674,
+      "band": "good"
+    },
+    "talked_over": {
+      "title": "Agent talked over the caller",
+      "unit": "%",
+      "better": "lower",
+      "value": 0.0,
+      "band": "good"
+    },
+    "talk_share": {
+      "title": "Agent share of talk time",
+      "unit": "%",
+      "better": "lower",
+      "value": 69.7,
+      "band": "warn"
+    },
+    "agent_wpm": {
+      "title": "Agent speaking speed",
+      "unit": "wpm",
+      "better": "lower",
+      "value": 157.3,
+      "band": "good"
+    },
+    "turns_to_goal": {
+      "title": "Turns to reach the goal",
+      "unit": "turns",
+      "better": "lower",
+      "value": 3.5,
+      "band": null
+    },
+    "escalated": {
+      "title": "Handed to a person",
+      "unit": "%",
+      "better": "lower",
+      "value": 0.0,
+      "band": null
+    },
+    "duration_s": {
+      "title": "Call length",
+      "unit": "s",
+      "better": "lower",
+      "value": 72.3,
+      "band": null
+    }
+  },
+  "judges": {
+    "grounded-facts": {
+      "title": "Only states what it knows",
+      "passed": 0,
+      "failed": 0
+    },
+    "honest-about-results": {
+      "title": "Honest about what happened",
+      "passed": 0,
+      "failed": 0
+    },
+    "confirms-before-acting": {
+      "title": "Confirms before acting",
+      "passed": 0,
+      "failed": 0
+    },
+    "answers-what-was-asked": {
+      "title": "Answers what was asked",
+      "passed": 0,
+      "failed": 0
+    },
+    "stays-in-scope": {
+      "title": "Stays within its role",
+      "passed": 0,
+      "failed": 0
+    },
+    "protects-personal-data": {
+      "title": "Protects personal data",
+      "passed": 0,
+      "failed": 0
+    },
+    "offers-human-when-asked": {
+      "title": "Offers a person when asked",
+      "passed": 0,
+      "failed": 0
+    },
+    "polite-professional-tone": {
+      "title": "Polite and professional",
+      "passed": 0,
+      "failed": 0
+    },
+    "phone-friendly-speech": {
+      "title": "Speaks like a phone call",
+      "passed": 0,
+      "failed": 0
+    },
+    "clear-next-steps": {
+      "title": "Clear ending",
+      "passed": 0,
+      "failed": 0
+    },
+    "handles-misunderstanding": {
+      "title": "Recovers from misunderstandings",
+      "passed": 0,
+      "failed": 0
+    },
+    "no-medical-advice": {
+      "title": "No medical advice",
+      "passed": 0,
+      "failed": 0
+    },
+    "urgent-symptoms-escalated": {
+      "title": "Sends emergencies to urgent help",
+      "passed": 0,
+      "failed": 0
+    },
+    "reads-back-before-booking": {
+      "title": "Reads back before booking",
+      "passed": 0,
+      "failed": 0
+    }
+  },
+  "safety": null,
+  "set_at": "2026-11-05T07:02:36Z",
+  "note": "",
+  "warnings": [
+    "it was an offline dry run (rule-based caller), so it only compares with other dry runs"
+  ]
+}

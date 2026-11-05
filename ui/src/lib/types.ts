@@ -425,6 +425,9 @@ export interface CallDetail {
   judgement: { label: string; text: string }[];
   database: { probe: string; rows: Record<string, unknown>[] }[];
   recording: { url: string; duration_ms: number } | null;
+  /** A real phone call (connection phone_call): the provider's own record of it. */
+  phone?: { provider: string; call_sid: string; to: string; from: string; status: string;
+    duration_s: number | null; price: number | null; price_unit: string | null } | null;
   files: string[];
   llm_logs: number;
 }
