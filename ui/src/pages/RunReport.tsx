@@ -18,7 +18,9 @@ import { navigate } from "../lib/router";
 import { decisionTitle } from "../lib/status";
 import { LAYER_WORDS, modelName } from "../lib/judges";
 import { PACK_TITLES } from "../lib/safety";
-import type { BaselinePage, CallBrief, DecisionDoc, LoadPage, Project, RunDetail, SafetyResult } from "../lib/types";
+import type { BaselinePage, CallBrief, DecisionDoc, LoadPage, Project, Readiness, RunDetail, SafetyResult } from "../lib/types";
+import { CoverageCard, ExecutiveSummary, FindingsList, MethodCard, MetricsCard, Scorecard, VerdictBanner, isReadiness } from "../components/readiness";
+import { modeTitle } from "../lib/modes";
 
 // The width of an element, kept up to date as the window resizes (for SVG charts drawn to fit).
 // The element appears only after the data loads, so this is a callback ref, not useRef.
@@ -146,14 +148,19 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
       ? <Count n={run.comparison.counts.regression + run.comparison.counts.worse} bad /> : null}</> }] : []),
     ...(info ? [{ value: "setup", label: "Run setup" }] : []),
   ];
-  const shown = tabs.some((t) => t.value === tab) ? tab : isLoad && run.load ? "load" : "calls";
+  const rd: Readiness | null = isReadiness(run.readiness) ? run.readiness : null;
+  if (rd) {
+    tabs.unshift({ value: "findings", label: <>Findings {rd.findings.length ? <Count n={rd.findings.length} bad={rd.counts.blocking > 0} /> : null}</> });
+    tabs.splice(tabs.findIndex((t) => t.value === "setup"), 0, { value: "numbers", label: "Numbers & coverage" });
+  }
+  const shown = tabs.some((t) => t.value === tab) ? tab : isLoad && run.load ? "load" : rd ? "findings" : "calls";
 
   return (
     <>
       <div className="flex items-end gap-4 mt-3 mb-6 flex-wrap">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{modeLabel(sm.mode)} {isLoad ? "load test" : "test run"}</h1>
+            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{modeTitle(sm.test_mode || (isLoad ? "load" : null))} test <span className="text-muted font-medium">· {modeLabel(sm.mode)}</span></h1>
             {isLoad && info?.load && <Chip tone="accent" icon="activity">{SHAPE_LABEL[info.load.shape]} to {info.load.calls_at_once} at once</Chip>}
             <OptionChips run={sm} />
           </div>
@@ -171,20 +178,27 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
               onDone={isLoad ? reloadLoad : reloadBase} />
           )}
           {d && <Button href={projectHref(project.key, `/compare?b=${runId}`)} icon="compare">Compare</Button>}
-          {info && <Button href={projectHref(project.key, isLoad ? `/load?file=${encodeURIComponent(profileFile)}` : `/new?from=${runId}`)} icon="refresh">Run again</Button>}
+          {info && <Button href={projectHref(project.key, isLoad ? `/test/load?file=${encodeURIComponent(profileFile)}` : `/test/${sm.test_mode && sm.test_mode !== "monitor" ? sm.test_mode : "full"}?from=${runId}`)} icon="refresh">Run again</Button>}
+          {rd && <Button href={projectHref(project.key, `/runs/${runId}/print`)} variant="primary" icon="printer" id="pdf-report">PDF report</Button>}
+          {rd && <Button href={`/api/runs/${runId}/export.csv`} icon="download" id="csv-export">CSV</Button>}
           {run.files["transcript.txt"] && <Button href={`/runs/${runId}/transcript.txt`} target="_blank" icon="file">Transcript</Button>}
-          {run.files["report.html"] && <Button href={`/runs/${runId}/report.html`} target="_blank" icon="ext">HTML report</Button>}
         </div>
       </div>
 
       <div className="flex flex-col gap-4">
-        {d ? (
+        {rd ? (
+          <>
+            <VerdictBanner r={rd} note={bugs ? <Notice tone="warn" icon="info">Bug switches were on ({bugs}) to prove Vocto catches them, so “Not ready” is the right answer here.</Notice> : undefined} />
+            {rd.summary.length > 1 && <ExecutiveSummary r={rd} skipVerdict />}
+            <Scorecard r={rd} />
+          </>
+        ) : d ? (
           <Hero
             tone={heroToneOf(d.decision)}
             eyebrow="Release decision"
-            title={<>{decisionTitle(d.decision)}{d.decision === "NO_GO_INSUFFICIENT_EVIDENCE" && <span className="text-lg font-semibold"> · not enough evidence</span>}</>}
+            title={<>{decisionTitle(d.decision)}</>}
             actions={bugs ? (
-              <Notice tone="warn" icon="info" className="max-w-[360px]">Bug switches were on ({bugs}), so NO-GO here means Vocto caught them.</Notice>
+              <Notice tone="warn" icon="info" className="max-w-[360px]">Bug switches were on ({bugs}), so “Not ready” here means Vocto caught them.</Notice>
             ) : undefined}
             reasons={reasons}
           >{d.basis && <BasisLine basis={d.basis} />}</Hero>
@@ -194,7 +208,8 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           <Notice tone="warn"><b>This run has no decision.</b> It was {sm.status} before the end. The calls that finished are below.</Notice>
         )}
 
-        {d && !isLoad && (
+        {run.readiness && !rd && <Notice tone="warn">Couldn't build the readiness report: {(run.readiness as { error: string }).error}</Notice>}
+        {d && !isLoad && !rd && (
           <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))] stagger">
             {Object.entries(d.scorecard).map(([name, s]) => (
               <ScoreCard key={name} ring={<Ring value={s.score} />} label={name[0].toUpperCase() + name.slice(1)}>
@@ -226,6 +241,9 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
         <div className="mt-2">
           <Tabs value={shown} onChange={setTab} tabs={tabs} className="mb-0" />
         </div>
+
+        {shown === "findings" && rd && <FindingsList r={rd} callHref={(t, seq) => callLink(t) + (seq != null ? `?at=${seq}` : "")} />}
+        {shown === "numbers" && rd && <><MetricsCard r={rd} /><CoverageCard r={rd} /><MethodCard r={rd} /></>}
 
         {shown === "load" && run.load && <LoadReport load={run.load} voice={voice} callHref={callLink} />}
 

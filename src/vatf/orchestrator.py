@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from . import modes
 from .attacks import is_safety
 from .calibration import calibration
 from .caller import LLMCaller, LLMValidator, RuleCaller, ScriptedCaller, ScriptThenLLM, follow_up_scenario
@@ -72,6 +73,7 @@ class RunConfig:
     trigger: str = "manual"                       # manual | ci | health: how the run was started (shown and alerted)
     caller: str = "claude"                        # Phase 7 load tests: free = scripted lines / rule-based caller, no Claude
     fixtures_once: bool = False                   # Phase 7: test data loaded once before the calls, not before each call
+    test_mode: str | None = None                  # modes.py: functional, timing, speech, safety, resilience, regression, full
 
 
 class Orchestrator:
@@ -103,6 +105,15 @@ class Orchestrator:
                   # Adaptive attackers need the Claude caller: not in a free dry run.
                   and not (self.config.offline and "adaptive" in s.get("tags", []))]
         chosen = [s for s in chosen if not is_safety(s)]
+        if self.config.test_mode:
+            # A test mode picks its own tests (modes.select); picked ids narrow them further.
+            pool = modes.select(self.config.test_mode, chosen, safety, self.config.safety)
+            if not self.config.scenario_ids:
+                return pool
+            unknown = set(self.config.scenario_ids) - {s["id"] for s in pool}
+            if unknown:
+                raise KeyError(f"not part of the {self.config.test_mode} tests: {', '.join(sorted(unknown))}")
+            return [s for s in pool if s["id"] in self.config.scenario_ids]
         if self.config.scenario_ids:
             known = {s["id"] for s in chosen} | {s["id"] for s in safety}
             unknown = set(self.config.scenario_ids) - known
@@ -229,6 +240,7 @@ class Orchestrator:
             "profile_id": self.profile["id"], "profile_name": self.profile.get("name", self.profile["id"]),
             "mode": self.mode, "offline": cfg.offline, "repeats": cfg.repeats,
             "scenario_ids": list(cfg.scenario_ids), "safety": cfg.safety, "conditions": cfg.conditions,
+            "test_mode": cfg.test_mode or ("full" if cfg.safety else "functional"),
             "trigger": cfg.trigger, "baseline": cfg.baseline, "agent_options": dict(self.profile["connection"].get("options", {})),
             "caller_model": None if cfg.offline else cfg.caller_model, "pii_masked": cfg.mask_pii,
             "judges": ({"enabled": False, "why": self._judges_off()} if self._judges_off() else

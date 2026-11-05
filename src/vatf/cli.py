@@ -32,6 +32,7 @@ from .baseline import BaselineError, baseline_path, clear_baseline, load_baselin
 from .cireport import write_ci_reports
 from .compare import compare
 from .health import scenario_ids as health_scenarios, settings as health_settings
+from .modes import CHOICES as MODE_CHOICES
 from .util import read_json, write_json
 
 # Which scenario each clinic bug switch must be caught by (the Phase 1 exit criterion).
@@ -104,7 +105,8 @@ def _config(args) -> RunConfig:
                      conditions=getattr(args, "conditions", None) or "as_written",
                      # The exit check proves Vocto catches each bug on its own, so it never compares.
                      baseline=getattr(args, "baseline", None) or "none",
-                     trigger="ci" if getattr(args, "ci", False) else "manual")
+                     trigger="ci" if getattr(args, "ci", False) else "manual",
+                     test_mode=getattr(args, "test_mode", None))
 
 
 def _llm(args, project):
@@ -145,8 +147,26 @@ def cmd_run(args) -> int:
     known = {b["id"] for b in project.profile.get("planted_bugs", [])}
     if args.planted_bug and args.planted_bug not in known:
         raise SystemExit(f"unknown planted bug {args.planted_bug!r}; the profile lists: {', '.join(sorted(known)) or 'none'}")
+    config = _config(args)
+    if config.test_mode:
+        from . import modes
+        if modes.mode(config.test_mode)["voice_only"] and not is_voice(project.profile):
+            print(f"error: the {config.test_mode} tests need a voice connection; this profile is tested by text",
+                  file=sys.stderr)
+            return 3
+        # A mode's own tests: the safety mode is the attack calls, so they are switched on with it.
+        config = replace(config, safety=config.safety or config.test_mode == "safety")
+        try:
+            picked = Orchestrator(project, config).scenarios()
+        except KeyError as e:
+            print(f"error: {e.args[0]}", file=sys.stderr)
+            return 3
+        if not picked:
+            print(f"error: nothing to run in the {config.test_mode} tests: {modes.why_empty(config.test_mode)}",
+                  file=sys.stderr)
+            return 3
     try:
-        decision = _run(project, _config(args), llm, args.planted_bug, args.start_agent)
+        decision = _run(project, config, llm, args.planted_bug, args.start_agent)
     except AgentProcessError as e:
         print(f"error: {e}", file=sys.stderr)
         return 3
@@ -237,6 +257,12 @@ def _finish(args, project, decision, llm) -> int:
         print(compare_text(comparison))
     run_dir = Path(args.root) / args.runs_dir / decision["run_id"]
     info = read_json(run_dir / "run.json")
+    try:  # the release readiness in plain words (DECISION above keeps the code CI scripts read)
+        from .readiness import build as readiness_report
+        v = readiness_report(run_dir)["verdict"]
+        print(f"RESULT: {v['headline']}. {v['line']}")
+    except Exception:  # noqa: BLE001 - the plain words never stop a run from finishing
+        pass
     for path in write_ci_reports(decision, decision.get("_verdicts", []), info, comparison,
                                  getattr(args, "junit", None), getattr(args, "summary", None)):
         print(f"CI report: {path}")
@@ -705,6 +731,11 @@ def main(argv: list[str] | None = None) -> int:
                        help="don't run the AI judges (they score tone, made-up facts and the like; see the Judges page)")
         p.add_argument("--safety", action="store_true",
                        help="add the built-in safety tests: attack calls written for this agent (profile safety section)")
+        if name == "run":
+            p.add_argument("--test-mode", choices=list(MODE_CHOICES),
+                           help="run one kind of testing: functional (your test cases), timing, speech (voice only), "
+                                "safety (the attack calls), resilience (test cases that break a tool), regression "
+                                "(everything, compared with the baseline) or full (test cases + safety)")
         p.add_argument("--conditions", choices=list(PRESETS), default="as_written",
                        help="voice: caller conditions laid over every test: phone (phone line, lost packets), "
                             "noisy (cafe noise) or hard (street noise, phone line, and callers who cut in)")

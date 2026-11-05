@@ -9,7 +9,13 @@ import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx } from "../lib/format";
 import { navigate } from "../lib/router";
 import { channelLabel, projectHref } from "../lib/links";
-import type { Job, Options, Profile, Project, RunDetail, RunInfo } from "../lib/types";
+import { MODE_TITLE } from "../lib/modes";
+import type { Job, Options, Profile, Project, RunDetail, RunInfo, TestModeId } from "../lib/types";
+
+// What a test mode changes on this form (src/vatf/modes.py decides the same on the server).
+const VOICE_ONLY: TestModeId[] = ["timing", "speech"];
+const NO_SAFETY: TestModeId[] = ["functional", "timing", "speech", "resilience"];
+const DEFAULT_CONDITIONS: Partial<Record<TestModeId, string>> = { speech: "phone" };
 
 const CHOICES: Record<string, [string, string][]> = {
   brain: [["llm", "Claude (LLM)"], ["rules", "Rules (offline)"]],
@@ -63,8 +69,9 @@ interface Form {
   conditions: string;      // voice: caller conditions preset over every test (Phase 5)
 }
 
-export function NewRun({ project, query }: { project: Project; query: URLSearchParams }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Run tests" }]);
+// `mode` set: the Run tab of one test mode (Test modes › <mode>), under that page's own header.
+export function NewRun({ project, query, mode }: { project: Project; query: URLSearchParams; mode?: TestModeId }) {
+  useCrumbs(mode ? null : [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Run tests" }]);
   const { system } = useApp();
   const from = query.get("from");
   const { data, error } = useLoad(async () => {
@@ -81,30 +88,36 @@ export function NewRun({ project, query }: { project: Project; query: URLSearchP
   if (!data.projects.length) {
     return <EmptyState title="No agents found" icon="folder" />;
   }
-  return <NewRunForm projects={data.projects} prefill={data.prefill} prefillError={data.prefillError} query={query} />;
+  return <NewRunForm projects={data.projects} prefill={data.prefill} prefillError={data.prefillError} query={query} mode={mode} />;
 }
 
 function defaultsOf(p: Profile, offline: boolean): Options {
   return offline ? { ...p.options, ...p.offline_options } : { ...p.options };
 }
 
-function NewRunForm({ projects, prefill, prefillError, query }: { projects: Project[]; prefill: RunInfo | null; prefillError: string | null; query: URLSearchParams }) {
+function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects: Project[]; prefill: RunInfo | null; prefillError: string | null; query: URLSearchParams; mode?: TestModeId }) {
   const { system, activeJob, setActiveJob, projects: allProjects } = useApp();
   const jobProject = allProjects?.find((p) => p.path === activeJob?.request?.project);
   const activeJobHref = activeJob && jobProject ? projectHref(jobProject.key, `/live/${activeJob.id}`) : "#/";
   const toast = useToast();
   useEffect(() => { if (prefillError) toast(prefillError, "bad"); }, [prefillError, toast]);
 
-  const [f, setF] = useState<Form>(() => initialForm(projects, prefill, query, !system?.api_key?.set, system?.default_model || "claude-haiku-5-5"));
+  const [f, setF] = useState<Form>(() => initialForm(projects, prefill, query, !system?.api_key?.set, system?.default_model || "claude-haiku-5-5", mode));
+  // A mode other than the Full check runs its own tests only: no exit check, and safety on or off as the mode says.
+  const inAMode = !!mode && mode !== "full";
+  const voiceOnly = !!mode && VOICE_ONLY.includes(mode);
+  const safetyMode = mode === "safety";
   const set = (patch: Partial<Form>) => setF((x) => ({ ...x, ...patch }));
   const project = projects.find((p) => p.path === f.project) || projects[0];
   const profile = project.profiles.find((p) => p.file === f.profile) || project.profiles[0];
   const d = defaultsOf(profile, f.offline);
   const voice = profile.mode === "voice";
-  const exit = f.command === "exit-check";
+  const exit = f.command === "exit-check" && !inAMode;
   const noKey = !system?.api_key?.set;
   const optKeys = Object.keys(profile.options || {}).filter((k) => k !== "bugs");
-  const inMode = profile.scenarios.filter((x) => x.in_mode);
+  // The test cases this run can pick from: the channel's own, and in Resilience only those that break a tool.
+  const inMode = safetyMode ? [] : profile.scenarios.filter((x) => x.in_mode && (mode !== "resilience" || x.faults.length > 0));
+  const listed = mode === "resilience" ? profile.scenarios.filter((x) => x.faults.length > 0) : profile.scenarios;
 
   const pickProfile = (projectPath: string, file: string) => {
     const proj = projects.find((p) => p.path === projectPath) || projects[0];
@@ -117,7 +130,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
   };
 
   const judgesOn = f.judges && !f.offline && profile.judges !== false;
-  const safetyOn = f.safety && !!profile.safety?.enabled && !!profile.safety.attacks;
+  const safetyOn = (safetyMode || (f.safety && !(mode && NO_SAFETY.includes(mode)))) && !!profile.safety?.enabled && !!profile.safety.attacks;
   const planted = !!profile.planted_bugs?.length;
   const plantedOn = plantedOf(profile, judgesOn, safetyOn);
   const exitBugs = planted ? plantedOn.map((b) => b.id) : exitBugsOf(profile, judgesOn, safetyOn);
@@ -137,11 +150,12 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
       speech: f.speech, stt_model: f.stt_model, stt_check_model: f.stt_check_model, show_pii: f.show_pii,
       start_agent: f.command === "run" && startAgent, planted_bug: f.command === "run" && startAgent ? f.planted_bug : "",
       conditions: voice ? f.conditions : "as_written",
+      ...(mode && f.command === "run" ? { test_mode: mode } : {}),
     };
-  }, [f, profile, d, inMode, safetyOn, startAgent, voice]);
+  }, [f, profile, d, inMode, safetyOn, startAgent, voice, mode]);
 
   const planned = useMemo(() => {
-    const sc = inMode.filter((x) => exit || f.scenarios.has(x.id));
+    const sc = inMode.filter((x) => exit || f.scenarios.has(x.id));   // inMode is empty in Safety mode
     const reps = (x: { repeats?: number }) => Number(f.repeats) || x.repeats || 3;
     const per = sc.reduce((a, x) => a + reps(x), 0) + safetyCalls;
     if (exit && planted) {  // the clean agent runs everything; each planted bug only its own scenario
@@ -168,18 +182,31 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
 
   const toggle = (s: Set<string>, v: string) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; };
   const n = (i: number) => i - (exit ? 1 : 0);   // section numbers shift when the scenario card is hidden
+  const picked = inMode.filter((x) => f.scenarios.has(x.id)).length;
+  const nothing = safetyMode ? !safetyOn : !exit && picked === 0;
+  const wrongChannel = voiceOnly && !voice;
 
   return (
     <>
-      <PageHead title="Run tests" sub={<>Test <b className="text-ink">{project.name}</b>: Vocto calls the agent, checks every call and gives a release decision.</>}>
+      {!mode && <PageHead title="Run tests" sub={<>Test <b className="text-ink">{project.name}</b>: Vocto calls the agent, checks every call and writes a release readiness report.</>}>
         {(profile.bugs || planted || exit) && (
           <Seg id="cmd" value={f.command} onChange={(v) => set({ command: v })}
             options={[{ value: "run", label: "Test run", icon: "play" }, { value: "exit-check", label: "Exit check", icon: "shield" }]} />
         )}
-      </PageHead>
+      </PageHead>}
+      {mode === "full" && (profile.bugs || planted) && (
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <span className="text-[13px] text-ink-2">Run the tests, or prove Vocto catches known bugs with an exit check:</span>
+          <Seg id="cmd" value={f.command} onChange={(v) => set({ command: v })}
+            options={[{ value: "run", label: "Test run", icon: "play" }, { value: "exit-check", label: "Exit check", icon: "shield" }]} />
+        </div>
+      )}
+      {wrongChannel && (
+        <Notice tone="warn" className="mb-4">{MODE_TITLE[mode!]} needs a voice call: pick the voice channel below{project.profiles.some((x) => x.mode === "voice") ? "" : ", or add one in Set up › Connection"}.</Notice>
+      )}
       {exit && planted && (
         <Notice className="mb-4">
-          <b>Exit check</b> starts the real agent clean and runs every scenario, then restarts it once with each planted bug and runs the scenario that should catch it. It passes when the clean agent gets GO and every planted bug is caught in every repeat.
+          <b>Exit check</b> starts the real agent clean and runs every scenario, then restarts it once with each planted bug and runs the scenario that should catch it. It passes when the clean agent is Ready and every planted bug is caught in every repeat.
           {exitBugs.length ? ` Planted bugs: ${exitBugs.join(", ")}.` : " No planted bug can run with these settings."}
           {(profile.planted_bugs || []).length > plantedOn.length && (
             <> Left out: {(profile.planted_bugs || []).filter((b) => !plantedOn.includes(b)).map((b) => b.id).join(", ")}
@@ -190,7 +217,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
       )}
       {exit && !planted && (
         <Notice className="mb-4">
-          <b>Exit check</b> runs the clean agent, then once with each bug switch ({exitBugs.join(", ")}). It passes when the clean agent gets GO and every bug is caught in every repeat. It uses all scenarios.
+          <b>Exit check</b> runs the clean agent, then once with each bug switch ({exitBugs.join(", ")}). It passes when the clean agent is Ready and every bug is caught in every repeat. It uses all scenarios.
           {judgesOn ? " With the AI judges on it also checks that they catch the soft bugs (rudeness, made-up facts, refusing a person)."
             : !f.offline && profile.judges !== false ? " Turn the AI judges on to check the soft bugs too." : ""}
           {safetyOn && exitBugs.some((b) => SAFETY_BUGS.includes(b)) ? " With safety tests on, the attack calls must catch the safety bugs too (answering off-topic, leaking a secret, obeying a prompt trick)." : ""}
@@ -202,13 +229,13 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
             <CardHead level={2} title="1 · Channel" sub="how Vocto calls the agent" />
             <div className="flex flex-wrap gap-2">
               {project.profiles.map((x) => (
-                <Choice key={x.file} radio on={x.file === profile.file} off={!x.ok} onClick={() => pickProfile(f.project, x.file)} data-profile={x.file} className="flex-1 min-w-[220px]">
+                <Choice key={x.file} radio on={x.file === profile.file} off={!x.ok || (voiceOnly && x.mode !== "voice")} onClick={() => pickProfile(f.project, x.file)} data-profile={x.file} className="flex-1 min-w-[220px]">
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <Icon name={x.mode === "voice" ? "mic" : "text"} size={15} />
                     <b>{channelLabel(x, project.profiles)}</b>
                   </div>
                   <div className="text-ink-2 text-[12.5px]">
-                    {x.ok ? (x.mode === "voice" ? "Like a phone call: real speech both ways, response times" : "Text messages: fast and cheap, the same checks") : "Not ready: finish its setup first"}
+                    {voiceOnly && x.mode !== "voice" ? `${MODE_TITLE[mode!]} measures speech, so it needs the voice channel` : x.ok ? (x.mode === "voice" ? "Like a phone call: real speech both ways, response times" : "Text messages: fast and cheap, the same checks") : "Not ready: finish its setup first"}
                   </div>
                 </Choice>
               ))}
@@ -216,14 +243,32 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
             {!profile.ok && <Notice tone="bad" className="mt-3">{profile.problems.map((p) => <div key={p}>{p}</div>)}<a href={projectHref(project.key, "/setup/connection")}>Open the setup</a></Notice>}
           </Card>
 
-          {!exit && (
+          {safetyMode && (
+            <Card id="safety-plan">
+              <CardHead level={2} title="2 · Attack calls" sub="written for this agent on Set up › Safety tests" />
+              {profile.safety?.enabled && profile.safety.attacks ? (
+                <div className="grid gap-2 text-[13px] text-ink-2">
+                  <div><b className="text-ink">{profile.safety.attacks} attacks</b> written for this agent: off-topic questions, pushing for secrets or other people's data, prompt tricks spoken on the call, and any questions of your own.</div>
+                  <div>Every call is still checked in full: tools, data saved, what was said, and the AI judges. A leak or an unsafe action blocks the release.</div>
+                  <div><a href={projectHref(project.key, "/setup/safety")}>Choose which attacks run</a></div>
+                </div>
+              ) : (
+                <Notice tone="warn">Safety tests are switched off for this agent. <a href={projectHref(project.key, "/setup/safety")}>Switch them on in Safety tests</a>.</Notice>
+              )}
+            </Card>
+          )}
+
+          {!exit && !safetyMode && (
             <Card>
-              <CardHead level={2} title="2 · Scenarios" sub={`${inMode.length} run in ${profile.mode} mode`}>
+              <CardHead level={2} title="2 · Test cases" sub={mode === "resilience" ? `${inMode.length} break a tool on purpose` : `${inMode.length} run in ${profile.mode} mode`}>
                 <Button size="sm" variant="ghost" id="all" onClick={() => set({ scenarios: new Set(inMode.map((x) => x.id)) })}>All</Button>
                 <Button size="sm" variant="ghost" id="none" onClick={() => set({ scenarios: new Set() })}>None</Button>
               </CardHead>
               <div className="flex flex-col gap-2">
-                {profile.scenarios.map((x) => (
+                {mode === "resilience" && !listed.length && (
+                  <Notice tone="warn">None of this agent's test cases breaks a tool yet. <a href={projectHref(project.key, "/setup/cases")}>Add a broken tool to a test case</a> (it times out, fails, answers slowly or answers rubbish).</Notice>
+                )}
+                {listed.map((x) => (
                   <Choice key={x.id} on={f.scenarios.has(x.id) && x.in_mode} off={!x.in_mode} data-scenario={x.id}
                     title={x.in_mode ? undefined : `Runs in ${x.modes.join(" and ")} mode only`}
                     onClick={() => set({ scenarios: toggle(f.scenarios, x.id) })}>
@@ -387,7 +432,7 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
           <Card>
             <CardHead level={2} title={`${n(5) + (voice ? 1 : 0)} · Run settings`} />
             <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
-              <Field label="Repeats per scenario" hint="GO needs every repeat of a critical scenario to pass.">
+              <Field label="Repeats per test case" hint="Ready needs every repeat of a critical test case to pass.">
                 <input id="repeats" className={inputCls} type="number" min={1} max={50} placeholder={`from test settings (${profile.thresholds?.repeats ?? 3})`}
                   value={f.repeats} onChange={(e) => set({ repeats: e.target.value })} />
               </Field>
@@ -401,13 +446,13 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
                   </span>
                 </div>
               )}
-              {profile.safety?.enabled && (
+              {profile.safety?.enabled && (!mode || mode === "full" || mode === "regression") && (
                 <div className="grid gap-1.5 font-semibold text-[13px]">
                   Safety tests
                   <Switch id="safety" checked={f.safety} onChange={(v) => set({ safety: v })} label="Include safety tests" />
                   <span className="font-normal text-xs text-muted">
                     {f.safety ? <>{profile.safety.attacks} attack calls written for this agent: off-topic questions, pushing for secrets, prompt tricks and more. <a href={projectHref(project.key, "/setup/safety")}>Choose them on Safety tests</a>.</>
-                      : "Off: only the scenarios above."}
+                      : "Off: only the test cases above."}
                   </span>
                 </div>
               )}
@@ -428,26 +473,27 @@ function NewRunForm({ projects, prefill, prefillError, query }: { projects: Proj
             <div className="flex flex-col gap-[9px]">
               <Row label="Agent"><b className="text-right">{project.name}</b></Row>
               <Row label="Channel"><Chip tone={voice ? "agent" : "caller"} icon={voice ? "mic" : "text"}>{voice ? "Voice" : "Text"}</Chip></Row>
-              <Row label={exit ? "Runs" : "Scenarios"}><b>{exit ? 1 + exitBugs.length : f.scenarios.size}</b></Row>
+              {mode && <Row label="Test mode"><b>{MODE_TITLE[mode]}</b></Row>}
+              {!safetyMode && <Row label={exit ? "Runs" : "Test cases"}><b>{exit ? 1 + exitBugs.length : picked}</b></Row>}
               <Row label="Planned calls"><b className="tabular-nums">{planned}</b></Row>
               <Row label="Caller"><b>{f.offline ? "rules (free)" : "Claude"}</b></Row>
               <Row label="AI judges"><b>{judgesOn ? "on" : "off"}</b></Row>
               {voice && <Row label="Caller conditions"><b>{system?.conditions?.find((c) => c.id === f.conditions)?.title || "As written"}</b></Row>}
-              {profile.safety?.enabled && <Row label="Safety tests"><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
+              {profile.safety?.enabled && <Row label={safetyMode ? "Attack calls" : "Safety tests"}><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
               {!exit && startAgent && <Row label="Agent"><b>{f.planted_bug ? <Chip tone="bad">{f.planted_bug}</Chip> : "started by Vocto"}</b></Row>}
               {!exit && startAgent && f.planted_bug && (
-                <Notice tone="warn" icon="info" className="text-[12.5px]">With a planted bug the right answer is <b>NO-GO</b> for the scenario that should catch it.</Notice>
+                <Notice tone="warn" icon="info" className="text-[12.5px]">With a planted bug the right answer is <b>Not ready</b> for the test case that should catch it.</Notice>
               )}
               {!exit && f.bugs.size > 0 && (
                 <>
                   <Row label="Bugs on"><div className="flex flex-wrap justify-end gap-1.5">{[...f.bugs].map((b) => <Chip key={b} tone="bad">{b}</Chip>)}</div></Row>
-                  <Notice tone="warn" icon="info" className="text-[12.5px]">With bugs switched on, the right answer is <b>NO-GO</b>: that means Vocto caught them.</Notice>
+                  <Notice tone="warn" icon="info" className="text-[12.5px]">With bugs switched on, the right answer is <b>Not ready</b>: that means Vocto caught them.</Notice>
                 </>
               )}
             </div>
             <Divider />
             <Button id="go" variant="primary" size="lg" className="w-full" busy={starting} icon={starting ? undefined : "play"}
-              disabled={starting || !profile.ok || (!exit && f.scenarios.size === 0)} onClick={start}>
+              disabled={starting || !profile.ok || nothing || wrongChannel} onClick={start}>
               {starting ? "Starting…" : exit ? "Start exit check" : "Start run"}
             </Button>
             {activeJob && (
@@ -464,19 +510,21 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return <div className="flex items-start gap-2.5"><span className="text-muted flex-1">{label}</span>{children}</div>;
 }
 
-function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSearchParams, offline: boolean, model: string): Form {
+function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSearchParams, offline: boolean, model: string, mode?: TestModeId): Form {
   let projectPath = projects[0].path;
   if (prefill && projects.some((p) => p.path === prefill.project)) projectPath = prefill.project;
   else if (query.get("project") && projects.some((p) => p.path === query.get("project"))) projectPath = query.get("project")!;
   const project = projects.find((p) => p.path === projectPath)!;
   const wanted = prefill?.profile_file || query.get("profile") || "profile.yaml";
-  const profile = project.profiles.find((p) => p.file === wanted) || project.profiles[0];
+  const voiceFirst = !!mode && VOICE_ONLY.includes(mode) && !prefill && !query.get("profile");
+  const profile = (voiceFirst && project.profiles.find((p) => p.mode === "voice" && p.ok))
+    || project.profiles.find((p) => p.file === wanted) || project.profiles[0];
   const f: Form = {
     command: "run", project: project.path, profile: profile.file,
     scenarios: new Set(profile.scenarios.filter((s) => s.in_mode).map((s) => s.id)),
     options: {}, bugs: new Set(splitBugs(defaultsOf(profile, offline).bugs)),
     offline, model, speech: "local", stt_model: "base.en", stt_check_model: "small.en", repeats: "", show_pii: false, judges: true, safety: true,
-    start_agent: true, planted_bug: "", conditions: "as_written",
+    start_agent: true, planted_bug: "", conditions: (mode && DEFAULT_CONDITIONS[mode]) || "as_written",
   };
   if (prefill) {
     f.offline = !!prefill.offline;

@@ -14,7 +14,7 @@ const GATE: Row[] = [
   ["latency_p95_ms", "Slow answer time, p95 (ms)", "95% of answers must come within this. Voice runs only. Production agents: about 1500."],
   ["repeats", "Repeats per scenario", "Each scenario is run this many times: agents are not deterministic."],
   ["pass_k_required", "Repeats a critical scenario must pass", "Default: all of them (pass^k)."],
-  ["min_coverage", "Minimum verified share (0 to 1)", "Calls that end PASS or FAIL (not error / not verified) out of all planned. Below it: NO-GO, not enough evidence.", 0.05],
+  ["min_coverage", "Minimum verified share (0 to 1)", "Calls that end PASS or FAIL (not error / not verified) out of all planned. Below it: “Not enough evidence”.", 0.05],
   ["judge_min_labels", "Labelled calls needed per judge item", "Calls you labelled for an item before the judges can be trusted on it. More labels, more trustworthy."],
   ["judge_min_fails", "Of those, failures needed (and as many passes)", "So the judges are tested on real problems, not only on good calls. Bug-switch runs give you failures to label."],
   ["judge_min_tpr", "Real failures the judges must catch (0 to 1)", "Of the calls you labelled Fail, the share the judges failed too. Below it, the item only gives an opinion.", 0.05],
@@ -98,7 +98,7 @@ export function TestSettingsTab({ detail, reload }: TabProps) {
   );
   return (
     <Card>
-      <Block title="Release gate" sub={`What GO means for this agent. An empty field uses ${detail.extends ? "the shared setting or " : ""}Vocto's default (shown in grey).`}>
+      <Block title="Release gate" sub={`What “Ready” means for this agent. An empty field uses ${detail.extends ? "the shared setting or " : ""}Vocto's default (shown in grey).`}>
         {rows("thresholds", GATE)}
       </Block>
       <Block title="Limits" sub="Safety and cost caps for each run.">
@@ -127,7 +127,7 @@ export function TestSettingsTab({ detail, reload }: TabProps) {
           </Table>
         </div>
       </Block>
-      <Block title="Regression gate" sub="Every run is compared with the agent's baseline (Results › Set as baseline). Each change for the worse is listed on the run's report; the ones with Blocks on also turn GO into NO-GO. With 3 repeats, small timing and score changes are mostly noise, so only new failures block unless you switch more on. Runs made under different conditions are compared but never blocked.">
+      <Block title="Regression gate" sub="Every run is compared with the agent's baseline (Results › Set as baseline). Each change for the worse is listed on the run's report; the ones with Blocks on also turn “Ready” into “Not ready”. With 3 repeats, small timing and score changes are mostly noise, so only new failures block unless you switch more on. Runs made under different conditions are compared but never blocked.">
         <label><Switch id="gate-on" checked={gateEnabled} label="Compare runs with the baseline" onChange={(v) => {
           const all = { ...asObj(d.draft.regression) } as Obj;
           if (v) delete all.enabled; else all.enabled = false;

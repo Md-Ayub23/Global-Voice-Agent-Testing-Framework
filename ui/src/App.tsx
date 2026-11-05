@@ -22,6 +22,9 @@ import { LoadTestPage } from "./pages/LoadTest";
 import { MonitorPageView, type MonitorTab } from "./pages/Monitor";
 import { MonitorCallPage } from "./pages/MonitorCall";
 import { NewRun } from "./pages/NewRun";
+import { MODE_IDS, ModePage, TestModesPage } from "./pages/TestModes";
+import type { TestModeId } from "./lib/types";
+import { PrintReport } from "./pages/PrintReport";
 import { ProjectOverviewPage } from "./pages/ProjectOverview";
 import { ProjectSetup, SETUP_ALIASES, SETUP_TABS, setupSection, type SetupTab } from "./pages/ProjectSetup";
 import { navigate } from "./lib/router";
@@ -43,12 +46,16 @@ const ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), Page][] = [
 ];
 const PROJECT_ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), ProjectPage][] = [
   [new RegExp(`^/p/${K}/?$`), "overview", (p) => <ProjectOverviewPage project={p} />],
-  [new RegExp(`^/p/${K}/new$`), "new", (p, _m, q) => <NewRun project={p} query={q} />],
+  [new RegExp(`^/p/${K}/test$`), "modes", (p) => <TestModesPage project={p} />],
+  [new RegExp(`^/p/${K}/test/(${MODE_IDS.join("|")})(/reports)?$`), "modes", (p, m, q) =>
+    <ModePage project={p} mode={m[2] as TestModeId} tab={m[3] ? "reports" : "run"} query={q} />],
+  [new RegExp(`^/p/${K}/new$`), "modes", (p, _m, q) => <NewRun project={p} query={q} />],
   [new RegExp(`^/p/${K}/live(?:/(j-[\\w-]+))?$`), "results", (p, m) => <Live project={p} jobId={m[2] || null} />],
-  [new RegExp(`^/p/${K}/load$`), "load", (p, _m, q) => <LoadTestPage project={p} query={q} />],
+  [new RegExp(`^/p/${K}/load$`), "modes", (p, _m, q) => <LoadTestPage project={p} query={q} />],
   [new RegExp(`^/p/${K}/runs$`), "results", (p) => <History project={p} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)$`), "results", (p, m) => <RunReport project={p} runId={m[2]} />],
-  [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/calls/(t-[\\w-]+)$`), "results", (p, m) => <CallPage project={p} runId={m[2]} testId={m[3]} />],
+  [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/print$`), "results", (p, m) => <PrintReport project={p} runId={m[2]} />],
+  [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/calls/(t-[\\w-]+)$`), "results", (p, m, q) => <CallPage project={p} runId={m[2]} testId={m[3]} at={q.get("at") != null ? Number(q.get("at")) : null} />],
   [new RegExp(`^/p/${K}/judges$`), "judges", (p) => <JudgesPageView project={p} />],
   [new RegExp(`^/p/${K}/compare$`), "compare", (p, _m, q) => <ComparePage project={p} query={q} />],
   [new RegExp(`^/p/${K}/labels$`), "judges", (p) => <Labels project={p} />],

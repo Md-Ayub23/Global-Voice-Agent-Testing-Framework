@@ -14,10 +14,10 @@ import type { AlertTarget, CiFile, OpsPage } from "../../lib/types";
 import { asList, asObj, useDraft, type TabProps } from "./common";
 
 const EVENT_WORDS: Record<string, [string, string]> = {
-  no_go: ["NO-GO", "The release is blocked."],
+  no_go: ["Not ready", "The release is blocked."],
   regression: ["Worse than the baseline", "Any new failure or change for the worse, even one that doesn't block."],
   insufficient: ["Not enough evidence", "Too few calls could be verified (usually the test setup, not the agent)."],
-  recovered: ["Back to GO", "A GO after the agent's last run was not GO."],
+  recovered: ["Ready again", "Ready after the agent's last run was not."],
   monitor: ["Real-call alert", "A rule on the agent's real calls was broken (Quality › Real calls › Settings)."],
   monitor_recovered: ["Real calls back to normal", "Every real-call alert has cleared."],
 };
@@ -154,7 +154,7 @@ function CiCard({ ops, projectKey, file }: { ops: OpsPage; projectKey: string; f
     jenkins: "Secret text credentials, with the ids shown in the file" }[o.provider];
   return (
     <Card>
-      <Block icon="plug" title="CI file" sub="Runs this agent's tests on every pull request and push. NO-GO or not enough evidence fails the build, and the report and run are kept with it. Runs are compared with the baseline when one is committed with the agent's folder.">
+      <Block icon="plug" title="CI file" sub="Runs this agent's tests on every pull request and push. “Not ready” or “Not enough evidence” fails the build, and the report and run are kept with it. Runs are compared with the baseline when one is committed with the agent's folder.">
         <Seg id="ci-provider" value={o.provider} onChange={(provider) => setO({ ...o, provider })}
           options={Object.entries(ops.providers).map(([value, label]) => ({ value, label }))} />
         <Grid cols={3}>

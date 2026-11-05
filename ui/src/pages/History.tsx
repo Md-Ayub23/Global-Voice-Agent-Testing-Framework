@@ -11,34 +11,37 @@ import { ago, cx, fmtDate, fmtMs, money } from "../lib/format";
 import { navigate } from "../lib/router";
 import { SHAPE_LABEL } from "../lib/load";
 import { modeLabel, projectHref, projectOfJob, runHref } from "../lib/links";
-import type { BaselinePage, ExitCheckRecord, Project, RunSummary } from "../lib/types";
+import { decisionTitle } from "../lib/status";
+import { MODE_ICON, modeTitle, runLabel } from "../lib/modes";
+import type { BaselinePage, ExitCheckRecord, Project, RunSummary, TestModeId } from "../lib/types";
 
-type Filter = "all" | "GO" | "NO_GO" | "NO_GO_INSUFFICIENT_EVIDENCE" | "none" | "text" | "voice" | "health" | "load";
+type Filter = "all" | "GO" | "NO_GO" | "NO_GO_INSUFFICIENT_EVIDENCE" | "none" | "text" | "voice" | "health";
 const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "All" }, { value: "GO", label: "GO" }, { value: "NO_GO", label: "NO-GO" },
-  { value: "NO_GO_INSUFFICIENT_EVIDENCE", label: "Not enough evidence" }, { value: "none", label: "No decision" },
-  { value: "text", label: "Text" }, { value: "voice", label: "Voice" }, { value: "health", label: "Health checks" }, { value: "load", label: "Load tests" },
+  { value: "all", label: "All" }, { value: "GO", label: "Ready" }, { value: "NO_GO", label: "Not ready" },
+  { value: "NO_GO_INSUFFICIENT_EVIDENCE", label: "Not enough evidence" }, { value: "none", label: "No result" },
+  { value: "text", label: "Text" }, { value: "voice", label: "Voice" }, { value: "health", label: "Health checks" },
 ];
-interface Saved { filter: Filter; q: string; tab: "runs" | "exit" }
+interface Saved { filter: Filter; q: string; tab: "runs" | "exit"; mode: string }
 const KEY = "vatf-history";
 
 function restore(): Saved {
-  const base: Saved = { filter: "all", q: "", tab: "runs" };
+  const base: Saved = { filter: "all", q: "", tab: "runs", mode: "" };
   try { return { ...base, ...JSON.parse(sessionStorage.getItem(KEY) || "{}") }; } catch { return base; }
 }
 
-function matches(r: RunSummary, filter: Filter, q: string) {
+function matches(r: RunSummary, filter: Filter, q: string, mode: string) {
+  if (mode && (r.test_mode || "functional") !== mode) return false;
   if (filter === "none" && r.decision) return false;
   if ((filter === "GO" || filter === "NO_GO" || filter === "NO_GO_INSUFFICIENT_EVIDENCE") && r.decision !== filter) return false;
   if ((filter === "text" || filter === "voice") && r.mode !== filter) return false;
   if (filter === "health" && r.trigger !== "health") return false;
-  if (filter === "load" && r.kind !== "load") return false;
-  if (q && ![r.run_id, r.agent_options?.bugs, r.mode, r.decision, r.offline ? "dry run" : "", r.trigger, r.kind === "load" ? "load test" : ""].join(" ").toLowerCase().includes(q)) return false;
+  if (q && ![r.run_id, r.agent_options?.bugs, r.mode, r.decision, decisionTitle(r.decision), modeTitle(r.test_mode), r.offline ? "dry run" : "", r.trigger, r.kind === "load" ? "load test" : ""].join(" ").toLowerCase().includes(q)) return false;
   return true;
 }
 
-export function History({ project }: { project: Project }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Results" }]);
+// `mode` set: the Reports tab of one test mode (only its runs, no baseline card or exit checks).
+export function History({ project, mode }: { project: Project; mode?: TestModeId }) {
+  useCrumbs(mode ? null : [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Results" }]);
   const { activeJob, projects } = useApp();
   const live = activeJob && activeJob.status === "running" && projectOfJob(activeJob, projects)?.key === project.key ? activeJob : null;
   const { data, error } = useLoad(() => Promise.all([
@@ -57,13 +60,15 @@ export function History({ project }: { project: Project }) {
   if (!data) return <Skeleton />;
   const [runs, checks] = data;
   const q = st.q.trim().toLowerCase();
-  const list = runs.filter((r) => matches(r, st.filter, q));
+  const modeFilter = mode || st.mode;
+  const list = runs.filter((r) => matches(r, st.filter, q, modeFilter));
+  const modesSeen = [...new Set(runs.map((r) => r.test_mode || "functional"))];
   const baselineIds = new Set((bases || []).map((b) => b?.baseline?.run_id).filter(Boolean) as string[]);
 
   return (
     <>
-      <PageHead title="Results" sub={<>Every test run of <b className="text-ink">{project.name}</b> and its release decision, newest first.</>} />
-      {live && (
+      {!mode && <PageHead title="Results" sub={<>Every test run of <b className="text-ink">{project.name}</b> and its release readiness, newest first.</>} />}
+      {live && !mode && (
         <a href={projectHref(project.key, `/live/${live.id}`)} id="live-card"
           className="group flex items-center gap-4 mb-5 p-4 rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-accent-soft/50 hover:bg-accent-soft hover:no-underline text-ink transition-colors animate-view-in">
           <span className="size-10 rounded-[10px] grid place-items-center bg-accent text-white flex-none"><Icon name="wave" size={20} /></span>
@@ -74,14 +79,20 @@ export function History({ project }: { project: Project }) {
           <span className="text-accent-ink font-semibold text-[13px] inline-flex items-center gap-1">Watch live <Icon name="arrow" size={15} className="transition-transform group-hover:translate-x-0.5" /></span>
         </a>
       )}
-      <BaselineCard project={project} pages={bases} reload={reloadBases} />
-      <Tabs value={st.tab} onChange={(tab) => setSt({ ...st, tab })}
-        tabs={[{ value: "runs", label: `Runs (${runs.length})` }, ...(checks.length || project.example ? [{ value: "exit" as const, label: `Exit checks (${checks.length})` }] : [])]} />
+      {(!mode || mode === "regression") && <BaselineCard project={project} pages={bases} reload={reloadBases} />}
+      {!mode && <Tabs value={st.tab} onChange={(tab) => setSt({ ...st, tab })}
+        tabs={[{ value: "runs", label: `Runs (${runs.length})` }, ...(checks.length || project.example ? [{ value: "exit" as const, label: `Exit checks (${checks.length})` }] : [])]} />}
 
-      {st.tab === "runs" ? (
+      {st.tab === "runs" || mode ? (
         <div key="runs" className="animate-view-in">
           <div className="flex flex-wrap items-center gap-3 mb-3.5">
             <Seg id="filters" value={st.filter} options={FILTERS} onChange={(filter) => setSt({ ...st, filter })} />
+            {!mode && (
+              <select id="mode-filter" aria-label="Test mode" className={cx(inputCls, "w-auto min-w-[170px]")} value={st.mode} onChange={(e) => setSt({ ...st, mode: e.target.value })}>
+                <option value="">All test modes</option>
+                {modesSeen.map((m) => <option key={m} value={m}>{modeTitle(m)}</option>)}
+              </select>
+            )}
             <span className="flex-1" />
             <div className="relative w-full sm:w-auto sm:min-w-[260px]">
               <Icon name="search" className="absolute left-[11px] top-2.5 text-muted pointer-events-none" />
@@ -91,12 +102,12 @@ export function History({ project }: { project: Project }) {
           </div>
           <Card flush>
             {list.length ? (
-              <Table head={["Decision", "Run", "Settings", "Calls", "Pass / fail", "Response p50", "Cost", "Started"]}>
+              <Table head={["Readiness", "Run", "Settings", "Calls", "Pass / fail", "Response p50", "Cost", "Started"]}>
                 {list.map((r) => (
                   <tr key={r.run_id} className={rowLink} data-href={runHref(r)} onClick={() => navigate(runHref(r))}>
-                    <td><Badge status={r.decision || r.status} /></td>
+                    <td><Badge status={r.decision || r.status} label={runLabel(r)} /></td>
                     <td>
-                      <b className="inline-flex items-center gap-1.5">{modeLabel(r.mode)} {r.kind === "load" ? "load test" : "run"}{baselineIds.has(r.run_id) && <span className="inline-flex items-center gap-1 text-accent-ink text-[11.5px] font-semibold" title="The baseline: every new run is compared with it"><BaselineIcon />baseline</span>}</b>
+                      <b className="inline-flex items-center gap-1.5"><Icon name={MODE_ICON[r.test_mode || "functional"] || "play"} size={14} className="text-muted" />{modeTitle(r.test_mode)} · {modeLabel(r.mode)}{baselineIds.has(r.run_id) && <span className="inline-flex items-center gap-1 text-accent-ink text-[11.5px] font-semibold" title="The baseline: every new run is compared with it"><BaselineIcon />baseline</span>}</b>
                       <div className="text-muted text-[11.5px] font-mono">{r.run_id}</div>
                       {r.vs_baseline && (r.vs_baseline.regressions + r.vs_baseline.worse > 0) && (
                         <div className="text-[11.5px] text-bad">{r.vs_baseline.regressions ? `${r.vs_baseline.regressions} new failure(s)` : ""}{r.vs_baseline.regressions && r.vs_baseline.worse ? " · " : ""}{r.vs_baseline.worse ? `${r.vs_baseline.worse} worse` : ""} vs baseline</div>
@@ -117,8 +128,8 @@ export function History({ project }: { project: Project }) {
               </Table>
             ) : (
               <EmptyState icon="search" title={runs.length ? "No runs match" : "No runs yet"}
-                text={runs.length ? "Try another filter." : "Start the first one from Run tests."}
-                action={runs.length ? undefined : <Button variant="primary" icon="play" href={projectHref(project.key, "/new")}>Run tests</Button>} />
+                text={runs.length ? "Try another filter." : mode ? "Start one from the Run tab." : "Start the first one from Test modes."}
+                action={runs.length || mode ? undefined : <Button variant="primary" icon="play" href={projectHref(project.key, "/test")}>Test modes</Button>} />
             )}
           </Card>
         </div>
@@ -145,7 +156,7 @@ export function History({ project }: { project: Project }) {
             <Card>
               <EmptyState icon="shield" title="No exit checks yet"
                 text="An exit check runs the clean agent and each bug switch, and passes when every bug is caught."
-                action={<Button href={projectHref(project.key, "/new")}>Set one up</Button>} />
+                action={<Button href={projectHref(project.key, "/test/full")}>Set one up</Button>} />
             </Card>
           )}
         </div>

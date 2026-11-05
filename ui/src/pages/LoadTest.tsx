@@ -1,4 +1,4 @@
-// Test › Load test (Phase 7): many test calls at once, in a shape the agent's owner picks, with a GO / NO-GO
+// Test › Load test (Phase 7): many test calls at once, in a shape the agent's owner picks, with a release readiness
 // for that load. The settings are the profile's `load` section (saved here); the plan chart follows the
 // form as it is edited; Start runs `vatf load` and opens the Live page.
 import { useMemo, useState, type ReactNode } from "react";
@@ -53,8 +53,10 @@ function effective(own: Obj, defaults: LoadPage["defaults"]): LoadSettings {
   return { ...defaults, ...(rest as Partial<LoadSettings>), limits: lim as unknown as LoadLimits } as LoadSettings;
 }
 
-export function LoadTestPage({ project, query }: { project: Project; query: URLSearchParams }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Load test" }]);
+// `embedded`: shown as the Run tab of Test modes › Load & capacity, under that page's own header.
+export function LoadTestPage({ project, query, embedded }: { project: Project; query: URLSearchParams; embedded?: boolean }) {
+  useCrumbs(embedded ? null : [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Load test" }]);
+  const here = embedded ? "/test/load" : "/load";
   const profiles = project.profiles;
   const wanted = query.get("file");
   const file = profiles.some((p) => p.file === wanted) ? wanted!
@@ -63,15 +65,17 @@ export function LoadTestPage({ project, query }: { project: Project; query: URLS
   const picker = profiles.length > 1 && (
     <div className="flex items-center gap-2.5 min-w-0 max-w-full">
       <span className="text-muted text-[13px] flex-none">Channel</span>
-      <Seg id="profile-file" value={file} onChange={(f) => navigate(`${projectHref(project.key, "/load")}?${qs({ file: f })}`)}
+      <Seg id="profile-file" value={file} onChange={(f) => navigate(`${projectHref(project.key, here)}?${qs({ file: f })}`)}
         options={profiles.map((p) => ({ value: p.file, label: channelLabel(p, profiles), icon: p.mode === "voice" ? "mic" : "text" }))} />
     </div>
   );
   return (
     <>
-      <PageHead title="Load test" sub={<>Many test calls to <b className="text-ink">{project.name}</b> at the same time: does it still answer fast and correctly when many people call at once?</>}>
-        {picker}
-      </PageHead>
+      {embedded ? picker && <div className="mb-4">{picker}</div> : (
+        <PageHead title="Load test" sub={<>Many test calls to <b className="text-ink">{project.name}</b> at the same time: does it still answer fast and correctly when many people call at once?</>}>
+          {picker}
+        </PageHead>
+      )}
       {error ? <Notice tone="bad">{error.message}</Notice> : !data ? <Skeleton /> : <LoadForm key={file} page={data} project={project} reload={reload} />}
     </>
   );
@@ -162,7 +166,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
           <Notice tone="warn" icon="tool">
             The agent's tool calls go through Vocto's tool gateway, but the agent isn't told the call's test id, so with many calls at once Vocto can't tell which call made which tool call.
             Have the agent pass the <code>{page.agent.test_id_header}</code> header (or a <code>test_id</code> field) on its tool calls, and set the test id to go in the session start
-            (Set up › Connection). Until then tool checks in a load test give "not enough evidence", never a false NO-GO.
+            (Set up › Connection). Until then tool checks in a load test give "not enough evidence", never a false “Not ready”.
           </Notice>
         )}
 
@@ -256,7 +260,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
         </Card>
 
         <Card>
-          <CardHead level={2} title="4 · Limits" sub="Every stage runs at or below the target, so every stage must meet these. A stage that breaks one gives NO-GO." />
+          <CardHead level={2} title="4 · Limits" sub="Every stage runs at or below the target, so every stage must meet these. A stage that breaks one makes the run “Not ready”." />
           <Grid>
             <Field label="Failed calls per stage, at most (%)" hint="Couldn't connect, agent error, stopped answering, ran too long.">
               <Num id="load-max_failed_pct" value={ownLimits.max_failed_pct as number} placeholder={`${page.defaults.limits.max_failed_pct} (default)`} min={0} step={0.5}
@@ -299,7 +303,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                 );
               })}
             </Table>
-            <div className="text-muted text-[12px] mt-2">Off: a warning on the report. On: also NO-GO. They compare two parts of one test, so a small agent with few calls gives noisy numbers.</div>
+            <div className="text-muted text-[12px] mt-2">Off: a warning on the report. On: also “Not ready”. They compare two parts of one test, so a small agent with few calls gives noisy numbers.</div>
           </div>
         </Card>
         <Problems items={problems} />

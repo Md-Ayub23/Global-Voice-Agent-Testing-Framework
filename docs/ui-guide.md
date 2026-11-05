@@ -2,7 +2,7 @@
 
 `uv run python -m vatf ui` (or `uv run vatf ui` where the launcher isn't blocked) starts a small web app on your computer and opens it in your browser
 (http://127.0.0.1:8765). Vocto is the product name; the terminal command is still `vatf`. Everything the terminal commands do can be done from it: pick what to
-test, start a run, watch every call live, and read the GO / NO-GO report. Keep the terminal
+test, start a run, watch every call live, and read the release readiness report. Keep the terminal
 window open while you use it; press Ctrl+C there to close the dashboard.
 
 ```powershell
@@ -22,7 +22,7 @@ to another agent. Pages that belong together are tabs of one page, so nothing is
 
 | Page | What it is for |
 |---|---|
-| **Home** | Every agent at a glance: *Needs attention* (agents whose latest run was NO-GO or not enough evidence, and your agents not ready to run), how many agents and which kinds, test runs, the release GO rate, runs per day for 14 days, each agent's last result and the latest runs. Runs with bug switches on are bug tests: listed but left out of the GO rate. |
+| **Home** | Every agent at a glance: *Needs attention* (agents whose latest run was not ready or had not enough evidence, and your agents not ready to run), how many agents and which kinds, test runs, the ready rate, runs per day for 14 days, each agent's last result and the latest runs. Runs with bug switches on are bug tests: listed but left out of the ready rate. |
 | **Agents** | Your agents and Vocto's practice agents as cards. *New agent* asks for the agent's name, industry, voice or text, and (optionally) its address. |
 | **Settings** | The Anthropic API key, the speech models, **Secrets** (every `${NAME}` your agents use; kept on this computer only) and a link to each agent's pass rules. |
 
@@ -30,15 +30,15 @@ Inside an agent:
 
 | Group | Page | What it is for |
 |---|---|---|
-| | **Overview** | The agent, its latest release decision, a set-up checklist with a link to each step, its numbers and recent runs. |
+| | **Overview** | The agent, **Release readiness by test mode** (the latest result of each mode and its top finding), a set-up checklist with a link to each step, its numbers and recent runs. |
 | 1 Set up | **Connection** | Who the agent is and how Vocto reaches it (voice format, Twilio Media Streams or Vocto's protocol, *Starting the agent* and its planted bugs). |
 | | **Tools & data** | Three tabs: **Tools** (the APIs the agent calls), **Database** (read-only access to check what really got saved) and **Logs**. |
 | | **Test cases** | The scenarios as a list and forms, and *Write tests for me* (Claude drafts a plan from the agent's instructions). *Advanced* opens the raw file editor. |
 | | **Callers** | Personas (who calls): accent, voice, speed, loudness and behaviour (cuts in, says "mm-hm", pauses mid-sentence, says um, goes quiet once), and *Add from library*. A test's own **Audio** block (Test cases) sets its noise and phone line (narrowband, lost packets). See [phase5-guide.md](phase5-guide.md). |
 | | **Safety tests** | How hard to push, which attacks, your own questions, planted secrets. |
-| | **Pass rules** | What a GO needs for this agent: p50 / p95 limits, repeats, coverage, budget, and **Call quality**: each metric's good and warn values and a *Blocks* switch. |
-| 2 Test | **Run tests** | Choose the channel, scenarios, caller (Claude or a free dry run) and repeats, then *Start run*; or an exit check. *Include safety tests* adds the attack calls. Voice runs can lay **Caller conditions** over every test: As written, Phone line, Noisy or Hard. |
-| | **Results** | A run in progress is pinned on top (*Watch live* shows the calls as they happen; for voice, *Listen live* plays them). Below, every run, filterable, and an *Exit checks* tab. A run opens its page: the decision and why, scorecard and coverage, then tabs for **Calls**, **Reliability**, **Response times**, **Call quality** (metric tiles with bands, results by caller condition), **AI judges**, **Safety** and **Run setup**. A call shows its recording and conversation, with tabs beside it for **Checks**, **AI judges**, **Timing**, **Quality**, **Database** and **Evidence**. |
+| | **Pass rules** | What *Ready* needs for this agent: p50 / p95 limits, repeats, coverage, budget, and **Call quality**: each metric's good and warn values and a *Blocks* switch. |
+| 2 Test | **Test modes** | Pick what to find out: the **Full check** (before a release) or one thing in depth: Functional, Timing & turns, Speech & accents, Safety & security, Resilience, Load & capacity, Regression, Real calls. Each mode has a **Run** tab (the form for that kind of testing: channel, test cases, caller, conditions, repeats) and a **Reports** tab (only its runs). See [test-modes-guide.md](test-modes-guide.md). The old *Run tests* and *Load test* addresses still work. |
+| | **Results** | A run in progress is pinned on top (*Watch live* shows the calls as they happen; for voice, *Listen live* plays them). Below, every run, filterable, and an *Exit checks* tab. A run opens its **release readiness report**: the verdict in plain words, an executive summary, a scorecard by area (no overall score), then tabs for **Findings** (each problem once, how often, who to look at, and quotes from the calls as proof; a quote opens the call at that moment), **Numbers & coverage**, **Calls**, **Reliability**, **Response times**, **Call quality** (metric tiles with bands, results by caller condition), **AI judges**, **Safety** and **Run setup**. *PDF report* opens the whole report laid out for paper (*Save as PDF*); *CSV* downloads the verdict, scorecard, findings and numbers for a spreadsheet. A call shows its recording and conversation, with tabs beside it for **Checks**, **AI judges**, **Timing**, **Quality**, **Database** and **Evidence**. |
 | 3 Quality | **AI judges** | Three tabs: **Scores** (what the judges score, whether each item is trusted to block yet, *Teach the judges*), **Review calls** (label calls, the most useful first, without seeing the judges' answers) and **Judge settings** (on/off, the agent's policy, items, models). See [phase3-guide.md](phase3-guide.md). |
 
 Each set-up page has a *Next* button, so a new agent can be set up in order. Addresses from before this layout

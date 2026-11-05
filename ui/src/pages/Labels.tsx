@@ -14,6 +14,7 @@ import { ago, cx, shortScenario } from "../lib/format";
 import { JUDGE_NAME, judgesApi, modelName, VOTE_LABEL } from "../lib/judges";
 import { projectHref } from "../lib/links";
 import { navigate } from "../lib/router";
+import { decisionTitle } from "../lib/status";
 import type { CallDetail, CallLabels, Check, Project, QueueItem, Vote } from "../lib/types";
 
 const CHOICES: { v: Vote; icon: "thumbs-up" | "thumbs-down" | "minus"; on: string }[] = [
@@ -51,7 +52,7 @@ export function Labels({ project, runId, testId }: { project: Project; runId?: s
       {!queue.length && !current ? (
         <Card><EmptyState icon="check-circle" title="Nothing waiting for a label"
           text="Every judged call has your labels. New runs with the AI judges on bring new calls here."
-          action={<Button variant="primary" icon="play" href={projectHref(project.key, "/new")}>Run tests</Button>} /></Card>
+          action={<Button variant="primary" icon="play" href={projectHref(project.key, "/test")}>Run tests</Button>} /></Card>
       ) : (
         <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[300px_minmax(0,1fr)]">
           <Queue project={project} queue={queue} current={current?.test_id} />
@@ -219,7 +220,7 @@ function LabelCall({ project, runId, testId, next, onSaved }: { project: Project
         <div className="flex items-center gap-2.5 mt-3 flex-wrap">
           {saved ? (
             <>
-              <span className="flex-1 text-[12.5px] text-muted">Run decision now: <b className="text-ink">{saved.decision.replace(/_/g, " ").replace("NO GO", "NO-GO")}</b></span>
+              <span className="flex-1 text-[12.5px] text-muted">Run decision now: <b className="text-ink">{decisionTitle(saved.decision)}</b></span>
               {next ? <Button id="next-call" variant="primary" icon="arrow" href={projectHref(project.key, `/labels/${next.run_id}/${next.test_id}`)}>Next call</Button>
                 : <Button variant="primary" icon="scale" href={projectHref(project.key, "/judges")}>See calibration</Button>}
             </>

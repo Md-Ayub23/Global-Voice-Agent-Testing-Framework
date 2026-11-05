@@ -4,8 +4,10 @@ Vocto is the product name; in the terminal its command (and Python package) is `
 
 A local-first framework that tests any voice agent as a black box. It simulates
 callers, watches the voice, the tool calls and the backend state, scores each
-call with hard checks and calibrated AI judges, and gives a GO / NO-GO release
-decision.
+call with hard checks and calibrated AI judges, and writes a release readiness
+report in plain words (Ready / Not ready / Not enough evidence, with the proof). Each agent
+can be tested in separate test modes (Full check, Functional, Timing, Speech, Safety,
+Resilience, Load, Regression, Real calls): see [docs/test-modes-guide.md](docs/test-modes-guide.md).
 
 **Status: Phase 8 (real-call monitoring).** The framework runs real test calls against the
 clinic example agent, in text or by voice: the simulated caller speaks (Piper),

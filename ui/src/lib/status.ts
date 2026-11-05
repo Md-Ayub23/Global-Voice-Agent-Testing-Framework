@@ -5,9 +5,9 @@ export type Tone = "good" | "bad" | "warn" | "neutral" | "run";
 export type StatusIcon = "check" | "x" | "alert" | "help" | "minus" | "stop" | null;
 
 const STATUS: Record<string, [Tone, StatusIcon, string]> = {
-  GO: ["good", "check", "GO"],
-  NO_GO: ["bad", "x", "NO-GO"],
-  NO_GO_INSUFFICIENT_EVIDENCE: ["warn", "alert", "NO-GO · not enough evidence"],
+  GO: ["good", "check", "Ready"],
+  NO_GO: ["bad", "x", "Not ready"],
+  NO_GO_INSUFFICIENT_EVIDENCE: ["warn", "alert", "Not enough evidence"],
   PASS: ["good", "check", "Pass"],
   FAIL: ["bad", "x", "Fail"],
   ERROR: ["warn", "alert", "Vocto error"],
@@ -29,5 +29,6 @@ export function statusInfo(s: string | null | undefined): [Tone, StatusIcon, str
 }
 export const tone = (s: string | null | undefined): Tone => statusInfo(s)[0];
 export const statusLabel = (s: string | null | undefined) => statusInfo(s)[2];
+// The release decision in plain words (the codes GO / NO_GO stay in files, CI and the API).
 export const decisionTitle = (d: string | null | undefined) =>
-  ({ GO: "GO", NO_GO: "NO-GO", NO_GO_INSUFFICIENT_EVIDENCE: "NO-GO" } as Record<string, string>)[d || ""] || "—";
+  ({ GO: "Ready", NO_GO: "Not ready", NO_GO_INSUFFICIENT_EVIDENCE: "Not enough evidence" } as Record<string, string>)[d || ""] || "—";

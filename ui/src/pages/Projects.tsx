@@ -40,7 +40,7 @@ function ProjectCard({ p }: { p: Row }) {
       </div>
       <div className="flex gap-2">
         <Button size="sm" icon="overview" href={projectHref(p.key)}>Open</Button>
-        <Button size="sm" icon="play" href={projectHref(p.key, "/new")}>Run tests</Button>
+        <Button size="sm" icon="play" href={projectHref(p.key, "/test")}>Run tests</Button>
         <Button size="sm" variant="ghost" icon="settings" href={projectHref(p.key, "/setup/connection")}>Set up</Button>
       </div>
     </Card>
@@ -167,7 +167,7 @@ export function NewProject() {
               ["db", "Backend & database", "Read-only access, so Vocto checks what really got saved."],
               ["logs", "Logs", "Optional: the agent's own log lines, kept with each call."],
               ["plan", "Test plan", "Scenarios (what callers try) and personas (who calls)."],
-              ["play", "Run tests", "Get a GO or NO-GO release decision with the evidence."],
+              ["play", "Run tests", "Get a release readiness report with the proof."],
             ] as const).map(([icon, title, text]) => (
               <li key={title} className="flex gap-3 items-start">
                 <span className="size-8 rounded-lg grid place-items-center bg-surface text-accent-ink border border-line flex-none"><Icon name={icon} size={15} /></span>

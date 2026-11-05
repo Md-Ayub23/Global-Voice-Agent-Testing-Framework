@@ -37,7 +37,7 @@ export function Live({ project, jobId }: { project: Project; jobId: string | nul
           <Notice className="mb-4" icon="activity">A run of <b>{other.name}</b> is in progress. <a href={projectHref(other.key, `/live/${activeJob.id}`)}>Watch it</a></Notice>
         )}
         <Card><EmptyState title="Nothing is running" text="Start a run and it appears here live." icon="wave"
-          action={<Button href={projectHref(project.key, "/new")} variant="primary" icon="play">Run tests</Button>} /></Card>
+          action={<Button href={projectHref(project.key, "/test")} variant="primary" icon="play">Run tests</Button>} /></Card>
       </>
     );
   }
@@ -459,7 +459,7 @@ function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean 
         ) : undefined}
         title={job.status !== "finished" ? "Exit check did not finish" : passed ? "Exit check PASSED" : "Exit check NOT PASSED"}>
         <div className="text-ink-2">
-          {passed ? `The clean agent got GO, and every ${sum?.planted ? "planted bug" : "bug switch"} was caught in every repeat.`
+          {passed ? `The clean agent was Ready, and every ${sum?.planted ? "planted bug" : "bug switch"} was caught in every repeat.`
             : sum?.error ? `The agent could not be started: ${sum.error}`
             : job.status !== "finished" ? "It was stopped or Vocto failed; the activity log below says why." : "At least one row below missed. Open its run to see why."}
           {!!sum?.skipped?.length && (
@@ -479,8 +479,8 @@ function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean 
   }
   return (
     <Hero tone={heroToneOf(d.decision)} className="mb-4" eyebrow="Release decision"
-      title={<>{decisionTitle(d.decision)}{d.decision === "NO_GO_INSUFFICIENT_EVIDENCE" && <span className="text-lg"> · not enough evidence</span>}</>}
-      actions={<><Button href={pl(job.kind === "load" ? `/load?file=${encodeURIComponent(job.request?.profile || "profile.yaml")}` : `/new?from=${runId}`)} icon="refresh">Run again</Button><Button href={runHref({ run_id: runId })} variant="primary" icon="file">Open report</Button></>}
+      title={<>{decisionTitle(d.decision)}</>}
+      actions={<><Button href={pl(job.kind === "load" ? `/test/load?file=${encodeURIComponent(job.request?.profile || "profile.yaml")}` : job.request?.test_mode ? `/test/${job.request.test_mode}?from=${runId}` : `/new?from=${runId}`)} icon="refresh">Run again</Button><Button href={runHref({ run_id: runId })} variant="primary" icon="file">Open report</Button></>}
       reasons={d.reasons.map((r) => r.message)} />
   );
 }

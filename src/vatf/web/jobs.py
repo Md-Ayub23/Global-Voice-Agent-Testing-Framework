@@ -20,6 +20,7 @@ from typing import Any
 
 from ..audio.tap import PORT_ENV, unpack
 from ..conditions import PRESETS
+from ..modes import CHOICES as MODE_CHOICES
 from ..evidence import utc_now
 from ..speech import ENGINES
 from ..util import read_json, write_json
@@ -221,6 +222,11 @@ class JobManager:
                     args += [flag, req[key]]
         if req.get("safety"):
             args.append("--safety")
+        test_mode = req.get("test_mode")
+        if test_mode and kind == "run":
+            if test_mode not in MODE_CHOICES:
+                raise JobError(f"test mode must be one of {', '.join(MODE_CHOICES)}")
+            args += ["--test-mode", test_mode]
         cond = req.get("conditions") or "as_written"
         if cond not in PRESETS:
             raise JobError(f"caller conditions must be one of {', '.join(PRESETS)}")

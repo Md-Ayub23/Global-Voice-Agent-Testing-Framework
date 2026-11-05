@@ -188,7 +188,16 @@ def make_handler(app: App):
 
     @route("GET", r"/api/runs/(r-[\w-]+)")
     def get_run(h, q, run_id):
-        return data.run_detail(app.runs, run_id, app.active_runs())
+        return data.run_detail(app.runs, run_id, app.active_runs(), root=app.root)
+
+    @route("GET", r"/api/runs/(r-[\w-]+)/export.csv")
+    def get_run_csv(h, q, run_id):
+        from ..readiness import to_csv
+        if run_id in app.active_runs():
+            raise ValueError("this run is still going; export it when it has finished")
+        text = to_csv(data.readiness_of(app.root, app.runs, run_id))
+        h.send_bytes(("\ufeff" + text).encode("utf-8"), "text/csv; charset=utf-8", f"vocto-{run_id}.csv")
+        return None
 
     @route("GET", r"/api/runs/(r-[\w-]+)/calls/(t-[\w-]+)")
     def get_call(h, q, run_id, test_id):
@@ -368,6 +377,16 @@ def make_handler(app: App):
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(raw)))
             self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(raw)
+
+        def send_bytes(self, raw: bytes, ctype: str, filename: str | None = None) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Cache-Control", "no-store")
+            if filename:
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.end_headers()
             self.wfile.write(raw)
 

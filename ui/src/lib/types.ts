@@ -131,7 +131,7 @@ export interface Dashboard {
 }
 
 export interface JudgeSummary { items: number; calibrated: number; labelled_calls: number; to_review: number; to_label: number; judged_runs: number; to_teach?: number }
-export interface ProjectOverview { project: Project; stats: ProjectStats; activity: DecisionDay[]; recent_runs: RunSummary[]; judges?: JudgeSummary }
+export interface ProjectOverview { project: Project; stats: ProjectStats; activity: DecisionDay[]; recent_runs: RunSummary[]; judges?: JudgeSummary; modes?: ModeCard[] }
 
 // ---- AI judges (src/vatf/web/judging.py) ----
 export type Vote = "PASS" | "FAIL" | "NOT_APPLICABLE";
@@ -210,6 +210,7 @@ export interface RunSummary {
   vs_baseline?: BaselineCounts | null;
   kind?: "run" | "load";
   load?: { shape: LoadShape; calls_at_once: number; capacity?: number | null; calls?: number; failed?: number } | null;
+  test_mode?: TestModeId | null;
 }
 
 // Phase 6: the comparison with the agent's baseline (src/vatf/compare.py).
@@ -364,6 +365,7 @@ export interface RunDetail {
   load?: LoadSummary | null;
   load_live?: LoadLive | null;
   alerts?: { events: string[]; text: string; sent: { name: string; type: string; events: string[]; sent: boolean; status?: number; error?: string }[] } | null;
+  readiness?: Readiness | { error: string } | null;
 }
 
 export interface Evidence { event: number; note?: string }
@@ -439,7 +441,7 @@ export interface ExitSummary {
 export interface Job {
   id: string;
   kind: "run" | "exit-check" | "health" | "load";
-  request: { project?: string; profile?: string; offline?: boolean };
+  request: { project?: string; profile?: string; offline?: boolean; test_mode?: string };
   command: string;
   started_at: string;
   finished_at: string | null;
@@ -597,4 +599,45 @@ export interface MonitorCallDetail {
   story: { seq: number; who: string; text: string }[];
   metric_defs: MetricDef[];
   judge_items: Record<string, string>;
+}
+
+// ---- Test modes (src/vatf/modes.py) and the release readiness report (src/vatf/readiness.py) ----
+export type TestModeId = "full" | "functional" | "timing" | "speech" | "safety" | "resilience" | "load" | "regression" | "monitor";
+export type ReadinessLevel = "ready" | "ready_with_notes" | "not_ready" | "not_enough_evidence" | "no_result";
+export type AreaStatus = "pass" | "watch" | "fail" | "not_tested";
+export interface ModeDef {
+  id: TestModeId; title: string; icon: string; kind: "run" | "load" | "compare" | "monitor"; voice_only: boolean;
+  question: string; about: string; checks: string[]; areas: string[];
+}
+export interface ModeCard extends ModeDef {
+  available: { ok: boolean; why?: string; fixable?: boolean };
+  runs: number;
+  latest: { run_id: string; at: string | null; decision: Decision; level: ReadinessLevel | null; headline: string | null; top_finding: string | null; calls: number | null } | null;
+}
+export interface ScoreRow { area: string; title: string; status: AreaStatus; status_text: string; value: string; detail: string; percent?: number | null }
+export interface Proof { test_id: string; check_id: string | null; seq: number | null; at: string | null; who: string; quote: string | null; note: string }
+export interface Finding {
+  id: string; title: string; area: string; area_title: string; kind: string;
+  status: "problem" | "needs_review" | "opinion" | "evidence"; severity: "blocker" | "major" | "minor" | "advice"; blocks: boolean;
+  what: string; expected: string; fix: string; caution: string; cause: "agent" | "setup" | "judges" | "opinion" | "evidence"; cause_text: string;
+  how_often: { calls: number; of: number; text: string };
+  tests: { id: string; title: string; calls: number }[];
+  calls: string[]; messages: string[]; proofs: Proof[];
+}
+export interface MetricLine { group: string; title: string; value: string; note: string; band: Band | null; rate?: number | null }
+export interface Readiness {
+  version: number; run_id: string; agent: string | null; channel: Mode;
+  mode: { id: TestModeId; title: string; question: string };
+  verdict: { level: ReadinessLevel; headline: string; line: string; code: Decision | null };
+  summary: string[];
+  scorecard: ScoreRow[];
+  findings: Finding[];
+  counts: { blocking: number; problems: number; to_review: number; opinions: number; evidence: number };
+  metrics: MetricLine[];
+  coverage: {
+    test_cases_run: number; test_cases_total: number; not_run: string[]; attack_calls: number; attack_kinds: string[];
+    tools_total: number; tools_used: string[]; tools_never_used: string[]; conditions: string[];
+    calls_planned: number; calls_verified: number | null;
+  };
+  method: { label: string; value: string }[];
 }

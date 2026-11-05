@@ -69,11 +69,12 @@ export function useApp(): AppState {
 }
 
 // Sets the page's breadcrumbs (and the browser tab title) whenever they change.
-export function useCrumbs(crumbs: Crumb[]) {
+// null leaves them alone (a page shown inside another page, which sets its own).
+export function useCrumbs(crumbs: Crumb[] | null) {
   const { setCrumbs } = useApp();
   const key = JSON.stringify(crumbs);
   useEffect(() => {
-    setCrumbs(JSON.parse(key));
+    if (key !== "null") setCrumbs(JSON.parse(key));
   }, [key, setCrumbs]);
 }
 

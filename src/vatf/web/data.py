@@ -20,7 +20,7 @@ from typing import Any, Mapping
 
 import yaml
 
-from .. import __version__, attacks
+from .. import __version__, attacks, modes, readiness
 from ..accents import accent_list
 from ..audio.noise import KINDS as NOISE_KINDS
 from ..conditions import preset_list
@@ -356,6 +356,7 @@ def run_summary(runs: Path, run_id: str, active_runs: set[str] = frozenset()) ->
                    if (decision or {}).get("safety") else None),
         "has_report": (folder / "report.html").exists(),
         "trigger": info.get("trigger") or "manual",
+        "test_mode": modes.of_run(info) if info else None,
         "vs_baseline": (decision or {}).get("baseline"),
         # Phase 7: load tests are listed with the other runs, marked, and kept out of the GO rate.
         "kind": "load" if info.get("kind") == "load" else "run",
@@ -400,7 +401,30 @@ def _call_brief(folder: Path) -> dict[str, Any] | None:
     return out
 
 
-def run_detail(runs: Path, run_id: str, active_runs: set[str] = frozenset()) -> dict[str, Any]:
+def readiness_of(root: Path, runs: Path, run_id: str, summary: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """The run's release readiness report (readiness.py), with the agent's test names, tools and test cases
+    when its project still loads (an old or moved project gives the report without them)."""
+    folder = _run_dir(runs, run_id)
+    info = _safe_json(folder / "run.json") or {}
+    titles: dict[str, str] = {}
+    own: list[str] = []
+    tools: list[str] = []
+    faulty: list[str] = []
+    if info.get("project"):
+        try:
+            project = _project_for(root, info)
+            mode = "voice" if is_voice(project.profile) else "text"
+            titles = {sc["id"]: sc.get("title", sc["id"]) for sc in project.scenarios}
+            own = [sc["id"] for sc in project.scenarios if not attacks.is_safety(sc)
+                   and mode in sc.get("modes", ["text", "voice"])]
+            tools = [t["name"] for t in project.profile.get("tools", [])]
+            faulty = [sc["id"] for sc in project.scenarios if modes.has_faults(sc)]
+        except Exception:  # noqa: BLE001 - the report still works from the run's own files
+            pass
+    return readiness.build(folder, summary or run_summary(runs, run_id), titles, own, tools, faulty)
+
+
+def run_detail(runs: Path, run_id: str, active_runs: set[str] = frozenset(), root: Path | None = None) -> dict[str, Any]:
     folder = _run_dir(runs, run_id)
     decision = _safe_json(folder / "decision.json")
     final_ids = {c["test_id"] for c in (decision or {}).get("calls", [])}
@@ -410,8 +434,15 @@ def run_detail(runs: Path, run_id: str, active_runs: set[str] = frozenset()) -> 
         if brief:
             brief["final"] = brief["test_id"] in final_ids if decision else None
             calls.append(brief)
-    return {"summary": run_summary(runs, run_id, active_runs), "info": _safe_json(folder / "run.json"),
-            "decision": decision, "calls": calls,
+    summary = run_summary(runs, run_id, active_runs)
+    report = None
+    if root is not None and summary["status"] != "running":
+        try:
+            report = readiness_of(root, runs, run_id, summary)
+        except Exception as e:  # noqa: BLE001 - the rest of the page still shows; say why the report is missing
+            report = {"error": f"{type(e).__name__}: {e}"}
+    return {"summary": summary, "info": _safe_json(folder / "run.json"),
+            "decision": decision, "calls": calls, "readiness": report,
             "comparison": _safe_json(folder / "comparison.json"), "alerts": _safe_json(folder / "alerts.json"),
             "load": _safe_json(folder / "load.json"), "load_live": _safe_json(folder / "load_live.json"),
             "files": {name: (folder / name).exists() for name in ("report.html", "transcript.txt", "decision.json")}}
@@ -674,11 +705,52 @@ def dashboard(root: Path, runs_dir: Path, active_runs: set[str] = frozenset(),
     }
 
 
+def mode_board(root: Path, runs_dir: Path, project: Mapping[str, Any], runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The agent's test modes (modes.py): whether each can run now, and its latest result in plain words.
+    Runs with bug switches or a planted bug are left out: they test Vocto, not the agent."""
+    profiles = [p for p in project.get("profiles", []) if p.get("ok")]
+    voice = any(p.get("mode") == "voice" for p in profiles)
+    own = [s for p in profiles for s in p.get("scenarios", []) if s.get("in_mode")]
+    safety_on = any((p.get("safety") or {}).get("enabled") for p in profiles)
+    out = []
+    for m in modes.catalog():
+        if m["voice_only"] and not voice:
+            avail = {"ok": False, "why": "Needs a voice connection: this agent is tested by text."}
+        elif m["id"] == "resilience" and not any(s.get("faults") for s in own):
+            avail = {"ok": False, "why": "No test case breaks a tool on purpose yet.", "fixable": True}
+        elif m["id"] == "safety" and not safety_on:
+            avail = {"ok": False, "why": "Safety tests are switched off for this agent.", "fixable": True}
+        elif m["kind"] == "run" and m["id"] != "safety" and not own:
+            avail = {"ok": False, "why": "No test cases yet.", "fixable": True}
+        elif not profiles:
+            avail = {"ok": False, "why": "Finish the agent's set-up first.", "fixable": True}
+        elif m["id"] == "regression" and not any(p.get("baseline") for p in profiles):
+            avail = {"ok": False, "why": "No baseline yet: open a good run and choose Set as baseline.", "fixable": True}
+        else:
+            avail = {"ok": True}
+        mine = [r for r in runs if r.get("test_mode") == m["id"] and not (r.get("agent_options") or {}).get("bugs")]
+        last = next((r for r in mine if r.get("decision")), None)
+        latest = None
+        if last:
+            try:
+                rep = readiness_of(root, runs_dir, last["run_id"], last)
+                top = next((f for f in rep["findings"] if f["status"] == "problem"), None)
+                latest = {"run_id": last["run_id"], "at": last.get("finished_at") or last.get("started_at"),
+                          "decision": last["decision"], "level": rep["verdict"]["level"],
+                          "headline": rep["verdict"]["headline"], "top_finding": top["title"] if top else None,
+                          "calls": sum((last.get("counts") or {}).values())}
+            except Exception:  # noqa: BLE001 - a broken run never hides the board
+                latest = {"run_id": last["run_id"], "at": last.get("started_at"), "decision": last["decision"],
+                          "level": None, "headline": None, "top_finding": None, "calls": None}
+        out.append({**m, "available": avail, "runs": len(mine), "latest": latest})
+    return out
+
+
 def project_overview(root: Path, runs_dir: Path, key: str, active_runs: set[str] = frozenset()) -> dict[str, Any]:
     project = project_by_key(root, key)
     runs = [r for r in with_projects(list_runs(runs_dir, active_runs), [project]) if r["project_key"] == key]
     return {"project": project, "stats": project_stats(project, runs), "activity": activity(runs, 14),
-            "recent_runs": runs[:8]}
+            "recent_runs": runs[:8], "modes": mode_board(root, runs_dir, project, runs)}
 
 
 # ---- secrets: the ${NAME} values projects refer to, kept in .env ---------------------------

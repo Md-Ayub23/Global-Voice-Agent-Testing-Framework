@@ -31,7 +31,7 @@ export const SETUP_TABS: SetupMeta[] = [
   { value: "cases", step: 3, label: "Test cases", icon: "plan", sub: "The situations the agent must handle. Write them yourself or let Claude draft them from the agent's instructions." },
   { value: "callers", step: 4, label: "Callers", icon: "user", sub: "Who calls: the personas a scenario can be run with, from calm to impatient." },
   { value: "safety", step: 5, label: "Safety tests", icon: "shield", sub: "Attack calls that try to make the agent leak, lie or go off its job." },
-  { value: "rules", step: 6, label: "Pass rules", icon: "sliders", sub: "What a GO needs for this agent: response times, repeats, coverage, budget, and what may not get worse than the baseline." },
+  { value: "rules", step: 6, label: "Pass rules", icon: "sliders", sub: "What “Ready” needs for this agent: response times, repeats, coverage, budget, and what may not get worse than the baseline." },
   { value: "ops", step: 7, label: "CI & alerts", icon: "bell", sub: "Run this agent's tests in CI on every change, on a schedule as health checks, and get a message when a release is blocked." },
   { value: "judges", label: "Judge settings", icon: "sparkles", sub: "What the AI judges score in every conversation, and what the agent may say." },
 ];
@@ -117,7 +117,7 @@ export function ProjectSetup({ project, tab, query }: { project: Project; tab: S
           <span className="flex-1" />
           {next
             ? <Button id="next-step" icon="arrow" href={projectHref(project.key, `/setup/${next.value}`)}>Next: {next.label}</Button>
-            : <Button id="next-step" variant="primary" icon="play" href={projectHref(project.key, "/new")}>Run tests</Button>}
+            : <Button id="next-step" variant="primary" icon="play" href={projectHref(project.key, "/test")}>Run tests</Button>}
         </div>
       )}
     </>

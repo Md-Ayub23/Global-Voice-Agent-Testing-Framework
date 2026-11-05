@@ -1,5 +1,5 @@
 // The app shell. The sidebar has the workspace (home, agents, settings) and, inside an agent, that agent's
-// pages in the order the work happens: overview, then 1 Set up, 2 Test, 3 Quality.
+// pages in the order the work happens: overview, then 1 Set up, 2 Test (test modes, results), 3 Quality.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useApp } from "../lib/app";
 import { cx } from "../lib/format";
@@ -28,8 +28,7 @@ const agentNav = (k: string): NavGroup[] => [
     { href: projectHref(k, "/setup/ops"), key: "setup:ops", label: "CI & alerts", icon: "bell" },
   ] },
   { step: 2, title: "Test", items: [
-    { href: projectHref(k, "/new"), key: "new", label: "Run tests", icon: "play-circle" },
-    { href: projectHref(k, "/load"), key: "load", label: "Load test", icon: "activity" },
+    { href: projectHref(k, "/test"), key: "modes", label: "Test modes", icon: "play-circle" },
     { href: projectHref(k, "/runs"), key: "results", label: "Results", icon: "history" },
   ] },
   { step: 3, title: "Quality", items: [
@@ -130,11 +129,11 @@ export function Layout({ section, projectKey, children }: { section: string; pro
   );
 
   return (
-    <div className="min-h-screen md:grid md:grid-cols-[248px_minmax(0,1fr)]">
+    <div className="min-h-screen md:grid md:grid-cols-[248px_minmax(0,1fr)] print:block print:min-h-0">
       {navOpen && <div className="fixed inset-0 z-10 bg-black/30 md:hidden animate-fade" onClick={() => setNavOpen(false)} />}
       <aside
         className={cx(
-          "fixed md:sticky top-0 left-0 bottom-0 z-20 md:z-5 h-screen w-[268px] md:w-auto flex flex-col px-3 py-4 bg-sidebar border-r border-line overflow-y-auto scrollbar-thin",
+          "print:hidden fixed md:sticky top-0 left-0 bottom-0 z-20 md:z-5 h-screen w-[268px] md:w-auto flex flex-col px-3 py-4 bg-sidebar border-r border-line overflow-y-auto scrollbar-thin",
           "transition-transform duration-200 ease-out-soft md:translate-x-0",
           navOpen ? "translate-x-0 shadow-pop md:shadow-none" : "-translate-x-full",
         )}
@@ -180,7 +179,7 @@ export function Layout({ section, projectKey, children }: { section: string; pro
       </aside>
 
       <div className="min-w-0 flex flex-col">
-        <header className={cx("sticky top-0 z-4 flex items-center gap-3 px-4 md:px-8 h-14 backdrop-blur-md bg-[color-mix(in_srgb,var(--bg)_85%,transparent)] border-b transition-colors",
+        <header className={cx("print:hidden sticky top-0 z-4 flex items-center gap-3 px-4 md:px-8 h-14 backdrop-blur-md bg-[color-mix(in_srgb,var(--bg)_85%,transparent)] border-b transition-colors",
           scrolled ? "border-line" : "border-transparent")}>
           <Button variant="ghost" iconOnly icon="menu" className="md:hidden" aria-label="Menu" onClick={() => setNavOpen((o) => !o)} />
           <div className="flex items-center gap-2 text-muted text-[13px] min-w-0">
@@ -202,11 +201,11 @@ export function Layout({ section, projectKey, children }: { section: string; pro
               <span className="sm:hidden">Live</span>
             </a>
           )}
-          {projectKey && section !== "new" && section !== "overview" && !live && (
-            <Button size="sm" variant="primary" icon="play" href={projectHref(projectKey, "/new")} id="header-run" className="hidden sm:inline-flex">Run tests</Button>
+          {projectKey && section !== "modes" && section !== "overview" && !live && (
+            <Button size="sm" variant="primary" icon="play" href={projectHref(projectKey, "/test")} id="header-run" className="hidden sm:inline-flex">Run tests</Button>
           )}
         </header>
-        <main className="px-4 md:px-8 pt-2 pb-16 max-w-[1360px] w-full mx-auto">{children}</main>
+        <main className="px-4 md:px-8 pt-2 pb-16 max-w-[1360px] w-full mx-auto print:p-0 print:max-w-none">{children}</main>
       </div>
     </div>
   );

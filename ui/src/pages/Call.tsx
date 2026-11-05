@@ -22,7 +22,7 @@ function Kpi({ label, value, foot }: { label: string; value: ReactNode; foot?: R
   );
 }
 
-export function CallPage({ project, runId, testId }: { project: Project; runId: string; testId: string }) {
+export function CallPage({ project, runId, testId, at }: { project: Project; runId: string; testId: string; at?: number | null }) {
   const runAt = (path = "") => projectHref(project.key, `/runs/${runId}${path}`);
   useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
     { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run", href: runAt() }, { label: "Call" }]);
@@ -46,6 +46,13 @@ export function CallPage({ project, runId, testId }: { project: Project; runId: 
       pendingFlash.current = null;
     }
   }, [view]);
+
+  // Opened from a finding's proof (?at=<event>): show that moment of the conversation once it is drawn.
+  useEffect(() => {
+    if (!data || at == null || Number.isNaN(at)) return;
+    const t = window.setTimeout(() => tl.current?.flash(at), 350);
+    return () => window.clearTimeout(t);
+  }, [data, at]);
 
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton />;

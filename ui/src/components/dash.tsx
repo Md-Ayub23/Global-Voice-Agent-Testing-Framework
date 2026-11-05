@@ -37,10 +37,10 @@ export function Kpi({ icon, label, value, foot, tone: t = "accent" }: {
 // ---- runs per day, stacked by decision ---------------------------------------------------------
 
 const SERIES: { key: keyof DecisionDay; label: string; color: string }[] = [
-  { key: "GO", label: "GO", color: "var(--good)" },
-  { key: "NO_GO", label: "NO-GO", color: "var(--bad)" },
+  { key: "GO", label: "Ready", color: "var(--good)" },
+  { key: "NO_GO", label: "Not ready", color: "var(--bad)" },
   { key: "NO_GO_INSUFFICIENT_EVIDENCE", label: "Not enough evidence", color: "var(--warn)" },
-  { key: "none", label: "No decision", color: "var(--line-strong)" },
+  { key: "none", label: "No result", color: "var(--line-strong)" },
 ];
 
 function niceCount(v: number) {

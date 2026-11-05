@@ -32,6 +32,12 @@ ROOT = Path(__file__).resolve().parent.parent
 T0 = 1793610000000          # epoch ms, 2026-11-02 around 09:00 UTC
 
 
+def recent_start() -> str:
+    """09:00 UTC within the last 24 hours: alerts only look at the last window_hours (24 by default)."""
+    now = datetime.now(timezone.utc)
+    return (now - timedelta(days=1 if now.hour < 10 else 0)).strftime("%Y-%m-%dT09:00:00.000Z")
+
+
 def vapi_call(call_id="call-abc-123", reply="You're all set, Maria, you're booked for 9 am tomorrow.",
               tool_result="Error: slot service timed out", started="2026-11-02T09:00:00.000Z", version="v12"):
     return {"message": {
@@ -466,7 +472,7 @@ def test_cli_import_status_and_check(clinic, tmp_path, capsys, monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     root, folder = clinic
     f = tmp_path / "calls.jsonl"
-    f.write_text("\n".join(json.dumps(vocto_call(i)) for i in range(2)) + "\n" + json.dumps(vapi_call()), encoding="utf-8")
+    f.write_text("\n".join(json.dumps(vocto_call(i)) for i in range(2)) + "\n" + json.dumps(vapi_call(started=recent_start())), encoding="utf-8")
     code = main(["monitor", "import", str(folder), str(f), "--root", str(root), "--runs-dir", "runs"])
     out = capsys.readouterr().out
     assert code == 0 and "3 call(s) added" in out and "Possible false success" in out
@@ -507,7 +513,7 @@ def test_dashboard_real_calls_api(web, monkeypatch):
     root, port = web
     status, page = api(port, "GET", "/api/project/clinic/monitor")
     assert status == 200 and page["totals"]["calls"] == 0 and len(page["daily"]) == 14 and not page["intake"]["token_set"]
-    files = [{"name": "a.json", "text": json.dumps(vapi_call())},
+    files = [{"name": "a.json", "text": json.dumps(vapi_call(started=recent_start()))},
              {"name": "b.jsonl", "base64": base64.b64encode("\n".join(json.dumps(vocto_call(i)) for i in range(2)).encode()).decode()},
              {"name": "c.txt", "text": "nonsense"}]
     status, out = api(port, "POST", "/api/project/clinic/monitor/import", {"files": files})

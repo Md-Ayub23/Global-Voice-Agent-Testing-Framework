@@ -78,7 +78,7 @@ export function BackendTab({ detail, reload }: TabProps) {
       <Block title="Backend access" sub={`Where the truth lives. After every call Vocto reads it to see what really changed: that beats anything the agent says.`}>
         <Seg id="backend-access" value={access} onChange={(v) => set({ access: v, connection: v === "none" ? undefined : str(backend.connection) })}
           options={[{ value: "none", label: "No access" }, { value: "sql", label: "Database (SQL)" }, { value: "rest", label: "REST API" }]} />
-        {access === "none" && <Notice tone="warn">Without backend access, checks that need the stored record are NOT VERIFIED (never PASS), so a release can't get a full GO on them.</Notice>}
+        {access === "none" && <Notice tone="warn">Without backend access, checks that need the stored record are NOT VERIFIED (never PASS), so the agent can't be fully Ready on them.</Notice>}
         {access !== "none" && (
           <>
             <Field label={access === "sql" ? "Database address" : "API base address"}

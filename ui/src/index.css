@@ -163,3 +163,21 @@
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) .avatar { background: hsl(var(--h) 18% 17%); color: hsl(var(--h) 60% 80%); box-shadow: inset 0 0 0 1px hsl(var(--h) 15% 25%); }
 }
+
+/* Printing (the report page's "Save as PDF"): always the light colours, no motion, cards kept whole. */
+@page { size: A4; margin: 14mm 12mm; }
+@media print {
+  :root, :root[data-theme="dark"], :root:where(:not([data-theme="light"])) {
+    color-scheme: light;
+    --bg: #ffffff; --surface: #ffffff; --surface-2: #f6f6f7; --surface-3: #ececee; --line: #e2e2e6; --line-strong: #cfcfd5;
+    --ink: #111113; --ink-2: #44444b; --muted: #6e6e77; --accent: #1a5cff; --accent-soft: #eef3ff; --accent-ink: #1446cc;
+    --good: #11804a; --good-soft: #ebf7f0; --bad: #d92d20; --bad-soft: #fdf0ef; --warn: #b25e09; --warn-soft: #fdf5e7;
+    --shadow-sm: none; --shadow-md: none; --shadow-lg: none;
+  }
+  html, body { background: #fff !important; font-size: 12px; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; animation: none !important; transition: none !important; }
+  .animate-view-in, .stagger > * { opacity: 1 !important; transform: none !important; }
+  #print-report section, #print-report [data-finding], #print-report [data-proof] { break-inside: avoid; }
+  #print-report h2, #print-report h3 { break-after: avoid; }
+  a { color: inherit !important; text-decoration: none !important; }
+}

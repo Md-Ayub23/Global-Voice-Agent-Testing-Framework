@@ -1,4 +1,4 @@
-// One project's home: who the agent is, what's left to set up, its latest release decision, its
+// One project's home: who the agent is, what's left to set up, its readiness in each test mode, its
 // numbers and recent runs.
 import { CountUp } from "../components/CountUp";
 import { ActivityChart, Kpi, MiniHistory, ProjectAvatar, When } from "../components/dash";
@@ -11,6 +11,8 @@ import { cx, fmtMs, money, pct } from "../lib/format";
 import { domainLabel, modeLabel, projectHref, projectOfJob, runHref } from "../lib/links";
 import { navigate } from "../lib/router";
 import { decisionTitle } from "../lib/status";
+import { ReadinessBoard } from "../components/modecards";
+import { modeTitle, runLabel } from "../lib/modes";
 import type { JudgeSummary, Project, ProjectOverview, ProjectStats, RunSummary } from "../lib/types";
 
 interface Step { key: string; title: string; icon: IconName; done: boolean; need: "required" | "recommended" | "optional"; text: string; href: string; problem?: boolean }
@@ -42,13 +44,13 @@ function stepsOf(p: Project, stats: ProjectStats, judges?: JudgeSummary, safetyR
       text: main?.safety?.enabled === false ? "Off: turn on to try attacks on the agent"
         : safetyRun?.safety ? `Last run: ${safetyRun.safety.passed} of ${safetyRun.safety.calls} attacks handled safely`
         : `${main?.safety?.attacks ?? 0} attack calls ready · include them in a run` },
-    { key: "run", title: "First run", icon: "play", need: "required", href: projectHref(k, "/new"), done: stats.runs > 0,
+    { key: "run", title: "First run", icon: "play", need: "required", href: projectHref(k, "/test"), done: stats.runs > 0,
       text: stats.runs ? `${stats.runs} run${stats.runs === 1 ? "" : "s"} so far` : "Start a test run" },
     { key: "baseline", title: "Baseline", icon: "anchor", need: "recommended", href: projectHref(k, "/runs"), done: !!main?.baseline,
       text: main?.baseline ? "Every run is compared with it" : "Mark a good run, so later runs show what got worse" },
     { key: "ops", title: "CI & alerts", icon: "bell", need: "optional", href: projectHref(k, "/setup/ops"), done: !!(main?.alerts || main?.health_checks),
       text: main?.alerts || main?.health_checks ? [main.alerts ? `${main.alerts} alert${main.alerts === 1 ? "" : "s"}` : "", main.health_checks ? "health checks on" : ""].filter(Boolean).join(" · ")
-        : "Run in CI, on a schedule, and get a message on NO-GO" },
+        : "Run in CI, on a schedule, and get a message when it is not ready" },
   ];
 }
 
@@ -120,14 +122,14 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
           <Button icon="settings" href={projectHref(project.key, "/setup/connection")}>Set up</Button>
           {running
             ? <Button variant="primary" icon="activity" href={projectHref(project.key, "/live")}>Watch live run</Button>
-            : <Button id="run-tests" variant="primary" icon="play" href={projectHref(project.key, "/new")}>Run tests</Button>}
+            : <Button id="run-tests" variant="primary" icon="play" href={projectHref(project.key, "/test")}>Run tests</Button>}
         </div>
       </div>
 
       <div className="flex flex-col gap-4">
-        {last ? (
-          <Hero tone={heroToneOf(last.decision)} eyebrow={<>Latest release decision · <When iso={last.started_at} /></>}
-            title={<>{decisionTitle(last.decision)}{last.decision === "NO_GO_INSUFFICIENT_EVIDENCE" && <span className="text-lg font-semibold"> · not enough evidence</span>}</>}
+        {data.modes && last ? <ReadinessBoard modes={data.modes} k={project.key} /> : last ? (
+          <Hero tone={heroToneOf(last.decision)} eyebrow={<>Latest release readiness · <When iso={last.started_at} /></>}
+            title={decisionTitle(last.decision)}
             actions={<Button href={runHref(last)} icon="file">Open report</Button>}>
             <div className="flex flex-wrap items-center gap-2 mt-1.5 text-ink-2">
               {modeLabel(last.mode)} run{last.offline ? " (free dry run)" : ""} · {last.calls_started} calls ·
@@ -148,7 +150,7 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
 
         {s.runs > 0 && <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 stagger">
           <Kpi icon="layers" label="Test runs" value={<CountUp to={s.runs} />} foot={`${s.decided} with a decision${s.bug_runs ? ` · ${s.bug_runs} with bugs on` : ""}`} />
-          <Kpi icon="shield" label="GO rate" tone={s.go_rate == null ? "accent" : s.go_rate >= 0.8 ? "good" : s.go_rate >= 0.5 ? "warn" : "bad"}
+          <Kpi icon="shield" label="Ready rate" tone={s.go_rate == null ? "accent" : s.go_rate >= 0.8 ? "good" : s.go_rate >= 0.5 ? "warn" : "bad"}
             value={s.go_rate == null ? "—" : pct(s.go_rate)} foot={<MiniHistory items={s.history} empty="after your first run" />} />
           <Kpi icon="phone" label="Test calls" value={<CountUp to={s.calls} />} foot={`${money(s.cost_usd)} spent`} />
           <Kpi icon="clock" label="Voice response time" tone={latTone}
@@ -161,11 +163,11 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
             <div className="flex items-center px-[18px] pt-4 pb-3"><h2 className="font-semibold text-base flex-1">Recent runs</h2>
               <Button href={projectHref(project.key, "/runs")} variant="ghost" size="sm">All results <Icon name="arrow" /></Button></div>
             {data.recent_runs.length ? (
-              <Table head={["Decision", "Channel", "Calls", "Pass / fail", "p95", "When"]}>
+              <Table head={["Readiness", "Test", "Calls", "Pass / fail", "p95", "When"]}>
                 {data.recent_runs.map((r) => (
                   <tr key={r.run_id} className={rowLink} onClick={() => navigate(runHref(r))}>
-                    <td><Badge status={r.decision || r.status} /></td>
-                    <td>{modeLabel(r.mode)}{r.offline ? <span className="text-muted"> · dry run</span> : null}{r.agent_options?.bugs ? <span className="text-bad text-xs font-semibold"> · bugs on</span> : null}</td>
+                    <td><Badge status={r.decision || r.status} label={runLabel(r)} /></td>
+                    <td>{modeTitle(r.test_mode)} · {modeLabel(r.mode)}{r.offline ? <span className="text-muted"> · dry run</span> : null}{r.agent_options?.bugs ? <span className="text-bad text-xs font-semibold"> · bugs on</span> : null}</td>
                     <td className="tabular-nums">{r.calls_started}{r.planned ? `/${r.planned}` : ""}</td>
                     <td className="tabular-nums whitespace-nowrap"><span className="text-good">{r.counts.PASS || 0}</span> / <span className="text-bad">{r.counts.FAIL || 0}</span></td>
                     <td className="tabular-nums">{r.mode === "voice" ? fmtMs(r.p95_ms) : <span className="text-muted">—</span>}</td>
@@ -174,8 +176,8 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
                 ))}
               </Table>
             ) : (
-              <EmptyState icon="play" title="No runs yet" text="Run the test plan against the agent to get its first release decision."
-                action={project.ready ? <Button variant="primary" icon="play" href={projectHref(project.key, "/new")}>Run tests</Button> : undefined} />
+              <EmptyState icon="play" title="No runs yet" text="Pick a test mode to get the agent's first release readiness report."
+                action={project.ready ? <Button variant="primary" icon="play" href={projectHref(project.key, "/test")}>Test modes</Button> : undefined} />
             )}
           </Card>
           {s.runs > 0 && (

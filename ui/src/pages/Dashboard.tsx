@@ -25,7 +25,7 @@ export function Dashboard() {
   const jobProject = projectOfJob(activeJob, projects);
   const rows = data.projects.filter((p) => show === "all" || (show === "mine" ? !p.example : p.example));
   const voice = data.agent_types.channels.voice, text = data.agent_types.channels.text;
-  // What to look at first: agents whose latest decided run was NO-GO, then your agents that still need setting up.
+  // What to look at first: agents whose latest decided run was not ready, then your agents that still need setting up.
   const attention = [
     ...data.projects.filter((p) => p.stats.last_decided && p.stats.last_decided.decision !== "GO").map((p) => ({
       key: p.key, name: p.name, tone: "bad" as const, href: runHref(p.stats.last_decided!), action: "Open the run",
@@ -65,9 +65,9 @@ export function Dashboard() {
           <Kpi icon="bot" label="Agents under test" value={<CountUp to={t.projects} />}
             foot={`${t.client_projects} of yours · ${t.examples} practice agent${t.examples === 1 ? "" : "s"}`} />
           <Kpi icon="layers" label="Test runs" value={<CountUp to={t.runs} />} foot={`${t.runs_7d} in the last 7 days · ${t.decided} with a decision`} />
-          <Kpi icon="shield" label="Release GO rate" tone={t.go_rate == null ? "accent" : t.go_rate >= 0.8 ? "good" : t.go_rate >= 0.5 ? "warn" : "bad"}
+          <Kpi icon="shield" label="Ready rate" tone={t.go_rate == null ? "accent" : t.go_rate >= 0.8 ? "good" : t.go_rate >= 0.5 ? "warn" : "bad"}
             value={t.go_rate == null ? "—" : <CountUp to={t.go_rate * 100} suffix="%" />}
-            foot={t.decided ? `${t.go} GO · ${t.no_go} NO-GO${t.insufficient ? ` · ${t.insufficient} not enough evidence` : ""}${t.bug_runs ? ` · ${t.bug_runs} bug test${t.bug_runs === 1 ? "" : "s"} not counted` : ""}` : "after your first run"} />
+            foot={t.decided ? `${t.go} ready · ${t.no_go} not ready${t.insufficient ? ` · ${t.insufficient} not enough evidence` : ""}${t.bug_runs ? ` · ${t.bug_runs} bug test${t.bug_runs === 1 ? "" : "s"} not counted` : ""}` : "after your first run"} />
           <Kpi icon="phone" label="Test calls" value={<CountUp to={t.calls} />} foot={`${t.scenarios} scenarios · ${money(t.cost_usd)} spent`} />
         </div>
 
@@ -117,7 +117,7 @@ export function Dashboard() {
               options={[{ value: "all", label: `All ${data.projects.length}` }, { value: "mine", label: "Your agents" }, { value: "practice", label: "Practice" }]} />
           </div>
           {rows.length ? (
-            <Table head={["Agent", "Type", "Last result", "Recent decisions", "GO rate", "Runs", "Last run"]}>
+            <Table head={["Agent", "Type", "Last result", "Recent decisions", "Ready rate", "Runs", "Last run"]}>
               {rows.map((p) => (
                 <tr key={p.key} className={rowLink} data-project={p.key} onClick={() => navigate(projectHref(p.key))}>
                   <td>

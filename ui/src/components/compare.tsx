@@ -95,7 +95,7 @@ export function VsBaseline({ cmp, baselineHref, callHref }: { cmp: Comparison; b
       <Card>
         <CardHead level={2} title="Compared with the baseline"
           sub={<>Baseline run <a href={baselineHref} className="font-mono">{cmp.baseline.run_id}</a> ({cmp.baseline.decision}) from {fmtDate(cmp.baseline.finished_at)}. {cmp.blocking
-            ? `${cmp.blocking} change(s) set to block made this run NO-GO.` : "Nothing set to block got worse."}</>} />
+            ? `${cmp.blocking} change(s) set to block made this run “Not ready”.` : "Nothing set to block got worse."}</>} />
         <CompareCounts cmp={cmp} />
         <div className="mt-3"><LikeForLike cmp={cmp} /></div>
       </Card>

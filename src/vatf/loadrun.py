@@ -134,6 +134,7 @@ class LoadOrchestrator(Orchestrator):
     def _run_info(self, run_id, plan) -> dict[str, Any]:
         info = super()._run_info(run_id, plan)
         info["kind"] = "load"
+        info["test_mode"] = "load"
         info["load"] = {**summary(self.load, self.stage_list), "settings": self.load,
                         "p95_limit_ms": p95_limit(self.load, self.profile, self.mode),
                         "launched_per_call": bool(self.profile["connection"].get("launch")) or
