@@ -18,7 +18,7 @@ from .checks import scenario_checks
 from .connectors import ConnectError, build_connector, is_voice
 from .contracts.models import CallContext, CallTrace, CheckResult, EvidenceLevel, EvidenceRef, Result
 from .contracts.orchestrator import PlannedCall
-from .decision import LocalDecisionEngine
+from .decision import LocalDecisionEngine, apply_regression
 from .evidence import LocalEvidenceStore, utc_now
 from .llm import DEFAULT_MODEL
 from .gateway import GatewayError, ToolGateway, gateway_address, uses_gateway
@@ -34,7 +34,10 @@ from .rubrics import items_for_call
 from .speech import SpeechConfig
 from .speech.local import blocked_hint
 from .story import call_story_text, load_events, run_story_text
-from .util import MissingSecret, expand_env, write_json
+from .baseline import BaselineError, load_baseline
+from .compare import compare
+from .snapshot import snapshot
+from .util import MissingSecret, expand_env, read_json, write_json
 from .verdict import LocalVerdictBuilder, merge_results
 
 FOLLOW_UP_TURNS = 6   # caller turns Claude adds after a scripted call's fixed lines (limits.follow_up_turns)
@@ -65,6 +68,10 @@ class RunConfig:
     judges: bool = True                           # False (--no-judges): skip the AI judges for this run
     safety: bool = False                          # True (--safety): add the built-in safety tests (attacks.py)
     conditions: str = "as_written"                # voice: caller conditions preset over every test (conditions.py)
+    baseline: str = "auto"                        # Phase 6: auto (the agent's saved baseline), none, or a snapshot file
+    trigger: str = "manual"                       # manual | ci | health: how the run was started (shown and alerted)
+    caller: str = "claude"                        # Phase 7 load tests: free = scripted lines / rule-based caller, no Claude
+    fixtures_once: bool = False                   # Phase 7: test data loaded once before the calls, not before each call
 
 
 class Orchestrator:
@@ -81,6 +88,7 @@ class Orchestrator:
         self._gateway: ToolGateway | None = None
         self._calibration: dict[str, dict[str, Any]] | None = None
         self._judge_cost = 0.0
+        self.concurrent = False   # True while a load test runs calls at the same time (loadrun.py)
 
     @property
     def mode(self) -> str:
@@ -125,14 +133,16 @@ class Orchestrator:
         self.preflight()
         run_dir = self.store.runs_dir / run_id
         info = self._run_info(run_id, plan)
+        self._info = info
         run_dir.mkdir(parents=True, exist_ok=True)
         write_json(run_dir / "run.json", info)
-        self.log(f"run {run_id}: {len(plan)} planned call(s)")
+        self.log(f"run {run_id}: {self._plan_text(plan)}")
         try:
             if uses_gateway(self.profile):
                 host, port = gateway_address(self.profile)
                 try:
-                    self._gateway = ToolGateway(host, port).start()
+                    header = (self.profile.get("test_id") or {}).get("header_name", "X-Test-Id")
+                    self._gateway = ToolGateway(host, port, header=header, fallback=self._gateway_fallback()).start()
                 except GatewayError as e:
                     raise RunSetupError(str(e)) from e
                 self.log(f"tool gateway: the agent's tools are at http://{host}:{self._gateway.port}/tools/<name>")
@@ -151,6 +161,45 @@ class Orchestrator:
                     exit_code=decision["exit_code"], judge_cost_usd=round(self._judge_cost, 6))
         write_json(run_dir / "run.json", info)
         return decision
+
+    def _plan_text(self, plan: list[PlannedCall]) -> str:
+        return f"{len(plan)} planned call(s)"   # the dashboard reads "run <id>: <n> planned call" from this line
+
+    def _gateway_fallback(self) -> Any:
+        """Where tool calls go that can't be matched to a call (only with several calls at once)."""
+        return None
+
+    def _compare(self, decision: dict[str, Any], run_dir: Path) -> dict[str, Any] | None:
+        """Phase 6: this run against the agent's baseline (baseline.py), saved as comparison.json, with a
+        copy of the baseline used (baseline.json) so relabelling later compares against the same one."""
+        mode = self.config.baseline or "auto"
+        if mode == "none":
+            return None
+        try:
+            if mode == "auto":
+                base = load_baseline(Path(self.project.folder), self.project.profile_file)
+                source = "baseline"
+            else:
+                base, source = read_json(Path(mode)), Path(mode).name
+                if not isinstance(base, dict) or base.get("kind") != "run_snapshot":
+                    raise BaselineError(f"{mode} is not a Vocto baseline (a run snapshot)")
+        except (BaselineError, OSError, ValueError) as e:
+            self.log(f"warning: no comparison with the baseline: {e}")
+            return None
+        if base is None:
+            return None
+        return self._compare_with(decision, run_dir, base, source)
+
+    def _compare_with(self, decision: dict[str, Any], run_dir: Path, base: Mapping[str, Any],
+                      source: str) -> dict[str, Any]:
+        titles = {sc["id"]: sc.get("title", sc["id"]) for sc in self.scenarios()}
+        comparison = compare(base, snapshot(decision, self._info, titles), self.profile, source)
+        write_json(run_dir / "baseline.json", base)
+        write_json(run_dir / "comparison.json", comparison)
+        c = comparison["counts"]
+        self.log(f"vs baseline {base.get('run_id')}: {c['regression']} new failure(s), {c['worse']} worse, "
+                 f"{c['better']} better" + ("" if comparison["like_for_like"] else " (not like-for-like)"))
+        return comparison
 
     def preflight(self) -> None:
         """Problems that would make every call fail, found before the first call: secrets named as
@@ -179,7 +228,8 @@ class Orchestrator:
             "project": Path(self.project.folder).as_posix(), "profile_file": self.project.profile_file,
             "profile_id": self.profile["id"], "profile_name": self.profile.get("name", self.profile["id"]),
             "mode": self.mode, "offline": cfg.offline, "repeats": cfg.repeats,
-            "scenario_ids": list(cfg.scenario_ids), "safety": cfg.safety, "conditions": cfg.conditions, "agent_options": dict(self.profile["connection"].get("options", {})),
+            "scenario_ids": list(cfg.scenario_ids), "safety": cfg.safety, "conditions": cfg.conditions,
+            "trigger": cfg.trigger, "baseline": cfg.baseline, "agent_options": dict(self.profile["connection"].get("options", {})),
             "caller_model": None if cfg.offline else cfg.caller_model, "pii_masked": cfg.mask_pii,
             "judges": ({"enabled": False, "why": self._judges_off()} if self._judges_off() else
                        {k: v for k, v in judge_settings(self.profile).items() if k != "policy"}),
@@ -206,7 +256,16 @@ class Orchestrator:
                 error_attempts.append(verdict)
 
         decision = LocalDecisionEngine().decide(run_id, finals, self.scenarios(), self.profile)
+        return self._close(run_id, decision, finals, error_attempts, run_dir)
+
+    def _close(self, run_id: str, decision: dict[str, Any], finals: list, error_attempts: list,
+               run_dir: Path) -> dict[str, Any]:
+        """The decision against the baseline, then decision.json, the report and the transcripts."""
+        comparison = self._compare(decision, run_dir)
+        decision = apply_regression(decision, comparison)
         write_json(run_dir / "decision.json", decision)
+        decision["_comparison"] = comparison
+        decision["_verdicts"] = finals
         decision["_pii_masked"] = self.config.mask_pii
         decision["_mode"] = self.mode
         report = write_report(decision, finals, error_attempts, run_dir, self.store)
@@ -264,15 +323,16 @@ class Orchestrator:
         validator_off_script = None
         live: dict[str, Any] = {}  # what must be closed if the call fails half way (session, line)
         try:
-            try:
-                load_fixtures(self.profile, scenario, self.config.root)
-            except ProbeSetupError as e:
-                raise HarnessError("fixtures_failed", str(e)) from e
+            if not self.config.fixtures_once:   # a load test loads them once, before its first call
+                try:
+                    load_fixtures(self.profile, scenario, self.config.root)
+                except ProbeSetupError as e:
+                    raise HarnessError("fixtures_failed", str(e)) from e
             proxy = InProcessToolProxy(self.profile, scenario.get("setup", {}).get("faults", []),
                                        real_delays=self.mode == "voice")
             await proxy.attach(ctx, writer)
             if self._gateway:
-                self._gateway.attach(proxy)
+                self._gateway.attach(proxy, ctx.test_id)
             logs = LogCollector(self.profile, self.config.root)
             logs.begin()
             cond = self._conditions(scenario, ctx.test_id) if self.mode == "voice" else None
@@ -287,13 +347,13 @@ class Orchestrator:
                                                     **live.pop("recording", {})}, turn=turn)
             ended = True
             if self._gateway:
-                self._gateway.detach()
+                self._gateway.detach(ctx.test_id)
             if self.mode == "voice":
                 await self._listen_again(scenario, writer, live)
             if logs.enabled:
                 await self._collect_logs(logs, ctx, writer)
 
-            if scenario["style"] == "simulated" and not self.config.offline:
+            if scenario["style"] == "simulated" and not self.config.offline and self.config.caller != "free":
                 validator = LLMValidator(self.llm, model=self.config.validator_model, metadata=meta)
                 res = await validator.validate(CallTrace(writer.record, writer.events), scenario)
                 validator_off_script = not res.on_script
@@ -323,17 +383,20 @@ class Orchestrator:
             self.log(f"    harness error ({code}): {e}")
         finally:
             if self._gateway:
-                self._gateway.detach()
+                self._gateway.detach(ctx.test_id)
 
-        writer.lock(status, cost_usd=self._spent() - cost_before)
+        # With several calls at once (load tests) the spend can't be split per call: the run has the total.
+        shared = self.concurrent
+        writer.lock(status, cost_usd=0.0 if shared else self._spent() - cost_before)
         trace = self.store.read_call(run_id, ctx.test_id)
         judge_before = self._spent()
         judged, notes = await self._judge(trace, scenario, status, meta)
         verdict = self.evaluate(trace, scenario, validator_off_script, judged)
         if notes:
             verdict["judge_notes"] = notes
-        verdict["metrics"]["judge_cost_usd"] = round(self._spent() - judge_before, 6)
-        self._judge_cost += self._spent() - judge_before
+        if not shared:
+            verdict["metrics"]["judge_cost_usd"] = round(self._spent() - judge_before, 6)
+            self._judge_cost += self._spent() - judge_before
         self.store.write_verdict(run_id, ctx.test_id, verdict)
         return verdict
 
@@ -661,7 +724,7 @@ class Orchestrator:
                                model=self.config.caller_model, agent_name=self.profile.get("name", "the agent"),
                                metadata=meta, voice=self.mode == "voice")
             return ScriptThenLLM(lines, claude, turns)
-        if self.config.offline:
+        if self.config.offline or self.config.caller == "free":
             return RuleCaller(scenario, spoken=self.mode == "voice")
         if self.llm is None:
             raise HarnessError("no_llm", "simulated scenarios need an LLM (set ANTHROPIC_API_KEY or use --offline)")
@@ -673,7 +736,8 @@ class Orchestrator:
     def _follow_up_turns(self, scenario: Mapping[str, Any]) -> int:
         """Caller turns Claude may add after a scripted call's fixed lines (0: the call ends with them).
         Live runs only: a dry run has no Claude, and its calls stay exactly as scripted."""
-        if self.config.offline or self.llm is None or scenario.get("follow_up") is False:
+        if (self.config.offline or self.llm is None or scenario.get("follow_up") is False
+                or self.config.caller == "free"):
             return 0
         f = scenario.get("follow_up") if isinstance(scenario.get("follow_up"), dict) else {}
         return int(f.get("turns", self.profile.get("limits", {}).get("follow_up_turns", FOLLOW_UP_TURNS)))

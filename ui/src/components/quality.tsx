@@ -54,10 +54,11 @@ function detailLine(r: QualityRow): string {
   return [`${r.calls} call(s)`, ...parts].join(" · ");
 }
 
-export function QualityTiles({ rows }: { rows: QualityRow[] }) {
+const TILES_SUB = "Read off each call's recording · bands are this agent's (Set up › Pass rules) · only a metric set to block can stop a release";
+export function QualityTiles({ rows, sub = TILES_SUB }: { rows: QualityRow[]; sub?: string }) {
   return (
     <Card>
-      <CardHead level={2} title="Call quality" sub="Read off each call's recording · bands are this agent's (Set up › Pass rules) · only a metric set to block can stop a release" />
+      <CardHead level={2} title="Call quality" sub={sub} />
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(210px,1fr))]" id="quality-tiles">
         {rows.map((r) => (
           <div key={r.id} data-metric={r.id} className="rounded-[10px] border border-line p-3.5 grid gap-1 min-w-0">

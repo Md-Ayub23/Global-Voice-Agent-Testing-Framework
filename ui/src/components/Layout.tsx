@@ -25,13 +25,17 @@ const agentNav = (k: string): NavGroup[] => [
     { href: projectHref(k, "/setup/callers"), key: "setup:callers", label: "Callers", icon: "user" },
     { href: projectHref(k, "/setup/safety"), key: "setup:safety", label: "Safety tests", icon: "shield" },
     { href: projectHref(k, "/setup/rules"), key: "setup:rules", label: "Pass rules", icon: "sliders" },
+    { href: projectHref(k, "/setup/ops"), key: "setup:ops", label: "CI & alerts", icon: "bell" },
   ] },
   { step: 2, title: "Test", items: [
     { href: projectHref(k, "/new"), key: "new", label: "Run tests", icon: "play-circle" },
+    { href: projectHref(k, "/load"), key: "load", label: "Load test", icon: "activity" },
     { href: projectHref(k, "/runs"), key: "results", label: "Results", icon: "history" },
   ] },
   { step: 3, title: "Quality", items: [
     { href: projectHref(k, "/judges"), key: "judges", label: "AI judges", icon: "scale" },
+    { href: projectHref(k, "/compare"), key: "compare", label: "Compare runs", icon: "compare" },
+    { href: projectHref(k, "/calls"), key: "calls", label: "Real calls", icon: "phone" },
   ] },
 ];
 

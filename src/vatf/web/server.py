@@ -21,9 +21,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import data, judging, plans, safety, setup
+from . import data, judging, loadtest, monitoring, plans, regress, safety, setup
 from ..loader import ProjectError
 from .jobs import JobError, JobManager
+from .schedule import HealthScheduler
 
 STATIC = Path(__file__).parent / "static"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
@@ -38,6 +39,7 @@ class App:
         self.runs_rel = runs_dir
         self.runs = root / runs_dir
         self.jobs = JobManager(root, runs_dir)
+        self.monitor_hub: monitoring.MonitorHub | None = None   # started by serve()
 
     def active_runs(self) -> set[str]:
         job = self.jobs.active
@@ -195,6 +197,95 @@ def make_handler(app: App):
     @route("GET", r"/api/runs/(r-[\w-]+)/calls/(t-[\w-]+)/waveform")
     def get_wave(h, q, run_id, test_id):
         return data.waveform(app.runs, run_id, test_id, points=int(q.get("points", 1200)))
+
+    # ---- Phase 6: baseline, compare, CI and alerts ----------------------------------------
+    @route("GET", r"/api/project/([\w.\-]+)/baseline")
+    def get_baseline(h, q, key):
+        return regress.baseline_page(app.root, app.runs, key, q.get("file", "profile.yaml"))
+
+    @route("POST", r"/api/project/([\w.\-]+)/baseline/clear")
+    def post_baseline_clear(h, q, key):
+        b = h.body()
+        return regress.clear(app.root, key, b.get("file", "profile.yaml"), b.get("kind") or "run")
+
+    @route("POST", r"/api/runs/(r-[\w-]+)/baseline")
+    def post_baseline(h, q, run_id):
+        if run_id in app.active_runs():
+            raise ValueError("this run is still going; set it as the baseline when it has finished")
+        return regress.set_from_run(app.root, app.runs, run_id, str(h.body().get("note") or ""))
+
+    @route("GET", r"/api/runs/(r-[\w-]+)/comparison")
+    def get_comparison(h, q, run_id):
+        return {"comparison": regress.run_comparison(app.runs, run_id)}
+
+    @route("GET", r"/api/compare")
+    def get_compare(h, q):
+        if not q.get("a") or not q.get("b"):
+            raise ValueError("pick two runs")
+        return regress.compare_runs(app.root, app.runs, q["a"], q["b"])
+
+    # ---- Phase 7: load tests ------------------------------------------------------------------
+    @route("GET", r"/api/project/([\w.\-]+)/load")
+    def get_load(h, q, key):
+        return loadtest.load_page(app.root, app.runs, key, q.get("file", "profile.yaml"))
+
+    @route("PUT", r"/api/project/([\w.\-]+)/load")
+    def put_load(h, q, key):
+        b = h.body()
+        return loadtest.save(app.root, key, b.get("file", "profile.yaml"), b.get("load") or {})
+
+    @route("GET", r"/api/project/([\w.\-]+)/ops")
+    def get_ops(h, q, key):
+        return regress.ops_page(app.root, app.runs, key, q.get("file", "profile.yaml"))
+
+    @route("GET", r"/api/project/([\w.\-]+)/ci")
+    def get_ci(h, q, key):
+        return regress.ci_file(app.root, key, q)
+
+    @route("POST", r"/api/project/([\w.\-]+)/alerts/test")
+    def post_alert_test(h, q, key):
+        return regress.test_alert(app.root, key, h.body())
+
+    # ---- Phase 8: real calls -------------------------------------------------------------------
+    @route("GET", r"/api/project/([\w.\-]+)/monitor")
+    def get_monitor(h, q, key):
+        return monitoring.page(app.root, app.runs, key, app.monitor_hub)
+
+    @route("PUT", r"/api/project/([\w.\-]+)/monitor")
+    def put_monitor(h, q, key):
+        return monitoring.save(app.root, app.runs, key, h.body().get("monitor") or {}, app.monitor_hub)
+
+    @route("GET", r"/api/project/([\w.\-]+)/monitor/calls")
+    def get_monitor_calls(h, q, key):
+        return monitoring.calls(app.root, app.runs, key, q)
+
+    @route("GET", r"/api/project/([\w.\-]+)/monitor/calls/(c-[\w-]+)")
+    def get_monitor_call(h, q, key, call_id):
+        return monitoring.call(app.root, app.runs, key, call_id)
+
+    @route("POST", r"/api/project/([\w.\-]+)/monitor/import")
+    def post_monitor_import(h, q, key):
+        return monitoring.import_files(app.root, app.runs, key, h.body(), app.monitor_hub)
+
+    @route("POST", r"/api/project/([\w.\-]+)/monitor/token")
+    def post_monitor_token(h, q, key):
+        return monitoring.new_token(app.root, app.runs, key, app.monitor_hub)
+
+    @route("POST", r"/api/project/([\w.\-]+)/monitor/check")
+    def post_monitor_check(h, q, key):
+        return monitoring.check_now(app.root, app.runs, key, app.monitor_hub)
+
+    @route("POST", r"/api/project/([\w.\-]+)/monitor/delete")
+    def post_monitor_delete(h, q, key):
+        return monitoring.delete(app.root, app.runs, key, h.body())
+
+    @route("POST", r"/api/project/([\w.\-]+)/monitor/calls/(c-[\w-]+)/labels")
+    def post_monitor_labels(h, q, key, call_id):
+        return monitoring.label(app.root, app.runs, key, call_id, h.body())
+
+    @route("POST", r"/api/project/([\w.\-]+)/monitor/calls/(c-[\w-]+)/test")
+    def post_monitor_test(h, q, key, call_id):
+        return monitoring.make_test(app.root, app.runs, key, call_id)
 
     @route("GET", r"/api/exit-checks")
     def get_exit_checks(h, q):
@@ -416,12 +507,16 @@ def make_handler(app: App):
                         sent_lines = len(job.lines)
                     for run_id in list(job.run_ids):
                         folder = app.runs / run_id
+                        # A load test also rewrites load_live.json every second (its progress).
                         sig = tuple((p.stat().st_mtime_ns if p.exists() else None)
-                            for p in (folder / "run.json", folder / "decision.json"))
+                            for p in (folder / "run.json", folder / "decision.json", folder / "load_live.json"))
                         if run_sigs.get(run_id) != sig:
                             run_sigs[run_id] = sig
                             send("run", data.run_detail(app.runs, run_id, app.active_runs()))
-                        for call in sorted((folder / "calls").glob("t-*")) if (folder / "calls").is_dir() else []:
+                        # A load test makes hundreds of calls at once: its page shows the load's progress
+                        # (load_live.json) and the log, not every call's conversation.
+                        calls_dir = folder / "calls"
+                        for call in sorted(calls_dir.glob("t-*")) if calls_dir.is_dir() and job.kind != "load" else []:
                             csig = data.call_signature(call)
                             if call_sigs.get(call.name) != csig and (call / "call.json").exists():
                                 call_sigs[call.name] = csig
@@ -497,11 +592,14 @@ def serve(root: Path, runs_dir: Path, port: int = 8765, open_browser: bool = Tru
     print("Keep this window open while you use it. Press Ctrl+C here to stop.")
     if open_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    app.scheduler = HealthScheduler(app.root, app.runs, app.jobs).start()   # health checks while it is open
+    app.monitor_hub = monitoring.MonitorHub(app.root, app.runs).start()     # real calls: judging, alerts, webhook
     try:
         httpd.serve_forever(poll_interval=0.3)
     except KeyboardInterrupt:
         print("\nstopping the dashboard...")
     finally:
         app.jobs.stop_all()
+        app.monitor_hub.stop()
         httpd.server_close()
     return 0

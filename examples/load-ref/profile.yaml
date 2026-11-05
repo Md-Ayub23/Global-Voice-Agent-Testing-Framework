@@ -1,0 +1,55 @@
+# Measuring stick for Vocto's load tests (Phase 7).
+# One shared voice server (zoo/load_ref.py) that answers every caller turn after
+#   300 ms + 250 ms for every other call in progress
+# so its answer time p95 passes the 1000 ms limit up to 3 calls at once and breaks it at 4: a load
+# test must find capacity 3 (ramp to 5) and a NO-GO. Above 6 calls at once it refuses new calls.
+#   uv run python -m vatf load examples/load-ref --start-agent
+schema_version: "0.1"
+kind: client_profile
+id: load-ref
+name: Load reference agent
+description: Gets slower by a known amount with every extra call. For checking Vocto's load tests.
+domain: test
+languages: [en]
+
+connection:
+  type: websocket_audio
+  target: ws://127.0.0.1:8792
+  audio: {sample_rate_hz: 16000, encoding: pcm16}
+
+agent_process:
+  command: [python, -m, zoo.load_ref, --port, "8792"]
+  ready_url: ws://127.0.0.1:8792
+  ready_timeout_s: 30
+
+test_id:
+  propagation: [session_metadata]
+
+tools: []
+
+backend:
+  access: none
+
+judges:
+  enabled: false                          # a measuring stick: nothing to judge
+
+safety:
+  enabled: false
+
+thresholds:
+  repeats: 1
+  pass_k_required: 1
+  latency_p50_ms: 1000
+  latency_p95_ms: 1000
+
+limits:
+  max_call_seconds: 60
+  end_of_turn_ms: 500
+
+load:
+  shape: ramp
+  calls_at_once: 5
+  start_at: 1
+  steps: 5
+  step_minutes: 1
+  start_agent: true

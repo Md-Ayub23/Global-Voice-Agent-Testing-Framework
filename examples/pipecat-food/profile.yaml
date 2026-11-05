@@ -134,3 +134,7 @@ limits:
   parallel_calls: 1
   end_of_turn_ms: 1200
   no_reply_ms: 15000
+load:
+  start_at: 5
+  calls_at_once: 12
+  conditions: noisy

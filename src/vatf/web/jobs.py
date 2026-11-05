@@ -38,7 +38,7 @@ class JobError(Exception):
 @dataclass
 class Job:
     id: str
-    kind: str                        # run | exit-check
+    kind: str                        # run | exit-check | health | load
     request: dict[str, Any]
     argv: list[str]
     command: str                     # the same thing typed in a terminal
@@ -140,7 +140,7 @@ class JobManager:
         """The vatf command line for a request from the New run page. `project` is the
         discovered project (data.project_info) the request names; every value is checked here."""
         kind = req.get("command", "run")
-        if kind not in ("run", "exit-check"):
+        if kind not in ("run", "exit-check", "health", "load"):
             raise JobError(f"unknown command {kind!r}")
         profile_file = req.get("profile")
         profile = next((p for p in project["profiles"] if p["file"] == profile_file), None)
@@ -149,6 +149,22 @@ class JobManager:
         if not profile["ok"]:
             raise JobError(f"{profile_file} has problems; fix them on the Projects page first")
         args = [kind, project["path"], "--profile", profile_file]
+        if kind == "load":
+            return self._load_args(req, profile, args)
+        if kind == "health":
+            # A health check takes its tests, repeats and conditions from the profile (health_checks).
+            if req.get("start_agent") and profile.get("agent_process"):
+                args.append("--start-agent")
+            if profile["mode"] == "voice":
+                speech = req.get("speech") or "local"
+                if speech not in ENGINES:
+                    raise JobError(f"speech engine must be one of {', '.join(ENGINES)}")
+                args += ["--speech", speech]
+            args.append("--quiet")
+            command = "uv run python -m vatf " + " ".join(_arg(a) for a in args if a != "--quiet")
+            if self.runs_dir != Path("runs"):
+                args += ["--runs-dir", str(self.runs_dir)]
+            return args, command
         known = {s["id"] for s in profile["scenarios"] if s["in_mode"]}
         for sid in (req.get("scenarios") or []) if kind == "run" else []:  # the exit check picks its own
             if sid not in known:
@@ -216,7 +232,34 @@ class JobManager:
             args.append("--show-pii")
         if kind == "run":
             args.append("--quiet")  # the dashboard shows each call itself; transcript.txt still has it all
-        command = "uv run vatf " + " ".join(_arg(a) for a in args if a != "--quiet")
+        # `python -m vatf`, not the vatf.exe launcher (Windows Application Control can block it).
+        command = "uv run python -m vatf " + " ".join(_arg(a) for a in args if a != "--quiet")
+        if self.runs_dir != Path("runs"):
+            args += ["--runs-dir", str(self.runs_dir)]
+            command += f" --runs-dir {_arg(self.runs_dir.as_posix())}"
+        return args, command
+
+    def _load_args(self, req: dict[str, Any], profile: dict[str, Any], args: list[str]) -> tuple[list[str], str]:
+        """A load test: its shape and limits come from the profile's load section (saved on the Load test
+        page); the request may only pick the speech engine, a dry run and whether to start the agent."""
+        if req.get("offline"):
+            args.append("--offline")
+        if req.get("start_agent"):
+            if not profile.get("agent_process"):
+                raise JobError("this profile doesn't say how to start the agent (agent_process)")
+            args.append("--start-agent")
+        if profile["mode"] == "voice":
+            speech = req.get("speech") or "local"
+            if speech not in ENGINES:
+                raise JobError(f"speech engine must be one of {', '.join(ENGINES)}")
+            args += ["--speech", speech]
+        model = req.get("model")
+        if model and not req.get("offline"):
+            if not MODEL.fullmatch(model):
+                raise JobError(f"model {model!r} is not valid")
+            args += ["--model", model]
+        args.append("--quiet")
+        command = "uv run python -m vatf " + " ".join(_arg(a) for a in args if a != "--quiet")
         if self.runs_dir != Path("runs"):
             args += ["--runs-dir", str(self.runs_dir)]
             command += f" --runs-dir {_arg(self.runs_dir.as_posix())}"

@@ -125,6 +125,8 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
         "planted_bugs": [{"id": b["id"], "title": b.get("title", b["id"]), "scenario": b["caught_by"]["scenario"],
                           "judge": b["caught_by"].get("judge")} for b in p.get("planted_bugs", [])],
         "thresholds": th, "limits": p.get("limits", {}),
+        "baseline": _baseline_id(folder, file),
+        "health_checks": bool((p.get("health_checks") or {}).get("enabled")), "alerts": len(p.get("alerts") or []),
         "judges": (p.get("judges") or {}).get("enabled", True) is not False,
         "safety": _safety_info(p, project),
         "tools": [{"name": t["name"], "effect": t.get("effect", "")} for t in p.get("tools", [])],
@@ -145,6 +147,16 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
                       "voice": v.get("speech", {}).get("tts_voice")} for k, v in project.personas.items()],
     })
     return info
+
+
+def _baseline_id(folder: Path, file: str) -> str | None:
+    """Phase 6: the run id of this profile's baseline, if one is saved."""
+    from ..baseline import BaselineError, load_baseline
+    try:
+        doc = load_baseline(folder, file)
+    except BaselineError:
+        return None
+    return doc.get("run_id") if doc else None
 
 
 def _safety_info(profile: dict[str, Any], project) -> dict[str, Any]:
@@ -343,6 +355,14 @@ def run_summary(runs: Path, run_id: str, active_runs: set[str] = frozenset()) ->
         "safety": ({k: (decision or {})["safety"].get(k, 0) for k in ("calls", "passed", "failed", "to_review")}
                    if (decision or {}).get("safety") else None),
         "has_report": (folder / "report.html").exists(),
+        "trigger": info.get("trigger") or "manual",
+        "vs_baseline": (decision or {}).get("baseline"),
+        # Phase 7: load tests are listed with the other runs, marked, and kept out of the GO rate.
+        "kind": "load" if info.get("kind") == "load" else "run",
+        "load": ({k: (decision or {}).get("load", {}).get(k) for k in ("shape", "calls_at_once", "capacity", "calls", "failed")}
+                 if (decision or {}).get("load") else
+                 ({"shape": info["load"].get("shape"), "calls_at_once": info["load"].get("calls_at_once")}
+                  if info.get("kind") == "load" and info.get("load") else None)),
     }
 
 
@@ -392,6 +412,8 @@ def run_detail(runs: Path, run_id: str, active_runs: set[str] = frozenset()) -> 
             calls.append(brief)
     return {"summary": run_summary(runs, run_id, active_runs), "info": _safe_json(folder / "run.json"),
             "decision": decision, "calls": calls,
+            "comparison": _safe_json(folder / "comparison.json"), "alerts": _safe_json(folder / "alerts.json"),
+            "load": _safe_json(folder / "load.json"), "load_live": _safe_json(folder / "load_live.json"),
             "files": {name: (folder / name).exists() for name in ("report.html", "transcript.txt", "decision.json")}}
 
 
@@ -553,7 +575,8 @@ def with_projects(rows: list[dict[str, Any]], projs: list[dict[str, Any]]) -> li
 def _gated(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Decided runs that judge the agent as it is: runs with bug switches on are meant to get NO-GO
     (they prove Vocto catches bugs), so they don't count against the GO rate."""
-    return [r for r in runs if r.get("decision") and not (r.get("agent_options") or {}).get("bugs")]
+    return [r for r in runs if r.get("decision") and not (r.get("agent_options") or {}).get("bugs")
+            and (r.get("kind") or "run") != "load"]
 
 
 def _go_rate(decided: list[dict[str, Any]], last: int = 20) -> float | None:
@@ -577,9 +600,10 @@ def project_stats(project: Mapping[str, Any], runs: list[dict[str, Any]]) -> dic
         "go_rate": _go_rate(decided), "calls": sum(r.get("calls_started") or 0 for r in mine),
         "cost_usd": round(sum(r.get("cost_usd") or 0 for r in mine), 4),
         "last_run": mine[0] if mine else None,
-        "last_decided": (_gated(decided) or decided or [None])[0],   # the latest real release decision
+        "last_decided": (_gated(decided) or [r for r in decided if (r.get("kind") or "run") != "load"] or [None])[0],
+        "last_load": next((r for r in decided if r.get("kind") == "load"), None),   # Phase 7: the latest load test
         "history": [r["decision"] for r in reversed(_gated(decided)[:12])],
-        "bug_runs": len(decided) - len(_gated(decided)),
+        "bug_runs": sum(1 for r in decided if (r.get("agent_options") or {}).get("bugs")),
         "latency": {"p50_ms": last_voice["p50_ms"], "p95_ms": last_voice["p95_ms"], "at": last_voice["started_at"]}
         if last_voice else None,
         "latency_limits": {"p50_ms": th.get("latency_p50_ms"), "p95_ms": th.get("latency_p95_ms")} if voice else None,
@@ -634,7 +658,7 @@ def dashboard(root: Path, runs_dir: Path, active_runs: set[str] = frozenset(),
             "decided": len(decided), "go": sum(r["decision"] == "GO" for r in decided),
             "no_go": sum(r["decision"] == "NO_GO" for r in decided),
             "insufficient": sum(r["decision"] == "NO_GO_INSUFFICIENT_EVIDENCE" for r in decided),
-            "go_rate": _go_rate(decided), "bug_runs": len(decided) - len(_gated(decided)),
+            "go_rate": _go_rate(decided), "bug_runs": sum(1 for r in decided if (r.get("agent_options") or {}).get("bugs")),
             "calls": sum(r.get("calls_started") or 0 for r in runs),
             "cost_usd": round(sum(r.get("cost_usd") or 0 for r in runs), 4),
             "scenarios": sum(x["stats"]["scenarios"] for x in rows),

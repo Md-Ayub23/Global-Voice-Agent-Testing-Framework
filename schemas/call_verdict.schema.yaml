@@ -67,6 +67,23 @@ properties:
       preset: {type: string}
       behaviours: {type: array, items: {type: string}}
 
+  load:
+    description: Phase 7, load runs only (loadstats.call_facts plus where the call ran in the load).
+    type: object
+    required: [stage, level, outcome]
+    properties:
+      stage: {type: integer}
+      stage_name: {type: string}
+      level: {description: "The stage's calls at once.", type: integer}
+      in_flight: {description: "Calls in flight when this one started, itself included.", type: integer}
+      start_s: {type: number}
+      end_s: {type: number}
+      outcome: {enum: [ok, failed, harness]}
+      why: {type: string}
+      answers: {description: "[seconds into the load, answer ms] per timed answer.", type: array}
+      blockers: {type: array, items: {type: string}}
+      missed: {type: array, items: {type: string}}
+
   judge_notes:
     description: Problems the AI judges met on this call (e.g. a judge gave no usable answer).
     type: array

@@ -76,11 +76,24 @@ def scripted(drafts=DRAFTS):
     return ScriptedLLM(reply)
 
 
+# The example as shipped, without tests and callers added later from the dashboard (Write tests for me /
+# Add from library): the tests below add those themselves.
+SHIPPED_PERSONAS = {"calm-adult", "fast-talker", "impatient-caller"}
+
+
+def shipped_example(folder):
+    shutil.copytree(ROOT / "examples" / "pipecat-food", folder, ignore=shutil.ignore_patterns("runs", "plans"))
+    for f in (folder / "scenarios").glob("gen-*.yaml"):
+        f.unlink()
+    for f in (folder / "personas").glob("*.yaml"):
+        if f.stem not in SHIPPED_PERSONAS:
+            f.unlink()
+    return folder
+
+
 @pytest.fixture
 def food(tmp_path):
-    folder = tmp_path / "pipecat-food"
-    shutil.copytree(ROOT / "examples" / "pipecat-food", folder, ignore=shutil.ignore_patterns("runs"))
-    return folder
+    return shipped_example(tmp_path / "pipecat-food")
 
 
 def plan_for(folder, drafts=DRAFTS, count=6):
@@ -218,8 +231,7 @@ def test_add_personas(food):
 
 @pytest.fixture
 def web_root(tmp_path, monkeypatch):
-    shutil.copytree(ROOT / "examples" / "pipecat-food", tmp_path / "examples" / "pipecat-food",
-                    ignore=shutil.ignore_patterns("runs"))
+    shipped_example(tmp_path / "examples" / "pipecat-food")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-0000000000")
     from vatf.web import plans
     monkeypatch.setattr(plans, "ClaudeClient", lambda *a, **k: scripted())

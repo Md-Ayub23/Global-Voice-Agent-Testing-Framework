@@ -1,0 +1,17 @@
+# Two caller turns; the load reference agent answers each after 300 ms + 250 ms per extra call in progress.
+schema_version: "0.1"
+kind: scenario
+id: load-ref.two-answers
+title: Two answers, timed under load
+profile: load-ref
+criticality: critical
+style: scripted
+modes: [voice]
+turns:
+  - caller: Hello, this is a load test, first turn.
+  - caller: And this is the second and last turn.
+checks:
+  - id: answers-timed
+    type: latency
+    p95_ms: 5000
+    min_answers: 2

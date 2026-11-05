@@ -177,7 +177,7 @@ allOf:
         data:
           required: [ended_by]
           properties:
-            ended_by: {enum: [caller, agent, max_turns, timeout, harness]}
+            ended_by: {description: "unknown: a real call (Phase 8) whose platform didn't say who ended it.", enum: [caller, agent, max_turns, timeout, harness, unknown]}
             reason: {type: string}
 
 $defs:

@@ -44,6 +44,11 @@ function stepsOf(p: Project, stats: ProjectStats, judges?: JudgeSummary, safetyR
         : `${main?.safety?.attacks ?? 0} attack calls ready · include them in a run` },
     { key: "run", title: "First run", icon: "play", need: "required", href: projectHref(k, "/new"), done: stats.runs > 0,
       text: stats.runs ? `${stats.runs} run${stats.runs === 1 ? "" : "s"} so far` : "Start a test run" },
+    { key: "baseline", title: "Baseline", icon: "anchor", need: "recommended", href: projectHref(k, "/runs"), done: !!main?.baseline,
+      text: main?.baseline ? "Every run is compared with it" : "Mark a good run, so later runs show what got worse" },
+    { key: "ops", title: "CI & alerts", icon: "bell", need: "optional", href: projectHref(k, "/setup/ops"), done: !!(main?.alerts || main?.health_checks),
+      text: main?.alerts || main?.health_checks ? [main.alerts ? `${main.alerts} alert${main.alerts === 1 ? "" : "s"}` : "", main.health_checks ? "health checks on" : ""].filter(Boolean).join(" · ")
+        : "Run in CI, on a schedule, and get a message on NO-GO" },
   ];
 }
 

@@ -268,7 +268,8 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
 }
 
 function KV({ obj }: { obj: Record<string, unknown> | null | undefined }) {
-  const entries = Object.entries(obj || {});
+  // A tool can answer with plain text or a list; show it as one value, not letter by letter.
+  const entries = obj == null ? [] : typeof obj === "object" && !Array.isArray(obj) ? Object.entries(obj) : [["result", obj] as [string, unknown]];
   if (!entries.length) return null;
   return (
     <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-[3px] mt-2 text-[12.5px]">

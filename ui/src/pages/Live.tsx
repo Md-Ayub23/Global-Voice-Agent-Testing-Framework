@@ -4,6 +4,8 @@ import { LatencyBars } from "../components/charts";
 import { Tip, useToast } from "../components/feedback";
 import { Icon } from "../components/Icon";
 import { ChecksList, Hero, heroToneOf } from "../components/runbits";
+import { LoadLiveCard } from "../components/load";
+import { SHAPE_LABEL } from "../lib/load";
 import { Timeline, whoIsNext, type TimelineHandle } from "../components/Timeline";
 import { Badge, Button, Card, CardHead, Chip, EmptyState, Notice, Progress, Skeleton, Spinner, Table } from "../components/ui";
 import { api } from "../lib/api";
@@ -18,7 +20,7 @@ export function Live({ project, jobId }: { project: Project; jobId: string | nul
   const { activeJob, projects } = useApp();
   const { data, error } = useLoad<Job | Job[]>(() => (jobId ? api.get<Job>(`/api/jobs/${jobId}`) : api.get<Job[]>("/api/jobs")), [jobId]);
   const base = [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }];
-  useCrumbs(jobId ? [...base, { label: "Results", href: projectHref(project.key, "/runs") }, { label: data && !Array.isArray(data) && data.kind === "exit-check" ? "Exit check" : "Test run" }]
+  useCrumbs(jobId ? [...base, { label: "Results", href: projectHref(project.key, "/runs") }, { label: data && !Array.isArray(data) && data.kind === "exit-check" ? "Exit check" : data && !Array.isArray(data) && data.kind === "load" ? "Load test" : "Test run" }]
     : [...base, { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Live" }]);
 
   if (!jobId) {
@@ -168,6 +170,43 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
     try { await api.post(`/api/jobs/${job.id}/stop`); toast("Stopping…"); }
     catch (e) { toast((e as Error).message, "bad"); setStopping(false); }
   };
+
+  if (initial.kind === "load") {
+    const info = run?.info;
+    const recent = lines.filter((l) => / call \d+ \(\d+ at once\): /.test(l)).slice(-14).reverse();
+    return (
+      <>
+        <div className="flex items-end gap-4 mt-2 mb-5 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <div className="flex flex-wrap items-center gap-2.5"><h1 className="text-[24px] font-semibold">Load test</h1><span id="status"><Badge status={job.status} /></span></div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-ink-2">
+              <b className="text-ink">{project.name}</b>
+              {runMode && <Chip tone={runMode === "voice" ? "agent" : "caller"} icon={runMode === "voice" ? "mic" : "text"}>{modeLabel(runMode)}</Chip>}
+              {info?.load && <Chip tone="accent" icon="activity">{SHAPE_LABEL[info.load.shape]} to {info.load.calls_at_once} at once</Chip>}
+              {job.request?.offline && <Chip>free dry run</Chip>}
+            </div>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span className="text-muted tabular-nums" id="elapsed">{fmtDuration(elapsed)}</span>
+            {job.status === "running" && <Button id="stop" variant="danger" icon="stop" disabled={stopping} onClick={stop}>Stop</Button>}
+          </div>
+        </div>
+        <div id="result"><Result job={job} ended={ended} exit={false} /></div>
+        {info?.load ? <LoadLiveCard stages={info.load.stages} live={run?.load_live ?? null} voice={runMode === "voice"} />
+          : <Card className="mb-4"><div className="flex items-center gap-2 text-ink-2">{finished ? "No load plan was written." : <><Spinner />{phase || "Getting ready…"}</>}</div></Card>}
+        {!finished && phase && !run?.load_live && <div className="text-muted text-[12.5px] -mt-2 mb-4 flex items-center gap-2"><Spinner />{phase}</div>}
+        <Card id="load-recent">
+          <CardHead title="Latest calls" sub="each one is a normal test call; open the run's report for every call and its checks" />
+          {recent.length ? (
+            <div className="grid gap-0.5 font-mono text-[12px]">
+              {recent.map((l, i) => <div key={i} className={/: (PASS|ok)/.test(l) ? "text-ink-2" : /FAIL|failed|ERROR|couldn't|error/i.test(l) ? "text-bad" : "text-ink-2"}>{l.trim()}</div>)}
+            </div>
+          ) : <div className="text-muted text-[12.5px]">{finished ? "No calls finished." : "Waiting for the first calls to finish…"}</div>}
+        </Card>
+        <Console lines={lines} open={finished && job.status !== "finished" && job.status !== "stopped"} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -441,7 +480,7 @@ function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean 
   return (
     <Hero tone={heroToneOf(d.decision)} className="mb-4" eyebrow="Release decision"
       title={<>{decisionTitle(d.decision)}{d.decision === "NO_GO_INSUFFICIENT_EVIDENCE" && <span className="text-lg"> · not enough evidence</span>}</>}
-      actions={<><Button href={pl(`/new?from=${runId}`)} icon="refresh">Run again</Button><Button href={runHref({ run_id: runId })} variant="primary" icon="file">Open report</Button></>}
+      actions={<><Button href={pl(job.kind === "load" ? `/load?file=${encodeURIComponent(job.request?.profile || "profile.yaml")}` : `/new?from=${runId}`)} icon="refresh">Run again</Button><Button href={runHref({ run_id: runId })} variant="primary" icon="file">Open report</Button></>}
       reasons={d.reasons.map((r) => r.message)} />
   );
 }

@@ -40,7 +40,7 @@ def test_run_command(jobs, clinic):
                                 "model": "claude-haiku-5-5"}, clinic)
     assert args == ["run", "examples/clinic", "--profile", "profile.yaml", "--scenario", HAPPY, "--repeats", "2",
                     "--agent-opt", "bugs=lie_on_failure", "--offline", "--quiet"]
-    assert command == ("uv run vatf run examples/clinic --profile profile.yaml --scenario clinic.book-checkup "
+    assert command == ("uv run python -m vatf run examples/clinic --profile profile.yaml --scenario clinic.book-checkup "
                        "--repeats 2 --agent-opt bugs=lie_on_failure --offline")  # --quiet is the dashboard's own
 
 
@@ -224,7 +224,7 @@ def test_a_run_started_from_the_api_is_followed_to_its_report(server):
     req = {"command": "run", "project": "examples/clinic", "profile": "profile.yaml", "scenarios": [HAPPY],
            "repeats": 1, "offline": True, "agent_options": {"bugs": "double_booking"}}
     status, preview = call(conn, "POST", "/api/jobs/preview", req)
-    assert status == 200 and preview["command"].startswith("uv run vatf run examples/clinic")
+    assert status == 200 and preview["command"].startswith("uv run python -m vatf run examples/clinic")
     status, job = call(conn, "POST", "/api/jobs", req)
     assert status == 200, job
 

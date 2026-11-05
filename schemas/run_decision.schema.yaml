@@ -37,7 +37,7 @@ properties:
       additionalProperties: false
       required: [rule, message]
       properties:
-        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings, metric, metric_warnings]}
+        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings, metric, metric_warnings, regression, regression_warnings, load_failed_calls, load_latency, load_metric, load_blocker, load_slowdown, load_pass_drop, load_drift, load_evidence, load_ok, load_warnings]}
         message: {type: string}
         refs:
           description: test_id or test_id/check_id pointing at the verdicts behind this reason.
@@ -125,7 +125,7 @@ properties:
     properties:
       decided_by:
         type: array
-        items: {enum: [all_checks, hard_checks, trusted_judges, reliability, latency, call_quality, evidence]}
+        items: {enum: [all_checks, hard_checks, trusted_judges, reliability, latency, call_quality, evidence, regression, load]}
       judge_opinions: {description: "Judge findings from items not trusted yet: shown, never counted.", type: integer}
       opinions_to_label: {description: "Of those, where the judges split and a person's label is wanted.", type: integer}
       trusted_items: {type: integer}
@@ -183,6 +183,41 @@ properties:
         talked_over_pct: {type: [number, "null"]}
         behaviours: {type: array, items: {type: string}}
 
+  load:
+    description: Phase 7, load runs only (decision.apply_load). The full numbers are in the run's load.json.
+    type: object
+    additionalProperties: false
+    required: [shape, calls_at_once, capacity, stages]
+    properties:
+      shape: {enum: [ramp, spike, soak, steady]}
+      calls_at_once: {type: integer, minimum: 1}
+      capacity: {description: "The highest level of calls at once up to which every stage met the limits.", type: integer, minimum: 0}
+      breaking: {type: [object, "null"]}
+      calls: {type: integer}
+      failed: {type: integer}
+      harness_errors: {type: integer}
+      p95_limit_ms: {type: [number, "null"]}
+      unattributed_tool_calls: {type: integer}
+      stages:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            index: {type: integer}
+            name: {type: string}
+            kind: {enum: [step, normal, spike, recovery, hold, window]}
+            level: {type: integer}
+            calls: {type: integer}
+            finished: {type: integer}
+            failed: {type: integer}
+            failed_pct: {type: [number, "null"]}
+            pass_rate: {type: [number, "null"]}
+            trusted: {type: boolean}
+            meets_limits: {type: [boolean, "null"]}
+            p50_ms: {type: [integer, "null"]}
+            p95_ms: {type: [integer, "null"]}
+
   safety:
     description: The built-in safety tests in this run (attacks.py) and every finding, worst first.
     type: object
@@ -213,6 +248,25 @@ properties:
             result: {type: string}
             can_block: {type: boolean}
             message: {type: string}
+
+  baseline:
+    description: >
+      Phase 6. This run compared with the agent's baseline (compare.py); the full list of changes is in
+      comparison.json. Absent when the agent has no baseline or the run was started with --baseline none.
+    type: object
+    additionalProperties: false
+    required: [run_id, like_for_like, regressions, worse, better, blocking]
+    properties:
+      run_id: {type: [string, "null"]}
+      decision: {type: [string, "null"]}
+      finished_at: {type: [string, "null"]}
+      like_for_like: {description: "Same mode, caller conditions, speech engine and offline setting.", type: boolean}
+      regressions: {description: "Tests that passed every repeat in the baseline and failed now.", type: integer}
+      worse: {type: integer}
+      better: {type: integer}
+      new: {type: integer}
+      removed: {type: integer}
+      blocking: {description: "Changes set to block (profile regression.<kind>.blocks) that made this a NO_GO.", type: integer}
 
   calls:
     description: Pointers to every call verdict in the run.

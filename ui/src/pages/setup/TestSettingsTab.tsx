@@ -21,6 +21,19 @@ const GATE: Row[] = [
   ["judge_min_tnr", "Good calls the judges must pass (0 to 1)", "Of the calls you labelled Pass, the share the judges passed too. Below it, the item only gives an opinion.", 0.05],
   ["max_harness_retries", "Retries after a Vocto error", "A call that fails because of Vocto itself is run again (never blamed on the agent)."],
 ];
+// The regression gate's defaults (src/vatf/compare.py DEFAULTS) and what each change means.
+const GATE_DEFAULTS: Record<string, Obj> = {
+  new_failures: { blocks: true }, latency: { blocks: false, increase_pct: 20, increase_ms: 150 },
+  scores: { blocks: false, drop_points: 10 }, metrics: { blocks: false }, judges: { blocks: false, drop_points: 20 }, safety: { blocks: false },
+};
+const REGRESSION: [string, string, string, [string, string][]][] = [
+  ["new_failures", "New failures", "A test that passed every repeat in the baseline fails at least once.", []],
+  ["latency", "Slower answers", "p50 or p95 response time rose by more than both limits (voice runs).", [["increase_pct", "%"], ["increase_ms", "ms"]]],
+  ["scores", "Lower scores", "Accuracy, Experience, Security or Safety fell by this many points or more.", [["drop_points", "points"]]],
+  ["metrics", "Call quality", "A call quality metric moved to a worse band (good to warn, warn to bad).", []],
+  ["judges", "AI judge items", "An item's pass rate fell by this many points or more.", [["drop_points", "points"]]],
+  ["safety", "Safety", "A safety test fails a check it passed in the baseline (both runs with safety tests).", []],
+];
 const LIMITS: Row[] = [
   ["max_turns", "Most caller turns per call", "Stops a conversation that goes round in circles."],
   ["follow_up_turns", "Turns Claude adds after a script's fixed lines", "Live runs: Claude listens to the agent and carries on the call (pushes on in a safety test, finishes an order). 0: calls end with their fixed lines."],
@@ -33,8 +46,20 @@ const LIMITS: Row[] = [
 
 export function TestSettingsTab({ detail, reload }: TabProps) {
   const { system } = useApp();
-  const d = useDraft({ thresholds: asObj(detail.raw.thresholds), limits: asObj(detail.raw.limits), metrics: asObj(detail.raw.metrics) },
-    detail.file, detail.project, reload);
+  const d = useDraft({ thresholds: asObj(detail.raw.thresholds), limits: asObj(detail.raw.limits), metrics: asObj(detail.raw.metrics),
+    regression: asObj(detail.raw.regression) }, detail.file, detail.project, reload);
+  // Regression gate (Phase 6): Vocto's defaults, then a profile this one extends, then this file.
+  const gateOwn = (k: string) => asObj(asObj(d.draft.regression)[k]);
+  const gateBase = (k: string) => ({ ...asObj(GATE_DEFAULTS[k]), ...asObj(asObj(detail.base.regression)[k]) });
+  const gateVal = (k: string, f: string) => (gateOwn(k)[f] ?? gateBase(k)[f]) as number | boolean;
+  const setGate = (k: string, f: string, v: number | boolean | undefined) => {
+    const row = { ...gateOwn(k) } as Obj;
+    if (v === undefined || v === gateBase(k)[f]) delete row[f]; else row[f] = v;
+    const all = { ...asObj(d.draft.regression) } as Obj;
+    if (Object.keys(row).length) all[k] = row; else delete all[k];
+    d.setDraft({ ...d.draft, regression: all });
+  };
+  const gateEnabled = (asObj(d.draft.regression).enabled ?? asObj(detail.base.regression).enabled ?? true) as boolean;
   const own = (id: string) => asObj(asObj(d.draft.metrics)[id]);
   const base = (id: string) => asObj(asObj(detail.base.metrics)[id]);
   const setMetric = (id: string, key: "good" | "warn" | "blocks", v: number | boolean | undefined) => {
@@ -97,6 +122,36 @@ export function TestSettingsTab({ detail, reload }: TabProps) {
                   <label><Switch id={`metric-${m.id}-blocks`} checked={!!(own(m.id).blocks ?? base(m.id).blocks)} label=""
                     onChange={(v) => setMetric(m.id, "blocks", v)} /></label>
                 </td>
+              </tr>
+            ))}
+          </Table>
+        </div>
+      </Block>
+      <Block title="Regression gate" sub="Every run is compared with the agent's baseline (Results › Set as baseline). Each change for the worse is listed on the run's report; the ones with Blocks on also turn GO into NO-GO. With 3 repeats, small timing and score changes are mostly noise, so only new failures block unless you switch more on. Runs made under different conditions are compared but never blocked.">
+        <label><Switch id="gate-on" checked={gateEnabled} label="Compare runs with the baseline" onChange={(v) => {
+          const all = { ...asObj(d.draft.regression) } as Obj;
+          if (v) delete all.enabled; else all.enabled = false;
+          d.setDraft({ ...d.draft, regression: all });
+        }} /></label>
+        <div id="gate-rules">
+          <Table compact head={["Change", "Limit", "Blocks"]}>
+            {REGRESSION.map(([k, title, about, limits]) => (
+              <tr key={k} data-gate={k}>
+                <td className="min-w-[240px]"><b>{title}</b><div className="text-muted text-[11.5px]">{about}</div></td>
+                <td className="min-w-[200px]">
+                  {limits.length ? (
+                    <div className="flex gap-2">
+                      {limits.map(([f, unit]) => (
+                        <label key={f} className="flex items-center gap-1.5 text-[12.5px] text-muted">
+                          <span className="w-[88px]"><Num id={`gate-${k}-${f}`} min={0} value={gateOwn(k)[f] as number}
+                            placeholder={String(gateBase(k)[f])} onChange={(v) => setGate(k, f, v)} /></span>{unit}
+                        </label>
+                      ))}
+                    </div>
+                  ) : <span className="text-muted text-[12px]">any</span>}
+                </td>
+                <td className="w-[90px]"><label><Switch id={`gate-${k}-blocks`} checked={!!gateVal(k, "blocks")} label=""
+                  onChange={(v) => setGate(k, "blocks", v)} /></label></td>
               </tr>
             ))}
           </Table>

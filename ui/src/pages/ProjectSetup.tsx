@@ -18,8 +18,9 @@ import { LogsTab } from "./setup/LogsTab";
 import { TestPlanTab } from "./setup/TestPlanTab";
 import { TestSettingsTab } from "./setup/TestSettingsTab";
 import { ToolsTab } from "./setup/ToolsTab";
+import { OpsTab } from "./setup/OpsTab";
 
-export type SetupTab = "connection" | "tools" | "backend" | "logs" | "cases" | "callers" | "safety" | "rules" | "judges";
+export type SetupTab = "connection" | "tools" | "backend" | "logs" | "cases" | "callers" | "safety" | "rules" | "ops" | "judges";
 interface SetupMeta { value: SetupTab; label: string; icon: IconName; sub: string; step?: number }
 // The set-up pages in the order the sidebar shows them. Tools, database and logs are tabs of one step, "Tools & data".
 export const SETUP_TABS: SetupMeta[] = [
@@ -30,10 +31,11 @@ export const SETUP_TABS: SetupMeta[] = [
   { value: "cases", step: 3, label: "Test cases", icon: "plan", sub: "The situations the agent must handle. Write them yourself or let Claude draft them from the agent's instructions." },
   { value: "callers", step: 4, label: "Callers", icon: "user", sub: "Who calls: the personas a scenario can be run with, from calm to impatient." },
   { value: "safety", step: 5, label: "Safety tests", icon: "shield", sub: "Attack calls that try to make the agent leak, lie or go off its job." },
-  { value: "rules", step: 6, label: "Pass rules", icon: "sliders", sub: "What a GO needs for this agent: response times, repeats, coverage and budget." },
+  { value: "rules", step: 6, label: "Pass rules", icon: "sliders", sub: "What a GO needs for this agent: response times, repeats, coverage, budget, and what may not get worse than the baseline." },
+  { value: "ops", step: 7, label: "CI & alerts", icon: "bell", sub: "Run this agent's tests in CI on every change, on a schedule as health checks, and get a message when a release is blocked." },
   { value: "judges", label: "Judge settings", icon: "sparkles", sub: "What the AI judges score in every conversation, and what the agent may say." },
 ];
-const STEPS = 6;
+const STEPS = 7;
 const DATA_TABS: SetupTab[] = ["tools", "backend", "logs"];
 // Old addresses (before the redesign) and where they live now.
 export const SETUP_ALIASES: Record<string, SetupTab> = { agent: "connection", plan: "cases", settings: "rules" };
@@ -64,6 +66,7 @@ export function ProjectSetup({ project, tab, query }: { project: Project; tab: S
     callers: () => <TestPlanTab part="callers" detail={detail} reload={reloadAll} edit={edit} projectKey={project.key} />,
     safety: () => <SafetyCard key={`sf${file}`} detail={detail} reload={reloadAll} projectKey={project.key} />,
     rules: () => <TestSettingsTab key={`s${file}`} detail={detail} reload={reloadAll} />,
+    ops: () => <OpsTab key={`o${file}`} detail={detail} reload={reloadAll} projectKey={project.key} />,
     judges: () => <JudgesTab key={`j${file}`} detail={detail} reload={reloadAll} projectKey={project.key} />,
   };
   const order = SETUP_TABS.filter((t) => t.step);
@@ -71,8 +74,8 @@ export function ProjectSetup({ project, tab, query }: { project: Project; tab: S
   const next = idx >= 0 ? order[idx + 1] : undefined;
   const shared = ["tools", "backend", "logs", "cases", "callers", "safety", "judges"].includes(tab);   // the same for every channel
   const channelPicker = profiles.length > 1 && !shared && (
-    <div className="flex items-center gap-2.5">
-      <span className="text-muted text-[13px]">Channel</span>
+    <div className="flex items-center gap-2.5 min-w-0 max-w-full">
+      <span className="text-muted text-[13px] flex-none">Channel</span>
       <Seg id="profile-file" value={file} onChange={(f) => navigate(`${projectHref(project.key, `/setup/${tab}`)}?${qs({ file: f })}`)}
         options={profiles.map((p) => ({ value: p.file, label: channelLabel(p, profiles), icon: p.mode === "voice" ? "mic" : "text" }))} />
     </div>

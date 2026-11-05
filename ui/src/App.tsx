@@ -11,12 +11,16 @@ import { projectByKey } from "./lib/links";
 import { useHashLocation } from "./lib/router";
 import type { Project, RunSummary } from "./lib/types";
 import { CallPage } from "./pages/Call";
+import { ComparePage } from "./pages/Compare";
 import { Dashboard } from "./pages/Dashboard";
 import { Files } from "./pages/Files";
 import { JudgesPageView } from "./pages/Judges";
 import { Labels } from "./pages/Labels";
 import { History } from "./pages/History";
 import { Live } from "./pages/Live";
+import { LoadTestPage } from "./pages/LoadTest";
+import { MonitorPageView, type MonitorTab } from "./pages/Monitor";
+import { MonitorCallPage } from "./pages/MonitorCall";
 import { NewRun } from "./pages/NewRun";
 import { ProjectOverviewPage } from "./pages/ProjectOverview";
 import { ProjectSetup, SETUP_ALIASES, SETUP_TABS, setupSection, type SetupTab } from "./pages/ProjectSetup";
@@ -41,15 +45,20 @@ const PROJECT_ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), Proje
   [new RegExp(`^/p/${K}/?$`), "overview", (p) => <ProjectOverviewPage project={p} />],
   [new RegExp(`^/p/${K}/new$`), "new", (p, _m, q) => <NewRun project={p} query={q} />],
   [new RegExp(`^/p/${K}/live(?:/(j-[\\w-]+))?$`), "results", (p, m) => <Live project={p} jobId={m[2] || null} />],
+  [new RegExp(`^/p/${K}/load$`), "load", (p, _m, q) => <LoadTestPage project={p} query={q} />],
   [new RegExp(`^/p/${K}/runs$`), "results", (p) => <History project={p} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)$`), "results", (p, m) => <RunReport project={p} runId={m[2]} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/calls/(t-[\\w-]+)$`), "results", (p, m) => <CallPage project={p} runId={m[2]} testId={m[3]} />],
   [new RegExp(`^/p/${K}/judges$`), "judges", (p) => <JudgesPageView project={p} />],
+  [new RegExp(`^/p/${K}/compare$`), "compare", (p, _m, q) => <ComparePage project={p} query={q} />],
   [new RegExp(`^/p/${K}/labels$`), "judges", (p) => <Labels project={p} />],
   [new RegExp(`^/p/${K}/labels/(r-[\\w-]+)/(t-[\\w-]+)$`), "judges", (p, m) => <Labels project={p} runId={m[2]} testId={m[3]} />],
   [new RegExp(`^/p/${K}/setup/(\\w+)$`), (m) => setupSection(SETUP_ALIASES[m[2]] || m[2]), (p, m, q) =>
     m[2] in SETUP_ALIASES ? <SetupRedirect to={projectHref(p.key, `/setup/${oldPlanTarget(m[2], q)}`)} query={q} />
       : SETUP_TABS.some((t) => t.value === m[2]) ? <ProjectSetup project={p} tab={m[2] as SetupTab} query={q} /> : null],
+  [new RegExp(`^/p/${K}/calls(?:/(list|import|settings))?$`), "calls", (p, m, q) =>
+    <MonitorPageView project={p} tab={(m[2] === "list" ? "calls" : m[2] || "overview") as MonitorTab} query={q} />],
+  [new RegExp(`^/p/${K}/calls/(c-[\\w-]+)$`), "calls", (p, m) => <MonitorCallPage project={p} callId={m[2]} />],
   [new RegExp(`^/p/${K}/files$`), "setup:cases", (p, _m, q) => <Files project={p} query={q} />],
 ];
 

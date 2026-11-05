@@ -320,3 +320,134 @@ class LocalDecisionEngine:
             "calls": [{"test_id": v["test_id"], "scenario_id": v["scenario_id"], "repeat": v["repeat"],
                        "status": v["status"]} for v in verdicts],
         }
+
+
+def _change_refs(decision: Mapping[str, Any], change: Mapping[str, Any]) -> list[str]:
+    """The calls behind a test regression (its failed repeats in this run)."""
+    if change["kind"] != "test":
+        return []
+    return [c["test_id"] for c in decision.get("calls", []) if c["scenario_id"] == change["id"] and c["status"] == "FAIL"]
+
+
+def apply_regression(decision: dict[str, Any], comparison: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Phase 6: folds the comparison with the baseline (compare.py) into the decision.
+
+    A change set to block (profile `regression`) turns GO or not-enough-evidence into NO_GO with rule
+    `regression`; the other changes for the worse are listed as `regression_warnings`. The decision
+    keeps a short `baseline` block; the full comparison is in comparison.json next to it.
+    """
+    if not comparison:
+        return decision
+    changes = comparison["changes"]
+    blocking = [c for c in changes if c["blocks"]]
+    warn = [c for c in changes if not c["blocks"] and c["direction"] in ("regression", "worse")]
+    reasons = list(decision["reasons"])
+    if blocking:
+        new = [{"rule": "regression", "message": f"Worse than the baseline: {c['message']}",
+                **({"refs": refs} if (refs := _change_refs(decision, c)) else {})} for c in blocking]
+        if decision["decision"] == "NO_GO":
+            later = ("coverage", "needs_review", "load_evidence")
+            reasons = [r for r in reasons if r["rule"] not in later] + new + [r for r in reasons if r["rule"] in later]
+        else:
+            reasons = new + [r for r in reasons if r["rule"] not in ("all_targets_met", "safety_warnings",
+                                                                       "metric_warnings", "load_ok")]
+        decision["decision"] = "NO_GO"
+        decision["exit_code"] = EXIT_CODES["NO_GO"]
+        layers = [x for x in decision["basis"]["decided_by"] if x != "all_checks"]
+        decision["basis"]["decided_by"] = layers + ["regression"]
+    if warn:
+        why = ("the runs were made differently (not like-for-like), so this doesn't block"
+               if not comparison["like_for_like"] else "not set to block in Pass rules > Regression gate")
+        refs = sorted({r for c in warn for r in _change_refs(decision, c)})[:20]
+        reasons.append({"rule": "regression_warnings",
+                        "message": f"Worse than the baseline, {why}: " + " ".join(c["message"] for c in warn[:6])
+                                   + (f" And {len(warn) - 6} more." if len(warn) > 6 else ""),
+                        **({"refs": refs} if refs else {})})
+    decision["reasons"] = reasons
+    counts = comparison["counts"]
+    decision["baseline"] = {
+        "run_id": comparison["baseline"]["run_id"], "decision": comparison["baseline"]["decision"],
+        "finished_at": comparison["baseline"]["finished_at"], "like_for_like": comparison["like_for_like"],
+        "regressions": counts["regression"], "worse": counts["worse"], "better": counts["better"],
+        "new": counts["new"], "removed": counts["removed"], "blocking": len(blocking),
+    }
+    return decision
+
+
+def apply_load(decision: dict[str, Any], load: Mapping[str, Any]) -> dict[str, Any]:
+    """Phase 7: a load run is decided by its load rules (loadstats.summarise), not by pass^k.
+
+    The decision keeps every summary block of a normal run (scorecard, latency, call quality, calls),
+    so Results, CI and alerts read it as usual; its decision and reasons come from the load:
+
+      NO_GO         a trusted stage broke a limit (failed calls, answer time p95, a blocking metric), a
+                    blocker check failed under load, or a top-vs-low rule set to block (slowdown, pass rate, drift)
+      not enough    a stage could not be trusted (too few calls, Vocto's computer couldn't keep up), or
+                    too many of Vocto's own errors; with unmatched tool calls, blocker checks can't be trusted
+      GO            every stage met the limits; the warnings (slowdown, pass rate, drift, call quality) are listed
+    """
+    from .loadstats import HARNESS_SHARE
+
+    bad: list[dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
+    stages = load["stages"]
+    for st in stages:
+        where = f"{st['name']} ({st['level']} call{'s' if st['level'] != 1 else ''} at once)"
+        if st["trusted"]:
+            for p in st["problems"]:
+                rule = {"failed_calls": "load_failed_calls", "latency": "load_latency"}.get(p["rule"], "load_metric")
+                bad.append({"rule": rule, "message": f"{where}: {p['message']}",
+                            **({"refs": st["failed_refs"]} if p["rule"] == "failed_calls" and st["failed_refs"] else {})})
+        elif st["calls"] or st["seconds"]:
+            evidence.append({"rule": "load_evidence", "message": f"{where} can't be judged: {st['untrusted_why']}."})
+    blockers: dict[str, list[str]] = {}
+    for st in stages:
+        for check, refs in st["blockers"].items():
+            blockers.setdefault(check, []).extend(refs)
+    for check, refs in blockers.items():
+        msg = (f"Under load the agent did something it must never do: blocker check {check} failed in "
+               f"{len(refs)} call(s).")
+        if load.get("unattributed_tool_calls"):
+            evidence.append({"rule": "load_evidence", "message": msg + " It can't be trusted in this run: some tool "
+                                                                         "calls couldn't be matched to their call.",
+                             "refs": refs[:20]})
+        else:
+            bad.append({"rule": "load_blocker", "message": msg, "refs": refs[:20]})
+    for b in load.get("blocking", []):
+        bad.append({"rule": f"load_{b['rule']}", "message": b["message"]})
+    if load.get("harness_share", 0) > HARNESS_SHARE:
+        evidence.append({"rule": "load_evidence", "message":
+                         f"{load['harness_errors']} of {load['calls']} calls ended in an error on Vocto's side "
+                         f"(more than {HARNESS_SHARE:.0%}); see the calls marked ERROR."})
+    if not load["calls"]:
+        evidence.append({"rule": "load_evidence", "message": "No load call was made."})
+    if bad:
+        verdict, reasons = "NO_GO", bad + evidence
+    elif evidence:
+        verdict, reasons = "NO_GO_INSUFFICIENT_EVIDENCE", evidence
+    else:
+        verdict = "GO"
+        p95 = max((st["latency"]["p95_ms"] or 0 for st in stages), default=0)
+        limit = load.get("p95_limit_ms")
+        reasons = [{"rule": "load_ok", "message":
+                    f"Handled up to {load['capacity']} call{'s' if load['capacity'] != 1 else ''} at once: "
+                    f"{load['calls']} calls, failed calls at most {load['limits']['max_failed_pct']:g}% in every stage"
+                    + (f", answer time p95 at most {p95:,} ms (limit {limit:,.0f} ms)" if limit else
+                       (f", answer time p95 at most {p95:,} ms" if p95 else "")) + "."}]
+    if load.get("warnings") and verdict != "NO_GO":
+        reasons.append({"rule": "load_warnings", "message": " ".join(w["message"] for w in load["warnings"][:6])
+                        + " These don't block (switch Blocks on in the load test's limits to make them)."})
+    elif load.get("warnings"):
+        reasons.append({"rule": "load_warnings", "message": " ".join(w["message"] for w in load["warnings"][:6])})
+    decision["decision"] = verdict
+    decision["exit_code"] = EXIT_CODES[verdict]
+    decision["reasons"] = reasons
+    layers = ["load"] + (["evidence"] if evidence else [])
+    decision["basis"] = {**decision.get("basis", {}), "decided_by": layers}
+    decision["load"] = {k: load[k] for k in ("shape", "calls_at_once", "capacity", "breaking", "calls", "failed",
+                                             "harness_errors", "p95_limit_ms", "unattributed_tool_calls")}
+    decision["load"]["stages"] = [{k: st[k] for k in ("index", "name", "kind", "level", "calls", "finished", "failed",
+                                                      "failed_pct", "pass_rate", "trusted", "meets_limits")}
+                                  | {"p95_ms": st["latency"]["p95_ms"], "p50_ms": st["latency"]["p50_ms"]}
+                                  for st in stages]
+    return decision

@@ -420,6 +420,212 @@ properties:
         warn: {type: number}
         blocks: {type: boolean, default: false}
 
+  regression:
+    description: >
+      Phase 6 regression gate (src/vatf/compare.py): how a run is compared with the agent's baseline
+      (baselines/<profile>.json) and which changes for the worse block the release. Unset fields keep the defaults.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled: {description: "Compare runs with the baseline when there is one.", type: boolean, default: true}
+      new_failures:
+        description: A test that passed every repeat in the baseline fails at least once now.
+        type: object
+        additionalProperties: false
+        properties: {blocks: {type: boolean, default: true}}
+      latency:
+        description: Response time p50 or p95 rose by more than increase_pct and increase_ms (the larger of the two).
+        type: object
+        additionalProperties: false
+        properties:
+          blocks: {type: boolean, default: false}
+          increase_pct: {type: number, minimum: 0, default: 20}
+          increase_ms: {type: number, minimum: 0, default: 150}
+      scores:
+        description: The Accuracy, Experience, Security or Safety score fell by drop_points or more.
+        type: object
+        additionalProperties: false
+        properties:
+          blocks: {type: boolean, default: false}
+          drop_points: {type: number, minimum: 0, default: 10}
+      metrics:
+        description: A call quality metric moved to a worse band (good to warn, warn to bad).
+        type: object
+        additionalProperties: false
+        properties: {blocks: {type: boolean, default: false}}
+      judges:
+        description: An AI judge item's pass rate fell by drop_points or more.
+        type: object
+        additionalProperties: false
+        properties:
+          blocks: {type: boolean, default: false}
+          drop_points: {type: number, minimum: 0, default: 20}
+      safety:
+        description: A safety test fails a check it passed in the baseline.
+        type: object
+        additionalProperties: false
+        properties: {blocks: {type: boolean, default: false}}
+      load:
+        description: "Load tests vs the load baseline, level by level: failed calls up by failed_points, pass rate down by pass_drop_points, slower p95 (the latency limits), lower capacity."
+        type: object
+        additionalProperties: false
+        properties:
+          blocks: {type: boolean, default: false}
+          failed_points: {type: number, minimum: 0, default: 2}
+          pass_drop_points: {type: number, minimum: 0, default: 20}
+
+  alerts:
+    description: >
+      Phase 6 (src/vatf/alerts.py): where to send a message after a run. Runs with bug switches never alert.
+      Keep the URL in the .env file and write ${NAME} here.
+    type: array
+    items:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        name: {type: string}
+        type: {enum: [slack, discord, webhook], default: webhook, description: "slack also suits Google Chat and Mattermost."}
+        url: {type: string}
+        enabled: {type: boolean, default: true}
+        events:
+          description: >
+            Which runs alert. Default no_go, regression, recovered, and the real-call alerts (Phase 8):
+            monitor (an alert rule over real calls broke) and monitor_recovered (they all cleared).
+          type: array
+          items: {enum: [no_go, regression, insufficient, recovered, monitor, monitor_recovered]}
+
+  health_checks:
+    description: >
+      Phase 6 (src/vatf/health.py): a short run on a schedule. The dashboard starts one every every_minutes
+      while it is open; `python -m vatf health <project>` runs one now (for cron or Task Scheduler).
+    type: object
+    additionalProperties: false
+    properties:
+      enabled: {type: boolean, default: false}
+      every_minutes: {type: integer, minimum: 5, default: 60}
+      scenarios: {description: "Test ids. Empty = the critical tests (all when none is critical).", type: array, items: {type: string}}
+      repeats: {type: integer, minimum: 1, maximum: 10, default: 1}
+      conditions: {enum: [as_written, phone, noisy, hard], default: as_written}
+      judges: {description: "Run the AI judges too (costs money on every check).", type: boolean, default: false}
+      start_agent: {description: "Scheduled checks start the agent first (agent_process). Leave off for an agent that is already running.", type: boolean, default: false}
+
+  load:
+    description: >
+      Phase 7 load test (src/vatf/load.py): many ordinary test calls at the same time, in a shape, with a
+      GO / NO-GO for that load. `python -m vatf load <project>`, or the dashboard's Load test page.
+      Every stage runs at or below calls_at_once, so every stage must meet the limits.
+    type: object
+    additionalProperties: false
+    properties:
+      shape:
+        description: "ramp: 1 call up to calls_at_once in steps; spike: normal, everyone at once, normal again; soak: hold calls_at_once for a long time; steady: hold calls_at_once."
+        enum: [ramp, spike, soak, steady]
+        default: ramp
+      calls_at_once: {description: "The target: the most calls at the same time (the busiest time you expect).", type: integer, minimum: 1, maximum: 200, default: 5}
+      start_at: {description: "Ramp: the first level. Spike: the normal traffic before and after the spike.", type: integer, minimum: 1, default: 1}
+      steps: {description: "Ramp: levels from start_at up to calls_at_once.", type: integer, minimum: 1, maximum: 50, default: 4}
+      step_minutes: {description: "Ramp: how long each level runs.", type: number, minimum: 0, default: 2}
+      minutes: {description: "Steady and soak: how long to hold calls_at_once. Spike: how long the spike lasts.", type: number, minimum: 0, default: 10}
+      before_minutes: {description: "Spike: normal traffic before the spike.", type: number, minimum: 0, default: 2}
+      after_minutes: {description: "Spike: normal traffic after the spike (the recovery).", type: number, minimum: 0, default: 2}
+      window_minutes: {description: "Soak: the hold is read in windows this long, to see drift.", type: number, minimum: 0, default: 5}
+      pause_seconds: {description: "Each simulated caller waits this long before its next call.", type: number, minimum: 0, default: 0}
+      max_calls: {description: "A load test never starts more calls than this.", type: integer, minimum: 1, default: 200}
+      scenarios: {description: "Test ids, taken in turn. Empty = the tests in this mode without planted tool faults or safety attacks.", type: array, items: {type: string}}
+      caller: {description: "free: scripted lines and the rule-based caller (no AI cost); claude: Claude plays the callers.", enum: [free, claude], default: free}
+      judges: {description: "Run the AI judges on every load call (costs money).", type: boolean, default: false}
+      conditions: {description: "Voice: caller conditions over every call.", enum: [as_written, phone, noisy, hard], default: as_written}
+      start_agent: {description: "Start the agent first (agent_process) and stop it after.", type: boolean, default: false}
+      limits:
+        type: object
+        additionalProperties: false
+        properties:
+          max_failed_pct: {description: "NO-GO when more calls than this fail in a stage (couldn't connect, agent error, stopped answering, ran too long).", type: number, minimum: 0, default: 2}
+          p95_ms: {description: "NO-GO when the answer time p95 in a stage is over this. Empty: voice uses thresholds.latency_p95_ms, text has none.", type: [number, "null"], exclusiveMinimum: 0}
+          slowdown:
+            description: Answer time p95 at the top level vs the lowest level rose by more than pct and ms.
+            type: object
+            additionalProperties: false
+            properties:
+              blocks: {type: boolean, default: false}
+              pct: {type: number, minimum: 0, default: 50}
+              ms: {type: number, minimum: 0, default: 300}
+          pass_drop:
+            description: The pass rate at the top level fell by points or more from the lowest level.
+            type: object
+            additionalProperties: false
+            properties:
+              blocks: {type: boolean, default: false}
+              points: {type: number, minimum: 0, default: 20}
+          drift:
+            description: "Soak: the last window's p95 rose by more than pct over the first's, or failed calls went up."
+            type: object
+            additionalProperties: false
+            properties:
+              blocks: {type: boolean, default: false}
+              pct: {type: number, minimum: 0, default: 50}
+          max_lag_ms: {description: "Vocto's own computer: event-loop lag p95 above this makes a stage untrustworthy (not enough evidence, never NO-GO).", type: number, minimum: 1, default: 100}
+          min_calls: {description: "A stage needs this many finished calls to decide anything.", type: integer, minimum: 1, default: 3}
+
+  monitor:
+    description: >
+      Phase 8 (src/vatf/monitor/): monitoring real production calls. Calls come in by upload, a webhook or
+      `python -m vatf monitor import`; personal data is removed before anything is saved; each call is scored
+      with the call-quality metrics, real-call checks and (on a sample) the AI judges; alert rules go out
+      through the alerts targets. Edited on the dashboard's Real calls page.
+    type: object
+    additionalProperties: false
+    properties:
+      enabled: {type: boolean, default: true}
+      intake:
+        type: object
+        additionalProperties: false
+        properties:
+          token: {description: "The webhook's token, as ${NAME} (the value lives in the .env file).", type: [string, "null"]}
+          listen: {description: "The dashboard receives this agent's webhook calls while it is open.", type: boolean, default: false}
+          port: {description: "The dashboard's port for real-call webhooks (one for all agents).", type: integer, minimum: 1024, maximum: 65535, default: 8791}
+      privacy:
+        type: object
+        additionalProperties: false
+        properties:
+          redact:
+            description: Kinds of personal data removed from real calls before saving. Default all.
+            type: array
+            items: {enum: [email, bank, card, id_number, phone, birth_date, address, name]}
+          patterns:
+            description: Extra things to remove, each a name and a regular expression (pii.mask_patterns also apply).
+            type: array
+            items:
+              type: object
+              additionalProperties: false
+              required: [name, regex]
+              properties:
+                name: {type: string, pattern: "^[a-z][a-z0-9_]*$"}
+                regex: {type: string}
+          keep_recording_links: {description: "Keep the platform's recording link with each call.", type: boolean, default: false}
+          retention_days: {description: "Real calls older than this are deleted. 0 keeps them.", type: integer, minimum: 0, maximum: 3650, default: 30}
+      scoring:
+        type: object
+        additionalProperties: false
+        properties:
+          judges: {description: "Run the AI judges on real calls (costs money).", type: boolean, default: true}
+          judge_share_pct: {description: "Share of calls the judges score (a fixed sample by call id).", type: number, minimum: 0, maximum: 100, default: 100}
+          judge_max_per_day: {type: integer, minimum: 0, default: 50}
+          judge_budget_usd_per_day: {type: number, minimum: 0, default: 5}
+          always_judge_flagged: {description: "Calls a check or metric flagged are always judged (within the daily caps).", type: boolean, default: true}
+      alerts:
+        type: object
+        additionalProperties: false
+        properties:
+          window_hours: {type: number, minimum: 1, maximum: 720, default: 24}
+          min_calls: {description: "Rate rules wait for this many calls in the window.", type: integer, minimum: 1, default: 10}
+          pass_rate_below: {type: [number, "null"], minimum: 0, maximum: 100, default: 85}
+          flagged_above: {type: [number, "null"], minimum: 0, maximum: 100, default: 25}
+          metrics_bad: {description: "Alert when a call-quality metric is in its bad band over the window.", type: boolean, default: true}
+          safety: {description: "Alert on any failed safety judge item.", type: boolean, default: true}
+          false_success: {description: "Alert on any possible false success.", type: boolean, default: true}
+
   limits:
     description: Cost and safety caps for one run.
     type: object

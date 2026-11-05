@@ -8,12 +8,14 @@ import { Tip } from "./feedback";
 import { Icon, type IconName } from "./Icon";
 import { Badge, Chip, Notice } from "./ui";
 
-export function OptionChips({ run }: { run: { mode?: string | null; offline?: boolean | null; agent_options?: Options | null } }) {
+export function OptionChips({ run }: { run: { mode?: string | null; offline?: boolean | null; agent_options?: Options | null; trigger?: string } }) {
   const bugs = (run.agent_options?.bugs || "").split(",").filter(Boolean);
   return (
     <>
       {run.mode && <Chip tone={run.mode === "voice" ? "agent" : "caller"} icon={run.mode === "voice" ? "mic" : "text"}>{run.mode}</Chip>}
       {run.offline && <Chip icon="bolt">dry run</Chip>}
+      {run.trigger === "ci" && <Chip icon="plug" title="Started by CI">CI</Chip>}
+      {run.trigger === "health" && <Chip icon="activity" title="A scheduled health check">health check</Chip>}
       {bugs.map((b) => <Chip key={b} tone="bad" icon="alert">{b}</Chip>)}
     </>
   );

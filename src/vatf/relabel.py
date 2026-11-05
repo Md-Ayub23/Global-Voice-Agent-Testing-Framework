@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .calibration import add_labels, calibration, label_key, load_labels
-from .decision import LocalDecisionEngine
+from .compare import compare
+from .decision import LocalDecisionEngine, apply_regression
+from .snapshot import snapshot
 from .evidence import LocalEvidenceStore, utc_now
 from .judges import combine, transcript
 from .loader import load_project
@@ -119,6 +121,13 @@ def reevaluate_run(root: Path, runs_dir: Path, run_id: str) -> dict[str, Any]:
     errors = [v for t, v in verdicts.items() if t not in final_ids]
 
     decision = LocalDecisionEngine().decide(run_id, finals, scenarios, project.profile)
+    if (run_dir / "baseline.json").is_file():   # Phase 6: compare again with the same baseline as the run did
+        old_cmp = read_json(run_dir / "comparison.json") if (run_dir / "comparison.json").is_file() else {}
+        titles = {sc["id"]: sc.get("title", sc["id"]) for sc in scenarios}
+        comparison = compare(read_json(run_dir / "baseline.json"), snapshot(decision, info, titles), project.profile,
+                             old_cmp.get("source", "baseline"))
+        write_json(run_dir / "comparison.json", comparison)
+        decision = apply_regression(decision, comparison)
     decision["created_at"] = old.get("created_at", decision["created_at"])
     decision["relabelled_at"] = utc_now()
     write_json(run_dir / "decision.json", decision)

@@ -59,6 +59,9 @@ export interface Profile {
   file: string;
   ok: boolean;
   problems: string[];
+  baseline?: string | null;       // Phase 6: the run id of this channel's baseline
+  health_checks?: boolean;
+  alerts?: number;
   id?: string;
   name?: string;
   description?: string;
@@ -203,7 +206,77 @@ export interface RunSummary {
   has_report: boolean;
   project_key?: string | null;
   project_name?: string | null;
+  trigger?: "manual" | "ci" | "health";
+  vs_baseline?: BaselineCounts | null;
+  kind?: "run" | "load";
+  load?: { shape: LoadShape; calls_at_once: number; capacity?: number | null; calls?: number; failed?: number } | null;
 }
+
+// Phase 6: the comparison with the agent's baseline (src/vatf/compare.py).
+export interface BaselineCounts {
+  run_id: string | null; decision?: string | null; finished_at?: string | null; like_for_like: boolean;
+  regressions: number; worse: number; better: number; new?: number; removed?: number; blocking: number;
+}
+export type Direction = "regression" | "worse" | "better" | "new" | "removed" | "same";
+export interface Change {
+  kind: "test" | "latency" | "score" | "metric" | "judge" | "safety" | "load";
+  id: string; title: string; direction: Direction; before: number | string | null; after: number | string | null;
+  message: string; blocks: boolean; unit?: string; band_before?: string; band_after?: string; criticality?: string;
+}
+export interface Comparison {
+  source: string;
+  baseline: { run_id: string | null; finished_at: string | null; decision: string | null; profile_file?: string | null };
+  current: { run_id: string | null; finished_at: string | null; decision: string | null };
+  like_for_like: boolean;
+  differences: { field: string; title: string; before: unknown; after: unknown }[];
+  gate_enabled: boolean;
+  changes: Change[];
+  counts: Record<Direction, number>;
+  blocking: number;
+}
+export interface Snapshot {
+  run_id: string; decision: string; finished_at: string | null;
+  how: { mode: Mode | null; conditions: string; speech_engine: string | null; offline: boolean; safety: boolean; bugs: string };
+  tests: Record<string, { title: string; criticality: string; k: number; passed: number; failed: number; unverified: number }>;
+  scores: Record<string, number | null>;
+  latency: { p50_ms: number | null; p95_ms: number | null; turns: number } | null;
+}
+export interface CompareResult extends Comparison {
+  runs: { a: RunSummary; b: RunSummary };
+  same_agent: boolean;
+  snapshots: { a: Snapshot; b: Snapshot };
+}
+export interface BaselineBrief {
+  run_id: string; decision: string; finished_at: string | null; set_at: string | null; note: string | null;
+  warnings: string[] | null; how: Snapshot["how"]; tests: number;
+  latency: Snapshot["latency"]; scores: Record<string, number | null> | null;
+}
+export interface BaselinePage {
+  file: string; baseline: BaselineBrief | null; problem: string | null; committed_with_project: boolean;
+  candidates: { run_id: string; decision: string; started_at: string; mode: Mode | null; offline: boolean | null; trigger?: string; bugs: boolean }[];
+}
+export type GateRules = {
+  enabled: boolean;
+  new_failures: { blocks: boolean };
+  latency: { blocks: boolean; increase_pct: number; increase_ms: number };
+  scores: { blocks: boolean; drop_points: number };
+  metrics: { blocks: boolean };
+  judges: { blocks: boolean; drop_points: number };
+  safety: { blocks: boolean };
+};
+export interface AlertTarget { name?: string; type?: "slack" | "discord" | "webhook"; url: string; enabled?: boolean; events?: string[] }
+export interface HealthSettings { enabled: boolean; every_minutes: number; scenarios: string[]; repeats: number; conditions: string; judges: boolean; start_agent: boolean }
+export interface OpsPage {
+  file: string; mode: Mode;
+  alerts: AlertTarget[]; alert_events: string[]; alert_types: string[]; default_events: string[];
+  health: HealthSettings; health_tests: string[];
+  tests: { id: string; title: string; criticality: string }[];
+  health_runs: RunSummary[]; conditions: string[];
+  regression: GateRules; regression_defaults: Omit<GateRules, "enabled">;
+  providers: Record<string, string>; secrets: Record<string, boolean>;
+  committed_with_project: boolean; agent_process: boolean;
+}
+export interface CiFile { path: string; text: string; secrets: string[] }
 
 export interface LatencyTurn { seq: number; turn: number; ms: number | null; counted: boolean; note: string }
 export interface Metrics {
@@ -251,8 +324,10 @@ export interface DecisionDoc {
   heard_numbers?: { numbers: number; heard_right: number; misheard: { test_id: string; seq: number; said: string; heard: string }[] };
   quality?: QualityRow[];
   by_condition?: ConditionRow[];
+  baseline?: BaselineCounts;
+  load?: LoadDecision;
 }
-export type Layer = "all_checks" | "hard_checks" | "trusted_judges" | "reliability" | "latency" | "call_quality" | "evidence";
+export type Layer = "all_checks" | "hard_checks" | "trusted_judges" | "reliability" | "latency" | "call_quality" | "evidence" | "regression" | "load";
 
 export interface RunInfo {
   run_id: string;
@@ -271,7 +346,12 @@ export interface RunInfo {
   judges?: { enabled?: boolean; why?: string; primary_model?: string; secondary_model?: string; tiebreak?: boolean; tiebreak_model?: string } | null;
   safety?: boolean;
   conditions?: string;
+  trigger?: string;
+  baseline?: string;
   speech?: { engine: string; ears_model: string; check_model: string } | null;
+  kind?: "run" | "load";
+  load?: { shape: LoadShape; calls_at_once: number; seconds: number; peak: number; max_calls: number; stages: LoadStage[];
+    settings: LoadSettings; p95_limit_ms: number | null; launched_per_call: boolean } | null;
 }
 
 export interface RunDetail {
@@ -280,6 +360,10 @@ export interface RunDetail {
   decision: DecisionDoc | null;
   calls: CallBrief[];
   files: Record<string, boolean>;
+  comparison?: Comparison | null;
+  load?: LoadSummary | null;
+  load_live?: LoadLive | null;
+  alerts?: { events: string[]; text: string; sent: { name: string; type: string; events: string[]; sent: boolean; status?: number; error?: string }[] } | null;
 }
 
 export interface Evidence { event: number; note?: string }
@@ -354,7 +438,7 @@ export interface ExitSummary {
 
 export interface Job {
   id: string;
-  kind: "run" | "exit-check";
+  kind: "run" | "exit-check" | "health" | "load";
   request: { project?: string; profile?: string; offline?: boolean };
   command: string;
   started_at: string;
@@ -403,4 +487,114 @@ export interface SafetyPage {
   live_only: boolean;
   problems: string[];
   last_run: ({ run_id: string; decision: Decision | null; started_at: string } & SafetyResult) | null;
+}
+
+// Phase 7: load tests (src/vatf/load.py, loadstats.py, loadrun.py).
+export type LoadShape = "ramp" | "spike" | "soak" | "steady";
+export type LoadCaller = "free" | "claude";
+export interface LoadLimits {
+  max_failed_pct: number; p95_ms: number | null;
+  slowdown: { blocks: boolean; pct: number; ms: number };
+  pass_drop: { blocks: boolean; points: number };
+  drift: { blocks: boolean; pct: number };
+  max_lag_ms: number; min_calls: number;
+}
+export interface LoadSettings {
+  shape: LoadShape; calls_at_once: number; start_at: number; steps: number; step_minutes: number; minutes: number;
+  before_minutes: number; after_minutes: number; window_minutes: number; pause_seconds: number; max_calls: number;
+  scenarios: string[]; caller: LoadCaller; judges: boolean; conditions: string; start_agent: boolean; limits: LoadLimits;
+}
+export interface LoadStage { index: number; name: string; kind: string; level: number; start_s: number; seconds: number; end_s: number }
+export interface LoadPlan { shape: LoadShape; calls_at_once: number; seconds: number; peak: number; max_calls: number; stages: LoadStage[] }
+export interface LoadProblem { rule: string; message: string; refs?: string[] }
+export interface LoadStageStats extends LoadStage {
+  calls: number; finished: number; ok: number; failed: number; harness_errors: number; failed_pct: number | null;
+  failed_why: Record<string, number>; failed_refs: string[]; unanswered_turns: number; unanswered_pct: number | null;
+  latency: { turns: number; p50_ms: number | null; p90_ms: number | null; p95_ms: number | null; p99_ms: number | null; max_ms: number | null };
+  first_word_p95_ms: number | null; tool_p95_ms: number | null; tool_calls: number; tool_errors: number;
+  passed: number; failed_tests: number; pass_rate: number | null; blockers: Record<string, string[]>;
+  quality: QualityRow[]; lag_p95_ms: number | null; lag_max_ms: number | null;
+  in_flight_mean: number | null; in_flight_max: number | null;
+  trusted: boolean; untrusted_why: string; problems: LoadProblem[]; meets_limits: boolean;
+}
+export interface LoadSummary {
+  mode: Mode; shape: LoadShape; calls_at_once: number; caller: LoadCaller; max_calls: number; p95_limit_ms: number | null;
+  limits: LoadLimits; calls: number; failed: number; harness_errors: number; harness_share: number;
+  capacity: number | null; breaking: { level: number; stage: string; why: string[]; untrusted?: boolean } | null;
+  stages: LoadStageStats[];
+  comparisons: { slowdown?: { low_level: number; top_level: number; low_p95_ms: number; top_p95_ms: number };
+    pass_rate?: { low: number; top: number }; drift?: Record<string, number | null> };
+  blocking: LoadProblem[]; warnings: LoadProblem[]; unattributed_tool_calls: number;
+  lag_p95_ms: number | null; lag_max_ms: number | null;
+  timeline: [number, number, number][];   // [seconds from the start, calls in progress, Vocto's event-loop lag ms]
+  notes: string[];
+}
+export interface LoadDecision {
+  shape: LoadShape; calls_at_once: number; capacity: number | null; breaking: LoadSummary["breaking"];
+  calls: number; failed: number; harness_errors: number; p95_limit_ms: number | null; unattributed_tool_calls: number;
+  stages: { index: number; name: string; kind: string; level: number; calls: number; finished: number; failed: number;
+    failed_pct: number | null; pass_rate: number | null; trusted: boolean; meets_limits: boolean; p95_ms: number | null; p50_ms: number | null }[];
+}
+export interface LoadLive {
+  finished: number; elapsed_s: number; seconds: number; stage: number; stage_name: string; level: number;
+  in_flight: number; started: number; failed: number; harness: number; lag_ms: number; timeline: [number, number, number][];
+}
+export interface LoadPage {
+  file: string; mode: Mode; saved: Partial<LoadSettings>; defaults: Omit<LoadSettings, "limits"> & { limits: LoadLimits };
+  settings: LoadSettings | null; plan: LoadPlan | null; tests_used: string[]; error: string | null;
+  p95_limit_ms: number | null; voice_p95_ms: number | null;
+  tests: { id: string; title: string; criticality: string; faults: boolean; style: string }[];
+  agent: { launched_per_call: boolean; agent_process: boolean; uses_gateway: boolean; test_id_sent: boolean; test_id_header: string; max_call_seconds: number };
+  baseline: (BaselineBrief & { load?: { capacity: number | null; levels: Record<string, unknown> } | null }) | null;
+  baseline_problem: string | null;
+  runs: RunSummary[];
+}
+
+// ---- Phase 8: real calls (src/vatf/monitor, web/monitoring.py) ----------------------------------
+export interface MonitorSettings {
+  enabled: boolean;
+  intake: { token: string | null; listen: boolean; port: number };
+  privacy: { redact: string[]; keep_recording_links: boolean; retention_days: number; patterns: { name: string; regex: string }[] };
+  scoring: { judges: boolean; judge_share_pct: number; judge_max_per_day: number; judge_budget_usd_per_day: number; always_judge_flagged: boolean };
+  alerts: { window_hours: number; min_calls: number; pass_rate_below: number | null; flagged_above: number | null;
+    metrics_bad: boolean; safety: boolean; false_success: boolean };
+}
+export interface MonitorSummary {
+  calls: number; passed: number; failed: number; review: number; flagged: number; escalated: number; judged: number;
+  pass_rate: number | null; flagged_pct: number | null; escalated_pct: number | null; p90_ms: number | null; answers: number;
+  repeat_callers: number;
+}
+export interface MonitorDay { day: string; calls: number; passed: number; failed: number; flagged: number; escalated: number;
+  pass_rate: number | null; flagged_pct: number | null; p90_ms: number | null }
+export interface MonitorAlert { title: string; message: string; calls: string[]; since?: string }
+export interface MonitorPage {
+  agent: string; settings: MonitorSettings; saved: Partial<MonitorSettings>; defaults: MonitorSettings; detectors: string[];
+  have_key: boolean; totals: MonitorSummary; window: MonitorSummary;
+  week: { this_week: MonitorSummary; last_week: MonitorSummary }; daily: MonitorDay[]; quality: QualityRow[];
+  versions: { version: string; first_seen: string | null; calls: number; pass_rate: number | null; flagged_pct: number | null;
+    escalated_pct: number | null; p90_ms: number | null }[];
+  top_flags: { kind: string; id: string; calls: number }[];
+  alerts: { active: Record<string, MonitorAlert>; history: { at: string; id: string; event: string; message: string }[];
+    last_sent: { name: string; sent: boolean; error?: string }[] };
+  pending: number; judging: boolean;
+  intake: { token_name: string | null; token_set: boolean; listen: boolean; port: number; url: string | null; running: boolean;
+    error: string | null; received: number };
+  metric_defs: MetricDef[];
+  project: { key: string; name: string; domain: string };
+}
+export interface MonitorFlag { kind: "check" | "judge" | "review" | "metric"; id: string; section?: string; trusted?: boolean; review?: boolean; text?: string }
+export interface MonitorRow {
+  call_id: string; started_at: string | null; imported_at: string; source: string; agent_version: string | null; mode: Mode;
+  duration_s: number; turns: number; status: CallStatus; flagged: boolean; flags: MonitorFlag[]; flag_text: string[];
+  escalated: boolean; judge_state: "pending" | "done" | "skipped"; redacted: number; summary: string;
+}
+export interface MonitorCallDetail {
+  record: { call_id: string; source: string; received_via: string; started_at: string | null; imported_at: string;
+    agent_version: string | null; mode: Mode; duration_ms: number | null; ended_reason: string | null; recording_url: string | null;
+    redacted: Record<string, number>; external_id: string | null; caller_hash: string | null };
+  events: TraceEvent[];
+  verdict: (Verdict & { flags: MonitorFlag[]; flagged: boolean; judges: { state: string; note: string; cost_usd?: number } }) | null;
+  story: { seq: number; who: string; text: string }[];
+  metric_defs: MetricDef[];
+  judge_items: Record<string, string>;
 }

@@ -7,7 +7,7 @@ callers, watches the voice, the tool calls and the backend state, scores each
 call with hard checks and calibrated AI judges, and gives a GO / NO-GO release
 decision.
 
-**Status: Phase 5 (harder callers and call quality).** The framework runs real test calls against the
+**Status: Phase 8 (real-call monitoring).** The framework runs real test calls against the
 clinic example agent, in text or by voice: the simulated caller speaks (Piper),
 listens (Whisper) and hears only what came down the line. It checks what the agent
 said against what it did and what was stored, measures response times on the call
@@ -22,6 +22,22 @@ packets, who cut in, say "mm-hm", pause mid-sentence or go quiet; every voice ca
 call quality metrics (time to first word, p90 / p99, silences, talk-over, stop time, and more) with
 good / warn / bad bands, and the report splits results by caller condition. See
 [docs/phase5-guide.md](docs/phase5-guide.md).
+**Baseline, regression gate and CI (Phase 6):** mark a good run as the agent's baseline and every
+later run is compared with it: a test that passed there and fails now blocks the release, and slower
+answers, lower scores and worse call quality are listed (and can block, if you choose). The same run
+works in CI (JUnit XML, a Markdown job summary, exit codes, a ready file for GitHub Actions, GitLab or
+Jenkins), on a schedule as health checks, and sends Slack, Discord or webhook alerts. See
+[docs/phase6-guide.md](docs/phase6-guide.md).
+**Load testing (Phase 7):** many test calls at once, in a ramp, spike, soak or steady shape. Every
+load call is a normal call with all its checks; the result is a GO / NO-GO for that load, the agent's
+capacity (calls at once within the limits), where it broke and why, answer times per stage, and a
+separate load baseline. Vocto watches its own computer too, so a stage it couldn't drive properly
+gives "not enough evidence" instead of blaming the agent. See [docs/phase7-guide.md](docs/phase7-guide.md).
+**Real-call monitoring (Phase 8):** import real production calls (Vocto JSON, Vapi, Retell or plain
+transcripts) or have the voice platform send them live. Personal data is removed before anything is
+saved; each call gets the call quality metrics, real-call checks and the AI judges (on a capped
+sample), with trends by day and agent version, alerts through the Phase 6 targets, and one click to
+turn a bad call into a test. See [docs/phase8-guide.md](docs/phase8-guide.md).
 
 **Real agents:** besides its own practice agents, Vocto tests a real open-source agent it did not
 write: Pipecat's food ordering agent, run on this computer as a phone agent and called the way
@@ -41,6 +57,9 @@ fill in its address, tools, backend and logs access, test plan and test settings
 - [docs/phase1-guide.md](docs/phase1-guide.md): text mode, how to run it and what each part does
 - [docs/phase2-guide.md](docs/phase2-guide.md): voice mode, response times, barge-in, noise, read-back checks
 - [docs/phase5-guide.md](docs/phase5-guide.md): harder callers (accents, phone line, cut-ins, "mm-hm", pauses, silence) and call quality metrics with good / warn / bad bands
+- [docs/phase6-guide.md](docs/phase6-guide.md): baseline, comparing runs, the regression gate, CI files and reports, alerts, health checks
+- [docs/phase7-guide.md](docs/phase7-guide.md): load tests (ramp, spike, soak, steady), capacity, the load baseline
+- [docs/phase8-guide.md](docs/phase8-guide.md): monitoring real calls: import or receive them, privacy, scoring, trends, alerts
 - [docs/real-agents-guide.md](docs/real-agents-guide.md): testing a real open-source agent (Pipecat food ordering), planted bugs, agents Vocto starts itself
 - [docs/twilio-protocol.md](docs/twilio-protocol.md): calling a phone agent the way Twilio Media Streams does
 - [docs/voice-protocol.md](docs/voice-protocol.md): how vatf talks to a voice agent over a WebSocket

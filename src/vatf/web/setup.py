@@ -33,7 +33,7 @@ PROJECTS_DIR = "projects"
 ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SECTIONS = {"name", "description", "agent_prompt", "domain", "languages", "connection", "test_id", "tools", "tool_gateway",
             "backend", "logs", "judges", "safety", "thresholds", "limits", "metrics", "pii", "agent_process",
-            "planted_bugs"}
+            "planted_bugs", "regression", "alerts", "health_checks", "load", "monitor"}
 
 # Framework defaults, shown in the forms as what an empty field means (client_profile.schema.yaml).
 DEFAULTS = {
@@ -206,8 +206,11 @@ def profile_detail(root: Path, project: str, file: str) -> dict[str, Any]:
     }
 
 
-def save_profile(root: Path, project: str, file: str, sections: Mapping[str, Any]) -> dict[str, Any]:
+def save_profile(root: Path, project: str, file: str, sections: Mapping[str, Any],
+                 replace: frozenset[str] = frozenset()) -> dict[str, Any]:
     """Replaces the given top-level sections of one profile file (None removes a section).
+    Sections are merged into what the file has, except those in `replace`, which are written whole
+    (a field the form cleared is then gone, not kept from before).
     Refused, with the reasons, if the profile would no longer pass its schema."""
     folder = _folder(root, project)
     path = _profile_file(folder, file)
@@ -219,7 +222,7 @@ def save_profile(root: Path, project: str, file: str, sections: Mapping[str, Any
         value = _clean(value) if isinstance(value, (Mapping, list)) else value
         if value is None or (isinstance(value, (Mapping, list)) and not value):
             doc.pop(key, None)
-        elif key in doc:
+        elif key in doc and key not in replace:
             doc[key] = deep_update(doc[key], value)
         else:
             doc[key] = value

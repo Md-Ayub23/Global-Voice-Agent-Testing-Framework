@@ -4,6 +4,9 @@ import { LatencyDots, Ring } from "../components/charts";
 import { Tip } from "../components/feedback";
 import { Icon } from "../components/Icon";
 import { ConditionsTable, QualityTiles } from "../components/quality";
+import { SetBaselineButton, VsBaseline } from "../components/compare";
+import { LoadReport } from "../components/load";
+import { SHAPE_LABEL, fmtSeconds } from "../lib/load";
 import { EvRef, Hero, OptionChips, heroToneOf } from "../components/runbits";
 import { Help } from "../components/form";
 import { Badge, Button, Card, CardHead, Chip, EmptyState, Legend, Notice, Skeleton, Table, Tabs, rowLink } from "../components/ui";
@@ -15,7 +18,7 @@ import { navigate } from "../lib/router";
 import { decisionTitle } from "../lib/status";
 import { LAYER_WORDS, modelName } from "../lib/judges";
 import { PACK_TITLES } from "../lib/safety";
-import type { CallBrief, DecisionDoc, Project, RunDetail, SafetyResult } from "../lib/types";
+import type { BaselinePage, CallBrief, DecisionDoc, LoadPage, Project, RunDetail, SafetyResult } from "../lib/types";
 
 // The width of an element, kept up to date as the window resizes (for SVG charts drawn to fit).
 // The element appears only after the data loads, so this is a callback ref, not useRef.
@@ -83,8 +86,17 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
   useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
     { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run" }]);
   const { data: run, error } = useLoad(() => api.get<RunDetail>(`/api/runs/${runId}`), [runId]);
+  const profileFile = run?.summary.profile_file || "profile.yaml";
+  const { data: basePage, reload: reloadBase } = useLoad(
+    () => api.get<BaselinePage>(`/api/project/${project.key}/baseline?file=${encodeURIComponent(profileFile)}`).catch(() => null),
+    [project.key, profileFile]);
+  // A load test has its own baseline (compared level by level); the button shows which one this run is.
+  const isLoad = run?.summary.kind === "load" || run?.info?.kind === "load";
+  const { data: loadPage, reload: reloadLoad } = useLoad(
+    () => (isLoad ? api.get<LoadPage>(`/api/project/${project.key}/load?file=${encodeURIComponent(profileFile)}`).catch(() => null) : Promise.resolve(null)),
+    [project.key, profileFile, isLoad]);
   const [dotsBox, dotsWidth] = useWidth<HTMLDivElement>();
-  const [tab, setTab] = useState("calls");
+  const [tab, setTab] = useState("");
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!run) return <Skeleton />;
 
@@ -103,7 +115,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
 
   const reasons = (d?.reasons || []).map((r, i) => (
     <span key={i}>
-      {r.message}{" "}
+      {r.rule === "load_warnings" && <b className="text-warn">Warning, doesn't block: </b>}{r.message}{" "}
       <span className="inline-flex flex-wrap gap-1 align-middle">
         {(r.refs || []).slice(0, 8).map((ref) => {
           const [test, check] = ref.split("/");
@@ -116,23 +128,33 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
 
   const heard = !!(d?.heard_numbers && d.heard_numbers.numbers > 0);
   const qualityBad = (d?.quality || []).filter((q) => q.band === "bad").length;
-  const tabs: { value: string; label: ReactNode }[] = [
+  const loadBlockers = (run.load?.stages || []).filter((s) => !s.meets_limits && s.trusted).length;
+  const tabs: { value: string; label: ReactNode }[] = isLoad ? [
+    ...(run.load ? [{ value: "load", label: <>Load {loadBlockers ? <Count n={loadBlockers} bad /> : null}</> }] : []),
+    { value: "calls", label: <>Calls <Count n={finals.length} /></> },
+    ...(run.comparison ? [{ value: "baseline", label: <>Vs load baseline {(run.comparison.counts.regression + run.comparison.counts.worse)
+      ? <Count n={run.comparison.counts.regression + run.comparison.counts.worse} bad /> : null}</> }] : []),
+    ...(info ? [{ value: "setup", label: "Run setup" }] : []),
+  ] : [
     { value: "calls", label: <>Calls <Count n={finals.length} /></> },
     ...(d && reliability.length ? [{ value: "reliability", label: "Reliability" }] : []),
     ...(timed || heard ? [{ value: "times", label: "Response times" }] : []),
     ...(d?.quality?.length ? [{ value: "quality", label: <>Call quality {qualityBad ? <Count n={qualityBad} bad /> : null}</> }] : []),
     ...(d?.judges?.length ? [{ value: "judges", label: "AI judges" }] : []),
     ...(d?.safety ? [{ value: "safety", label: <>Safety {d.safety.failed ? <Count n={d.safety.failed} bad /> : null}</> }] : []),
+    ...(run.comparison ? [{ value: "baseline", label: <>Vs baseline {(run.comparison.counts.regression + run.comparison.counts.worse)
+      ? <Count n={run.comparison.counts.regression + run.comparison.counts.worse} bad /> : null}</> }] : []),
     ...(info ? [{ value: "setup", label: "Run setup" }] : []),
   ];
-  const shown = tabs.some((t) => t.value === tab) ? tab : "calls";
+  const shown = tabs.some((t) => t.value === tab) ? tab : isLoad && run.load ? "load" : "calls";
 
   return (
     <>
       <div className="flex items-end gap-4 mt-3 mb-6 flex-wrap">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{modeLabel(sm.mode)} test run</h1>
+            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{modeLabel(sm.mode)} {isLoad ? "load test" : "test run"}</h1>
+            {isLoad && info?.load && <Chip tone="accent" icon="activity">{SHAPE_LABEL[info.load.shape]} to {info.load.calls_at_once} at once</Chip>}
             <OptionChips run={sm} />
           </div>
           <div className="mt-1 text-ink-2 flex flex-wrap items-center gap-2">
@@ -144,7 +166,12 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           </div>
         </div>
         <div className="flex flex-wrap gap-2.5">
-          {info && <Button href={projectHref(project.key, `/new?from=${runId}`)} icon="refresh">Run again</Button>}
+          {d && !bugs && sm.status === "finished" && (
+            <SetBaselineButton runId={runId} current={(isLoad ? loadPage?.baseline?.run_id : basePage?.baseline?.run_id) === runId}
+              onDone={isLoad ? reloadLoad : reloadBase} />
+          )}
+          {d && <Button href={projectHref(project.key, `/compare?b=${runId}`)} icon="compare">Compare</Button>}
+          {info && <Button href={projectHref(project.key, isLoad ? `/load?file=${encodeURIComponent(profileFile)}` : `/new?from=${runId}`)} icon="refresh">Run again</Button>}
           {run.files["transcript.txt"] && <Button href={`/runs/${runId}/transcript.txt`} target="_blank" icon="file">Transcript</Button>}
           {run.files["report.html"] && <Button href={`/runs/${runId}/report.html`} target="_blank" icon="ext">HTML report</Button>}
         </div>
@@ -167,7 +194,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           <Notice tone="warn"><b>This run has no decision.</b> It was {sm.status} before the end. The calls that finished are below.</Notice>
         )}
 
-        {d && (
+        {d && !isLoad && (
           <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))] stagger">
             {Object.entries(d.scorecard).map(([name, s]) => (
               <ScoreCard key={name} ring={<Ring value={s.score} />} label={name[0].toUpperCase() + name.slice(1)}>
@@ -200,10 +227,20 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           <Tabs value={shown} onChange={setTab} tabs={tabs} className="mb-0" />
         </div>
 
+        {shown === "load" && run.load && <LoadReport load={run.load} voice={voice} callHref={callLink} />}
+
         {shown === "times" && d?.heard_numbers && d.heard_numbers.numbers > 0 && <HeardCard heard={d.heard_numbers} callLink={callLink} />}
 
         {shown === "quality" && d?.quality && <QualityTiles rows={d.quality} />}
         {shown === "quality" && d?.by_condition && d.by_condition.length > 0 && <ConditionsTable rows={d.by_condition} />}
+
+        {shown === "baseline" && run.comparison && (
+          <VsBaseline cmp={run.comparison} baselineHref={projectHref(project.key, `/runs/${run.comparison.baseline.run_id}`)}
+            callHref={(sid) => {
+              const c = finals.find((x) => x.scenario_id === sid && x.status === "FAIL") || finals.find((x) => x.scenario_id === sid);
+              return c ? callLink(c.test_id) : undefined;
+            }} />
+        )}
 
         {shown === "safety" && d?.safety && <SafetyRunCard safety={d.safety} callLink={callLink} projectKey={project.key} />}
 
@@ -272,14 +309,21 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
             <dl className="mt-3 grid gap-x-6 gap-y-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 text-[13px]">
               {([
                 ["Channel", modeLabel(info.mode)],
-                ["Caller", info.offline ? "Rules (free dry run)" : `Claude${info.caller_model ? ` · ${info.caller_model}` : ""}`],
+                ["Caller", info.load ? (info.load.settings.caller === "claude" && !info.offline ? "Claude" : "Scripted lines and rules (free)")
+                  : info.offline ? "Rules (free dry run)" : `Claude${info.caller_model ? ` · ${info.caller_model}` : ""}`],
                 ["Scenarios", info.scenario_ids.length ? info.scenario_ids.map(shortScenario).join(", ") : "All"],
-                ["Repeats", info.repeats ? String(info.repeats) : "From test settings"],
+                ...(info.load ? [
+                  ["Load", `${SHAPE_LABEL[info.load.shape]} · up to ${info.load.calls_at_once} at once · ${fmtSeconds(info.load.seconds)} · at most ${info.load.max_calls} calls`],
+                  ["Answer time limit", info.load.p95_limit_ms != null ? `p95 ${fmtMs(info.load.p95_limit_ms)} per stage` : "None (text)"],
+                ] : [["Repeats", info.repeats ? String(info.repeats) : "From test settings"]]),
                 ["Agent options", Object.entries(info.agent_options || {}).map(([k, v]) => `${k} = ${v}`).join(" · ") || "Defaults"],
                 ...(info.speech ? [["Caller's speech", info.speech.engine === "local" ? `Real speech · hears with ${info.speech.ears_model}` : "Test tones"]] : []),
                 ["AI judges", info.judges?.enabled === false ? `Off · ${info.judges.why || ""}` : info.judges
                   ? `${modelName(info.judges.primary_model)} and ${modelName(info.judges.secondary_model)}` : "Not used (older run)"],
                 ["Safety tests", info.safety ? "Included" : "Not included"],
+                ["Started by", info.trigger === "ci" ? "CI" : info.trigger === "health" ? "A scheduled health check" : "A person"],
+                ["Compared with", info.baseline === "none" ? "Nothing (comparison off)" : run.comparison ? `Baseline ${run.comparison.baseline.run_id}` : "No baseline was set"],
+                ...(run.alerts ? [["Alerts", run.alerts.sent.map((a) => `${a.name}: ${a.sent ? "sent" : `not sent (${a.error || a.status})`}`).join(" · ")]] : []),
                 ["Personal data", info.pii_masked ? "Masked" : "Not masked"],
                 ["Vocto version", info.framework_version],
               ] as [string, string][]).map(([k, v]) => (

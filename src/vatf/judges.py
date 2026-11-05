@@ -267,8 +267,9 @@ class JudgePanel:
     """Two judges, run side by side on one locked call, and a deciding judge for the items they split on."""
 
     def __init__(self, llm: Any, profile: Mapping[str, Any], calibration: Mapping[str, Mapping[str, Any]],
-                 metadata: Mapping[str, str] = (), max_tokens: int = 8000):
+                 metadata: Mapping[str, str] = (), max_tokens: int = 8000, system: str = JUDGE_SYSTEM):
         self._llm = llm
+        self._system = system      # real-call monitoring (Phase 8) words it for a real customer
         self._profile = profile
         self._calibration = calibration
         self._metadata = dict(metadata or {})
@@ -280,7 +281,7 @@ class JudgePanel:
 
     async def _ask(self, judge: str, prompt: str, items, shown) -> dict[str, dict[str, Any]]:
         response = await self._llm.complete(LLMRequest(
-            purpose=f"judge_{judge}", model=self.models[judge], system=JUDGE_SYSTEM,
+            purpose=f"judge_{judge}", model=self.models[judge], system=self._system,
             messages=(LLMMessage("user", prompt),), max_tokens=self._max_tokens,
             metadata={**self._metadata, "judge": judge}, json_schema=answer_schema(items)))
         return {k: {**v, "model": response.model} for k, v in parse_votes(response.text, items, shown).items()}

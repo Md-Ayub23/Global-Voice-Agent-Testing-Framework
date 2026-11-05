@@ -10,7 +10,13 @@ the test id header, injects the scenario's faults and forwards it to the tool's 
 The agent gets the upstream's answer (or the injected fault) back. A JSON body is the tool's
 arguments; for GET the query string is. Between calls it answers 503: no test call is running.
 
-Calls run one at a time (limits.parallel_calls 1), so every request belongs to the call in progress.
+Which call a request belongs to: with one call in progress, that call (the agent needs to do nothing).
+With several at once (a load test, Phase 7), the agent must pass the call's test id on with its tool
+calls, the way the profile's test_id section says: the header (X-Test-Id by default) or a `test_id`
+field in the body or query string (left in the arguments). The id reaches the agent at the start of each call
+(test_id.propagation: session_metadata). A request without one while several calls run cannot be
+told apart: it is forwarded to the tool's upstream untouched (no faults, not recorded with any call)
+and counted, and the load report says the tool checks of that run can't be trusted.
 """
 
 from __future__ import annotations
@@ -46,9 +52,14 @@ def tool_url(profile: Mapping[str, Any], tool: str) -> str:
 
 
 class ToolGateway:
-    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
+    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_PORT, header: str = "X-Test-Id",
+                 fallback: Any = None):
         self.host, self.port = host, port
-        self._proxy: Any = None
+        self.header = header
+        self._proxies: dict[str, Any] = {}       # test id -> that call's tool proxy
+        self._fallback = fallback                # several calls, no test id: forwards untouched (load tests)
+        self.unattributed = 0                    # requests that could not be matched to a call
+        self.unknown_ids = 0                     # requests naming a test id that is not in progress
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -73,18 +84,46 @@ class ToolGateway:
             self._server.server_close()
             self._server = None
 
-    def attach(self, proxy: Any) -> None:
+    def attach(self, proxy: Any, test_id: str = "") -> None:
         with self._lock:
-            self._proxy = proxy
+            self._proxies[test_id] = proxy
 
-    def detach(self) -> None:
+    def detach(self, test_id: str = "") -> None:
         with self._lock:
-            self._proxy = None
+            self._proxies.pop(test_id, None)
 
     @property
     def proxy(self) -> Any:
+        """The call in progress when there is exactly one (None between calls or with several)."""
         with self._lock:
-            return self._proxy
+            return next(iter(self._proxies.values())) if len(self._proxies) == 1 else None
+
+    @property
+    def calls(self) -> int:
+        with self._lock:
+            return len(self._proxies)
+
+    def route(self, test_id: str | None) -> tuple[Any, str]:
+        """(proxy, why) for one request: the named call, the only call, or the load fallback."""
+        with self._lock:
+            if test_id:
+                if test_id in self._proxies:
+                    return self._proxies[test_id], ""
+                if len(self._proxies) == 1 and self._fallback is None:
+                    return next(iter(self._proxies.values())), ""   # one call at a time: as before Phase 7
+                if self._proxies:
+                    self.unknown_ids += 1
+                    return None, f"test id {test_id} is not a call in progress"
+                return None, "no vatf test call is in progress"
+            if len(self._proxies) == 1:
+                return next(iter(self._proxies.values())), ""
+            if not self._proxies:
+                return None, "no vatf test call is in progress"
+            self.unattributed += 1
+            if self._fallback is not None:
+                return self._fallback, ""
+            return None, (f"{len(self._proxies)} calls are in progress and this request has no {self.header} "
+                          "header: vatf can't tell which call it belongs to")
 
 
 def _handler(gw: ToolGateway):
@@ -109,7 +148,7 @@ def _handler(gw: ToolGateway):
             raw = self.rfile.read(n) if n > 0 else b""
             url = urlparse(self.path)
             if url.path in ("/", "/health"):
-                return self._send(200, {"ok": True, "call_in_progress": gw.proxy is not None})
+                return self._send(200, {"ok": True, "call_in_progress": gw.calls > 0, "calls": gw.calls})
             if not url.path.startswith("/tools/") or len(url.path) <= len("/tools/"):
                 return self._send(404, {"error": "use /tools/<tool name>"})
             tool = url.path[len("/tools/"):].strip("/")
@@ -123,9 +162,10 @@ def _handler(gw: ToolGateway):
                     args.update(body)
                 else:
                     args["body"] = body
-            proxy = gw.proxy
+            test_id = self.headers.get(gw.header) or str(args.get("test_id") or "")
+            proxy, why = gw.route(test_id or None)
             if proxy is None:
-                return self._send(503, {"error": "no vatf test call is in progress"})
+                return self._send(503, {"error": why})
             try:
                 result = proxy.call_with(tool, args)
             except Exception as e:  # noqa: BLE001 - the call ended under us (locked evidence) or similar

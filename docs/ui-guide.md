@@ -1,6 +1,6 @@
 # The Vocto dashboard
 
-`uv run vatf ui` starts a small web app on your computer and opens it in your browser
+`uv run python -m vatf ui` (or `uv run vatf ui` where the launcher isn't blocked) starts a small web app on your computer and opens it in your browser
 (http://127.0.0.1:8765). Vocto is the product name; the terminal command is still `vatf`. Everything the terminal commands do can be done from it: pick what to
 test, start a run, watch every call live, and read the GO / NO-GO report. Keep the terminal
 window open while you use it; press Ctrl+C there to close the dashboard.
@@ -81,3 +81,27 @@ cd ui && npm run build           # when done: type-checks, then writes src/vatf/
 Commit both `ui/` and `src/vatf/web/static/`. To add a page for a later phase, add a file in
 `ui/src/pages/`, a route in `App.tsx` (under `PROJECT_ROUTES` if it belongs to one agent), a link in `components/Layout.tsx`, and any data it needs in
 `data.py` plus a route in `server.py`.
+
+## Phase 6: baseline, Compare runs, CI & alerts
+
+- Results: a Baseline card (per channel, with Remove), a "baseline" mark on that run, "N new failures vs baseline" under a run, a Health checks filter, and CI / health check chips.
+- Run report: **Set as baseline** and **Compare** buttons, a **Vs baseline** tab listing every change worst first, and "Started by", "Compared with" and "Alerts" under Run setup.
+- Quality › **Compare runs**: any two runs side by side.
+- Set up › Pass rules: the **Regression gate** table (what may not get worse, and whether it blocks).
+- Set up › **CI & alerts** (step 7): alert targets with Send test, health check schedule, and a ready CI file to copy.
+See [phase6-guide.md](phase6-guide.md).
+
+## Phase 7: load tests
+
+- Test › **Load test**: pick the shape (ramp, spike, soak, steady), the calls at once and how long, who plays the callers (scripted for free, or Claude), the tests and the limits. The plan chart and its length follow the form as you type. Save, then **Start load test** (voice: real speech or test tones).
+- The Live page for a load test shows calls at once over time (planned and real), calls started, finished and failed, Vocto's own lag and the latest calls.
+- The run report opens on a **Load** tab: capacity, calls, p95 at the top level, tests passed, where it broke, the calls-at-once chart, p95 per stage against the limit, the stage table and notes. **Set as baseline** on a load run sets the load baseline (separate from the normal one); later load tests get a **Vs load baseline** tab.
+- Results: load runs carry a "load test" chip with their shape and capacity, and a **Load tests** filter. Load runs are left out of the agent's GO rate.
+
+## Phase 8: real calls
+
+- Quality › **Real calls**, with four tabs. **Overview**: active alerts, KPIs for the last 24 h with this week vs last, calls per day, call quality, why calls were flagged, results by agent version and the alert history. **Calls**: filters, search and the call list. **Import**: drop call files. **Settings**: monitoring on or off, receiving calls live (port, address, token shown once), privacy, AI judges limits, alert rules, delete all.
+- A real call's page: the conversation (personal data already removed), why it was flagged, checks, AI judges with labels you can give right there, call quality, details, **Make a test from this call** and Delete.
+- Set up › CI & alerts has two new alert events: "Real-call alert" and "Real calls back to normal".
+See [phase8-guide.md](phase8-guide.md).
+
