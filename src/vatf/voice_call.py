@@ -30,14 +30,14 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
 
-from .audio.pcm import SPEECH_DBFS, from_pcm16, resample, set_level, to_pcm16
+from .audio.pcm import SPEECH_DBFS, from_pcm16, read_wav, resample, set_level, to_pcm16
 from .audio.recorder import Line, Recorder
 from .audio.vad import trim
-from .conditions import BACKCHANNEL_LINES as BACKCHANNELS
 from .contracts.models import AudioClip
 
 POLL_S = 0.03
@@ -61,10 +61,12 @@ class Heard:
 
 @dataclass
 class Prepared:
-    """A caller line ready to say: its audio, the words as said (when not the line itself), any pause in it."""
+    """A caller line ready to say: its audio, the words as said (when not the line itself), any pause in it,
+    and the recording it was played from (recordings.py), if any."""
     clip: np.ndarray
     spoken: str | None
     pause_ms: int
+    recording: str | None = None
 
 
 @dataclass
@@ -78,10 +80,12 @@ class VoiceSettings:
 
 class VoiceConversation:
     def __init__(self, *, session: Any, recorder: Recorder, line: Line, tts: Any, stt: Any,
-                 voice: str, speaking_rate: float, settings: VoiceSettings, writer: Any, proxy: Any):
+                 voice: str, speaking_rate: float, settings: VoiceSettings, writer: Any, proxy: Any,
+                 language: str = "en"):
         self.session, self.rec, self.line = session, recorder, line
         self.tts, self.stt = tts, stt
         self.voice, self.rate = voice, speaking_rate
+        self.language = language
         self.cfg = settings
         self.writer, self.proxy = writer, proxy
         self.agent_turns = 0
@@ -96,7 +100,7 @@ class VoiceConversation:
         b = self.cond.behaviour if self.cond else None
         if b is None:
             return
-        words = (list(b.interrupt_lines) if b.interrupts else []) + (list(BACKCHANNELS) if b.backchannels else [])
+        words = (list(b.interrupt_lines) if b.interrupts else []) + (list(self.cond.backchannel_lines()) if b.backchannels else [])
         for w in words:
             if w not in self._sounds:
                 self._sounds[w] = await self.synthesize(w)
@@ -121,6 +125,12 @@ class VoiceConversation:
                                    await self.synthesize(second)])
         return Prepared(clip, spoken, pause)
 
+    async def recording(self, path: Path, name: str) -> "Prepared":
+        """A caller line played from a recording of a real caller: levelled to this caller's speaking volume."""
+        x, _ = await asyncio.to_thread(read_wav, path, self.rec.sr)
+        volume = self.cond.volume_db if self.cond else 0.0
+        return Prepared(set_level(trim(x, self.rec.sr), SPEECH_DBFS + volume), None, 0, name)
+
     async def say(self, text: str, turn: int, clip: "np.ndarray | Prepared | None" = None,
                   emit: bool = True) -> tuple[int, int]:
         if not isinstance(clip, Prepared):
@@ -128,11 +138,13 @@ class VoiceConversation:
         start, end = self.line.speak(clip.clip)
         self.proxy.turn = turn  # tool calls from here on belong to this caller turn
         if emit:
-            self.emit_caller_turn(text, start, end, turn, spoken=clip.spoken, pause_ms=clip.pause_ms)
+            self.emit_caller_turn(text, start, end, turn, spoken=clip.spoken, pause_ms=clip.pause_ms,
+                                  recording=clip.recording)
         return start, end
 
     def emit_caller_turn(self, text: str, start: int, end: int, turn: int, barge_in: bool = False,
-                         spoken: str | None = None, pause_ms: int = 0, auto: bool = False) -> None:
+                         spoken: str | None = None, pause_ms: int = 0, auto: bool = False,
+                         recording: str | None = None) -> None:
         data: dict[str, Any] = {"text": text,
                                 "audio": {"file": RECORDING, "start_ms": self.ms(start), "end_ms": self.ms(end)}}
         if barge_in:
@@ -143,13 +155,16 @@ class VoiceConversation:
             data["spoken"] = spoken
         if pause_ms:
             data["pause_ms"] = pause_ms
+        if recording:
+            data["recording"] = recording       # played from a real caller's recording, not synthesized
         self.writer.emit("caller", "caller_turn", data, turn=turn, t_ms=self.ms(start))
 
     # ---- the caller's ears --------------------------------------------------
     async def transcribe(self, start: int, end: int) -> str:
         pad = self.rec.sr // 20
         x = self.rec.agent.slice(start - pad, end + pad)
-        return (await asyncio.to_thread(self.stt.transcribe, AudioClip(to_pcm16(x), self.rec.sr))).text.strip()
+        clip = AudioClip(to_pcm16(x), self.rec.sr)
+        return (await asyncio.to_thread(self.stt.transcribe, clip, self.language)).text.strip()
 
     def _done(self) -> bool:
         return self.session.closed.is_set() and not self.rec.agent_playing()
@@ -209,7 +224,7 @@ class VoiceConversation:
             if mm_hm and talking and now >= heard.start + b.backchannel_after_ms * self.rec.sr // 1000:
                 mm_hm = False                                     # at most one per agent turn
                 if self.cond.wants_backchannel():
-                    word = self.cond.pick(list(BACKCHANNELS))
+                    word = self.cond.pick(list(self.cond.backchannel_lines()))
                     s0, s1 = self.line.speak(self._sounds[word])
                     heard.backchannels.append((s0, s1, word))
             if cut_in and talking and now >= heard.start + b.interrupt_after_ms * self.rec.sr // 1000:

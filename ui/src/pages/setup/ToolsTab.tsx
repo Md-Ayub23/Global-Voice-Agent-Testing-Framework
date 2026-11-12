@@ -30,7 +30,7 @@ export function ToolsTab({ detail, reload }: TabProps) {
       <Block title="The agent's tools" sub={`The APIs the agent calls during a conversation. Write tools (bookings, payments, changes) are what the outcome check follows.`}>
         {tools.length === 0 && <Notice>No tools yet. Add each API the agent can call: Vocto records every call, can break it on purpose (faults), and checks it against the backend.</Notice>}
         {tools.map((t, i) => (
-          <div key={`${i}-${d.version}`} data-tool={str(t.name)} className="grid gap-3 p-3.5 border border-line rounded-[10px] bg-surface-2/40">
+          <div key={`${i}-${d.version}`} data-tool={str(t.name)} className="grid gap-3 p-3.5 border border-line rounded-[12px] bg-surface-2/40">
             <div className="flex items-center gap-2 flex-wrap">
               <b className="font-mono">{str(t.name) || "new tool"}</b>
               <Seg value={str(t.effect) || "read"} onChange={(v) => setTool(i, { effect: v })}

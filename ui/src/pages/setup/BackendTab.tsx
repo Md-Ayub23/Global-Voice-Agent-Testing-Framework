@@ -1,6 +1,6 @@
 // The backend (source of truth) and the probes that read it after each call.
 import { useState } from "react";
-import { Area, Block, Check, Grid, Help, KeyValue, Problems, SaveBar, Select, Text, TestResult, type Obj, type Patch, type TestOutcome } from "../../components/form";
+import { Area, Block, Check, Grid, Help, KeyValue, Problems, SaveBar, Select, StrList, Text, TestResult, type Obj, type Patch, type TestOutcome } from "../../components/form";
 import { Button, Card, Field, Notice, Seg } from "../../components/ui";
 import { binds, owner, setupApi } from "../../lib/setup";
 import { asList, asObj, str, useDraft, type TabProps } from "./common";
@@ -103,7 +103,7 @@ export function BackendTab({ detail, reload }: TabProps) {
       {access !== "none" && (
         <Block title="Probes: what to look up after a call" sub="Scenarios point at these by id. Bind values: :test_id, :call_started_at, :call_ended_at, and any caller fact by name (:full_name).">
           {probes.map((p, i) => (
-            <div key={`${i}-${d.version}`} data-probe={str(p.id)} className="grid gap-3 p-3.5 border border-line rounded-[10px] bg-surface-2/40">
+            <div key={`${i}-${d.version}`} data-probe={str(p.id)} className="grid gap-3 p-3.5 border border-line rounded-[12px] bg-surface-2/40">
               <div className="flex items-center gap-2">
                 <b className="font-mono flex-1">{str(p.id) || "new probe"}</b>
                 <Button size="sm" variant="ghost" icon="x" onClick={() => set({ probes: probes.filter((_, j) => j !== i) })}>Remove</Button>
@@ -131,6 +131,25 @@ export function BackendTab({ detail, reload }: TabProps) {
             </div>
           ))}
           <div><Button id="add-probe" icon="plus" onClick={() => set({ probes: [...probes, { id: "", query: access === "rest" ? "GET /" : "" }] })}>Add probe</Button></div>
+        </Block>
+      )}
+
+      {access !== "none" && (
+        <Block title="Nothing else changed" sub="Vocto copies these tables right before and after each call and flags any change the test didn't ask for (another customer's booking edited, a second order cancelled). Read-only, skipped for load tests."
+          aside={<Check checked={backend.watch !== false} label="Check for other changes" onChange={(on) => set({ watch: on ? undefined : false })} />}>
+          {backend.watch !== false && (
+            <Grid>
+              <Field label={access === "sql" ? "Tables to watch" : "Reads that return a whole collection"}
+                hint={access === "sql" ? "Empty: the tables your probes read. Up to 5000 rows per table are compared." : 'Required for a REST backend, e.g. GET /bookings. Empty: not checked.'}>
+                <StrList mono value={Array.isArray(backend.watch) ? asList<string>(backend.watch) : []} placeholder={access === "sql" ? "bookings" : "GET /bookings"}
+                  onChange={(v) => set({ watch: v.length ? v : undefined })} />
+              </Field>
+              <Field label="May always change" hint="Tables, or table.column, that change on their own (audit logs, sessions, updated_at).">
+                <StrList mono value={asList<string>(backend.watch_ignore)} placeholder="audit_log or bookings.updated_at"
+                  onChange={(v) => set({ watch_ignore: v.length ? v : undefined })} />
+              </Field>
+            </Grid>
+          )}
         </Block>
       )}
       <Problems items={d.problems} />

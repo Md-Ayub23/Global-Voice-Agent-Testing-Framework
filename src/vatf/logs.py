@@ -19,6 +19,7 @@ Logs rank below backend state and tool traffic: they say what the agent reported
 from __future__ import annotations
 
 import json
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -168,3 +169,13 @@ def sample_logs(profile: Mapping[str, Any], root: Path, n: int = 20) -> LogResul
             return LogResult(False, collector.where(), error=str(e))
         return LogResult(True, collector.where(), lines[-n:], truncated=len(lines) > n)
     return LogResult(False, "none", error="no logs configured")
+
+
+def heard_in_log(rx: "re.Pattern[str]", line: str) -> str | None:
+    """logs.heard_pattern: the caller's words as the agent's speech recognition heard them, from one
+    log line ("User said: (?P<text>.+)"), or None when the line is not one of those."""
+    m = rx.search(line)
+    if not m:
+        return None
+    text = m.group("text") if "text" in rx.groupindex else (m.group(1) if rx.groups else m.group(0))
+    return (text or "").strip().strip('"').strip()

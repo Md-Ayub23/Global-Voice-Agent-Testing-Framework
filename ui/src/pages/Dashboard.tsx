@@ -1,18 +1,42 @@
-// Home: every agent under test at a glance. What needs attention, how many agents and of which kinds,
-// how the runs went, recent activity, and each agent's latest result.
+// Home: every agent under test, side by side. Key numbers, what needs attention, each agent's latest result in
+// every test type, runs per day and the latest runs. Nothing about one agent's set-up lives here: that is the
+// agent's own Overview.
 import { useState } from "react";
-import { CountUp } from "../components/CountUp";
-import { ActivityChart, DomainBars, Kpi, MiniHistory, ProjectAvatar, When } from "../components/dash";
+import { ActivityChart, KpiStrip, ProjectAvatar, When } from "../components/dash";
 import { Icon } from "../components/Icon";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, LiveDot, Notice, PageHead, Seg, Skeleton, Table, rowLink } from "../components/ui";
+import { Badge, Button, Card, CardHead, EmptyState, LiveDot, Notice, PageHead, Seg, Skeleton, Table, rowLink } from "../components/ui";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
-import { money, pct } from "../lib/format";
-import { domainLabel, modeLabel, projectHref, projectOfJob, runHref } from "../lib/links";
+import { cx, money } from "../lib/format";
+import { domainLabel, projectHref, projectOfJob, runHref } from "../lib/links";
+import { MODE_TITLE, SHORT_TITLE, TEST_TYPES, TONE_DOT, TONE_TEXT, TYPE_STATUS, modeTitle, runLabel, unavailableWords } from "../lib/modes";
 import { navigate } from "../lib/router";
-import type { Dashboard as DashboardData } from "../lib/types";
+import type { Dashboard as DashboardData, ModeBrief } from "../lib/types";
 
 type Show = "all" | "mine" | "practice";
+type Row = DashboardData["projects"][number];
+
+// One cell of the agents × test types grid.
+function TypeCell({ m, k }: { m: ModeBrief | undefined; k: string }) {
+  if (!m) return <span className="text-muted">—</span>;
+  const st = TYPE_STATUS[m.status];
+  const words = m.status === "unavailable" ? unavailableWords(m) : m.status === "watch" ? "Passed" : st.label;
+  const body = (
+    <span className={cx("inline-flex items-center gap-1.5 text-[13px] whitespace-nowrap", m.status === "not_run" || m.status === "unavailable" ? "text-muted" : TONE_TEXT[st.tone])}>
+      {m.status !== "not_run" && m.status !== "unavailable" && <i className={cx("size-[7px] rounded-full", TONE_DOT[st.tone])} />}
+      {words}{m.status === "watch" && <span className="text-muted">· notes</span>}
+    </span>
+  );
+  return m.run_id
+    ? <a href={projectHref(k, `/runs/${m.run_id}`)} onClick={(e) => e.stopPropagation()} title={m.top_finding || m.headline || st.label} className="hover:no-underline">{body}</a>
+    : <span title={m.why || undefined}>{body}</span>;
+}
+
+// Agents that ran and are fine in everything they ran.
+const passing = (p: Row) => {
+  const ran = p.modes.filter((m) => TEST_TYPES.includes(m.id) && m.status !== "not_run" && m.status !== "unavailable");
+  return ran.length > 0 && ran.every((m) => m.status === "passed" || m.status === "watch");
+};
 
 export function Dashboard() {
   useCrumbs([{ label: "Home" }]);
@@ -24,26 +48,25 @@ export function Dashboard() {
   const t = data.totals;
   const jobProject = projectOfJob(activeJob, projects);
   const rows = data.projects.filter((p) => show === "all" || (show === "mine" ? !p.example : p.example));
-  const voice = data.agent_types.channels.voice, text = data.agent_types.channels.text;
-  // What to look at first: agents whose latest decided run was not ready, then your agents that still need setting up.
+  const tested = data.projects.filter((p) => p.modes.some((m) => m.status !== "not_run" && m.status !== "unavailable"));
+  // What to look at first: each agent's failed test types, then your agents that can't run yet.
   const attention = [
-    ...data.projects.filter((p) => p.stats.last_decided && p.stats.last_decided.decision !== "GO").map((p) => ({
-      key: p.key, name: p.name, tone: "bad" as const, href: runHref(p.stats.last_decided!), action: "Open the run",
-      what: p.stats.last_decided!.decision === "NO_GO" ? "Latest run was NO-GO" : "Latest run didn't have enough evidence",
-    })),
-    ...data.projects.filter((p) => !p.ready && !p.example).map((p) => ({
-      key: p.key, name: p.name, tone: "warn" as const, href: projectHref(p.key), action: "Finish set up", what: "Not ready to run yet",
+    ...data.projects.flatMap((p) => p.modes.filter((m) => m.status === "failed" && m.run_id).map((m) => ({
+      key: `${p.key}:${m.id}`, name: p.name, tone: "bad" as const, href: projectHref(p.key, `/runs/${m.run_id}`), action: "Open report",
+      what: `${MODE_TITLE[m.id]} failed${m.top_finding ? `: ${m.top_finding}` : ""}`,
+    }))),
+    ...data.projects.filter((p) => !p.connection.connected && !p.example).map((p) => ({
+      key: `${p.key}:connect`, name: p.name, tone: "warn" as const, href: projectHref(p.key, "/setup/connection"), action: "Connect", what: "Not connected yet",
     })),
   ].slice(0, 6);
 
   return (
     <>
-      <PageHead title="Home" sub="Every voice agent you test, and how its releases are doing.">
-        <Button icon="bot" href="#/projects">All agents</Button>
+      <PageHead title="Voice agent quality" sub="Release readiness for every voice agent you test, at a glance.">
         <Button id="new-project" variant="primary" icon="plus" href="#/projects/new">New agent</Button>
       </PageHead>
 
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-6">
         {system && !system.api_key.set && (
           <Notice tone="warn" icon="key">
             <b>Add your Anthropic API key to run real tests.</b> Free dry runs work without it. <a href="#/settings">Open Settings</a>
@@ -51,126 +74,100 @@ export function Dashboard() {
         )}
         {activeJob && (
           <a href={jobProject ? projectHref(jobProject.key, `/live/${activeJob.id}`) : "#/"} id="live-banner"
-            className="flex items-center gap-3.5 p-4 rounded-[10px] border border-[color-mix(in_srgb,var(--accent)_30%,transparent)] bg-accent-soft text-ink hover:no-underline animate-rise">
-            <span className="size-9 rounded-full bg-accent text-white grid place-items-center flex-none"><Icon name="activity" /></span>
-            <span className="flex-1 min-w-0">
-              <b className="flex items-center gap-2">{activeJob.kind === "exit-check" ? "Exit check running" : "Test run in progress"} <LiveDot /></b>
-              <span className="text-ink-2 text-[13px]">{jobProject?.name || "An agent"}: watch every call as it happens.</span>
-            </span>
-            <span className="text-accent-ink font-semibold text-[13px] flex items-center gap-1">Watch live <Icon name="arrow" size={14} /></span>
+            className="flex items-center gap-3 px-4 py-3 rounded-[12px] border border-line bg-surface text-ink hover:no-underline hover:bg-surface-2 animate-rise">
+            <LiveDot />
+            <span className="flex-1 min-w-0"><b className="font-medium">{activeJob.kind === "exit-check" ? "Exit check running" : "Test run in progress"}</b>
+              <span className="text-ink-2"> · {jobProject?.name || "An agent"}</span></span>
+            <span className="text-accent-ink font-medium text-[13px] flex items-center gap-1">Watch live <Icon name="arrow" size={14} /></span>
           </a>
         )}
 
-        <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 stagger">
-          <Kpi icon="bot" label="Agents under test" value={<CountUp to={t.projects} />}
-            foot={`${t.client_projects} of yours · ${t.examples} practice agent${t.examples === 1 ? "" : "s"}`} />
-          <Kpi icon="layers" label="Test runs" value={<CountUp to={t.runs} />} foot={`${t.runs_7d} in the last 7 days · ${t.decided} with a decision`} />
-          <Kpi icon="shield" label="Ready rate" tone={t.go_rate == null ? "accent" : t.go_rate >= 0.8 ? "good" : t.go_rate >= 0.5 ? "warn" : "bad"}
-            value={t.go_rate == null ? "—" : <CountUp to={t.go_rate * 100} suffix="%" />}
-            foot={t.decided ? `${t.go} ready · ${t.no_go} not ready${t.insufficient ? ` · ${t.insufficient} not enough evidence` : ""}${t.bug_runs ? ` · ${t.bug_runs} bug test${t.bug_runs === 1 ? "" : "s"} not counted` : ""}` : "after your first run"} />
-          <Kpi icon="phone" label="Test calls" value={<CountUp to={t.calls} />} foot={`${t.scenarios} scenarios · ${money(t.cost_usd)} spent`} />
-        </div>
+        <KpiStrip id="home-kpis" items={[
+          { label: "Agents", value: t.projects, foot: `${t.client_projects} yours · ${t.examples} practice` },
+          { label: "Passing what they ran", value: tested.length ? `${tested.filter(passing).length} of ${tested.length}` : "—",
+            foot: tested.length ? "agents with no failed test type" : "after the first run",
+            tone: tested.length ? (tested.every(passing) ? "good" : "bad") : undefined },
+          { label: "Runs, last 7 days", value: t.runs_7d, foot: `${t.runs} in all` },
+          { label: "Test calls", value: t.calls, foot: `${t.scenarios} test cases` },
+          { label: "Spend", value: money(t.cost_usd), foot: "Claude, all runs" },
+        ]} />
 
         {attention.length > 0 && (
-          <Card flush id="attention">
-            <div className="px-5 pt-4 pb-2"><CardHead level={2} title="Needs attention" sub={`${attention.length} agent${attention.length === 1 ? "" : "s"}`} className="mb-0" /></div>
-            <div className="divide-y divide-line border-t border-line stagger">
+          <section id="attention">
+            <CardHead level={2} title="Needs attention" sub={`${attention.length}`} className="mb-2.5" />
+            <div className=" rounded-[20px] glass divide-y divide-line overflow-hidden">
               {attention.map((a) => (
-                <a key={a.key + a.what} href={a.href} data-attention={a.key}
-                  className="group flex items-center gap-3 px-5 py-3 hover:bg-surface-2/70 hover:no-underline text-ink transition-colors">
-                  <span className={a.tone === "bad" ? "size-2 rounded-full bg-bad flex-none" : "size-2 rounded-full bg-warn flex-none"} />
-                  <b className="text-[13.5px] truncate">{a.name}</b>
-                  <span className="text-ink-2 text-[13px] flex-1 min-w-0 truncate">{a.what}</span>
-                  <span className="text-accent-ink text-[12.5px] font-semibold whitespace-nowrap inline-flex items-center gap-1">{a.action}<Icon name="arrow" size={14} className="transition-transform group-hover:translate-x-0.5" /></span>
+                <a key={a.key} href={a.href} data-attention={a.key}
+                  className="group flex items-center gap-3 px-4 py-3 hover:bg-[var(--glass-strong)] hover:no-underline text-ink transition-colors">
+                  <i className={cx("size-[7px] rounded-full flex-none", a.tone === "bad" ? "bg-bad" : "bg-warn")} />
+                  <b className="font-semibold truncate min-w-0 max-sm:flex-1 sm:whitespace-nowrap sm:shrink-0">{a.name}</b>
+                  <span className="text-ink-2 flex-1 min-w-0 truncate max-sm:hidden">{a.what}</span>
+                  <span className="text-accent-ink text-[13px] font-medium whitespace-nowrap inline-flex items-center gap-1">{a.action}<Icon name="arrow" size={13} /></span>
                 </a>
               ))}
             </div>
-          </Card>
+          </section>
         )}
 
-        <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px]">
-          <Card>
-            <CardHead level={2} title="Activity" sub="runs per day, last 14 days" />
-            <ActivityChart days={data.activity} />
-          </Card>
-          <Card>
-            <CardHead level={2} title="Agent types" />
-            <div className="grid grid-cols-2 gap-2.5 mb-4">
-              <div className="flex items-center gap-2.5 p-3 rounded-[10px] bg-surface-2">
-                <span className="size-8 rounded-lg grid place-items-center bg-agent-soft text-agent"><Icon name="mic" /></span>
-                <div><b className="text-lg tabular-nums leading-none">{voice}</b><div className="text-muted text-xs">voice</div></div>
-              </div>
-              <div className="flex items-center gap-2.5 p-3 rounded-[10px] bg-surface-2">
-                <span className="size-8 rounded-lg grid place-items-center bg-caller-soft text-caller"><Icon name="text" /></span>
-                <div><b className="text-lg tabular-nums leading-none">{text}</b><div className="text-muted text-xs">text</div></div>
-              </div>
-            </div>
-            <div className="text-[12.5px] text-ink-2 font-semibold mb-2.5">Agents by industry</div>
-            <DomainBars rows={data.agent_types.domains} />
-          </Card>
-        </div>
-
-        <Card flush>
-          <div className="flex items-center gap-3 flex-wrap px-[18px] pt-4 pb-3">
-            <h2 className="font-semibold text-base flex-1">Agents</h2>
+        <section>
+          <div className="flex items-center gap-3 flex-wrap mb-2.5">
+            <h2 className="font-semibold text-[15px] flex-1">Agents by test type</h2>
+            <span className="text-muted text-[13px] hidden sm:inline">latest result of each kind of test</span>
             <Seg id="show" value={show} onChange={setShow}
-              options={[{ value: "all", label: `All ${data.projects.length}` }, { value: "mine", label: "Your agents" }, { value: "practice", label: "Practice" }]} />
+              options={[{ value: "all", label: `All ${data.projects.length}` }, { value: "mine", label: "Yours" }, { value: "practice", label: "Practice" }]} />
           </div>
-          {rows.length ? (
-            <Table head={["Agent", "Type", "Last result", "Recent decisions", "Ready rate", "Runs", "Last run"]}>
-              {rows.map((p) => (
-                <tr key={p.key} className={rowLink} data-project={p.key} onClick={() => navigate(projectHref(p.key))}>
-                  <td>
-                    <div className="flex items-center gap-3 min-w-[220px]">
-                      <ProjectAvatar name={p.name} k={p.key} size={36} />
-                      <div className="min-w-0">
-                        <b className="block truncate">{p.name}</b>
-                        <span className="text-muted text-xs">{p.stats.scenarios} scenario{p.stats.scenarios === 1 ? "" : "s"}{p.example ? " · practice agent" : ""}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <div className="flex flex-wrap gap-1.5">
-                      <Chip>{domainLabel(p.domain)}</Chip>
-                      {p.channels.map((c) => <Chip key={c} tone={c === "voice" ? "agent" : "caller"} icon={c === "voice" ? "mic" : "text"}>{modeLabel(c)}</Chip>)}
-                    </div>
-                  </td>
-                  <td>{p.stats.last_decided ? <Badge status={p.stats.last_decided.decision} /> : p.ready ? <span className="text-muted text-[12.5px]">not run yet</span> : <Chip tone="warn" icon="alert">to set up</Chip>}</td>
-                  <td><MiniHistory items={p.stats.history} empty="—" /></td>
-                  <td className="tabular-nums">{pct(p.stats.go_rate)}</td>
-                  <td className="tabular-nums">{p.stats.runs}</td>
-                  <td className="text-muted"><When iso={p.stats.last_run?.started_at} /></td>
-                </tr>
-              ))}
-            </Table>
-          ) : (
-            <EmptyState icon="bot" title={show === "mine" ? "No agents of yours yet" : "No agents"}
-              text="Add each voice agent you want to test." action={<Button variant="primary" icon="plus" href="#/projects/new">New agent</Button>} />
-          )}
-        </Card>
+          <Card flush>
+            {rows.length ? (
+              <Table compact head={["Agent", ...TEST_TYPES.map((id) => SHORT_TITLE[id] || MODE_TITLE[id]), "Last run"]}>
+                {rows.map((p) => {
+                  const byId = new Map(p.modes.map((m) => [m.id, m]));
+                  return (
+                    <tr key={p.key} className={rowLink} data-project={p.key} onClick={() => navigate(projectHref(p.key))}>
+                      <td>
+                        <div className="flex items-center gap-2.5 min-w-[200px]">
+                          <ProjectAvatar kind={p.connection.kind} size={26} />
+                          <div className="min-w-0">
+                            <b className="block truncate font-medium">{p.name}</b>
+                            <span className="text-muted text-[13px]">{domainLabel(p.domain)} · {p.connection.connected
+                              ? <>{p.connection.label}{p.connection.text_too ? " + text" : ""}</> : <span className="text-warn">Not connected</span>}{p.example && !p.connection.label.startsWith("Practice") ? " · practice" : ""}</span>
+                          </div>
+                        </div>
+                      </td>
+                      {TEST_TYPES.map((id) => <td key={id}><TypeCell m={byId.get(id)} k={p.key} /></td>)}
+                      <td className="text-muted whitespace-nowrap"><When iso={p.stats.last_run?.started_at} /></td>
+                    </tr>
+                  );
+                })}
+              </Table>
+            ) : (
+              <EmptyState icon="bot" title={show === "mine" ? "No agents of yours yet" : "No agents"}
+                text="Add each voice agent you want to test." action={<Button variant="primary" icon="plus" href="#/projects/new">New agent</Button>} />
+            )}
+          </Card>
+        </section>
 
-        <Card flush>
-          <div className="px-[18px] pt-4 pb-3"><h2 className="font-semibold text-base">Recent runs</h2></div>
-          {data.recent_runs.length ? (
-            <Table head={["Decision", "Agent", "Channel", "Calls", "Pass / fail", "When"]}>
-              {data.recent_runs.map((r) => (
-                <tr key={r.run_id} className={rowLink} onClick={() => navigate(runHref(r))}>
-                  <td><Badge status={r.decision || r.status} /></td>
-                  <td>
-                    <div className="flex items-center gap-2.5">
-                      {r.project_key && <ProjectAvatar name={r.project_name || ""} k={r.project_key} size={26} />}
-                      <b className="truncate">{r.project_name || r.profile_name || "Removed agent"}</b>
-                    </div>
-                  </td>
-                  <td>{modeLabel(r.mode)}{r.offline ? <span className="text-muted"> · dry run</span> : null}</td>
-                  <td className="tabular-nums">{r.calls_started}{r.planned ? `/${r.planned}` : ""}</td>
-                  <td className="tabular-nums whitespace-nowrap"><span className="text-good">{r.counts.PASS || 0}</span> / <span className="text-bad">{r.counts.FAIL || 0}</span></td>
-                  <td className="text-muted"><When iso={r.started_at} /></td>
-                </tr>
-              ))}
-            </Table>
-          ) : <EmptyState title="No runs yet" text="Open an agent and run its tests: results show up here." icon="play" />}
-        </Card>
+        <div className="grid gap-6 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_400px]">
+          <section>
+            <CardHead level={2} title="Runs per day" sub="last 14 days, all agents" className="mb-2.5" />
+            <Card><ActivityChart days={data.activity} /></Card>
+          </section>
+          <section>
+            <CardHead level={2} title="Recent runs" className="mb-2.5" />
+            <Card flush>
+              {data.recent_runs.length ? (
+                <div className="divide-y divide-line">
+                  {data.recent_runs.slice(0, 6).map((r) => (
+                    <a key={r.run_id} href={runHref(r)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 hover:no-underline text-ink">
+                      <Badge status={r.decision || r.status} label={runLabel(r)} />
+                      <span className="flex-1 min-w-0 truncate">{r.project_name || r.profile_name || "Removed agent"} <span className="text-muted">· {modeTitle(r.test_mode)}</span></span>
+                      <span className="text-muted text-[13px] whitespace-nowrap"><When iso={r.started_at} /></span>
+                    </a>
+                  ))}
+                </div>
+              ) : <EmptyState title="No runs yet" text="Open an agent and run its tests: results show up here." icon="play" />}
+            </Card>
+          </section>
+        </div>
       </div>
     </>
   );

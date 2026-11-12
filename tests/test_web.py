@@ -69,10 +69,18 @@ def test_voice_command_shows_only_non_default_speech_models(jobs, clinic):
     ({"agent_options": {"a b": "x"}}, "not valid"),
     ({"agent_options": {"bugs": "x\n--show-pii"}}, "not valid"),
     ({"model": "x; rm -rf /"}, "not valid"),
+    ({"language": "xx"}, "caller language"),
 ])
 def test_bad_requests_are_refused(jobs, clinic, req, message):
     with pytest.raises(JobError, match=message):
         jobs.build({"command": "run", "profile": "profile.yaml", **req}, clinic)
+
+
+def test_a_run_can_set_the_callers_language(jobs, clinic):
+    args, _ = jobs.build({"command": "run", "profile": "profile-voice.yaml", "test_mode": "speech", "language": "ta"}, clinic)
+    assert args[args.index("--language") + 1] == "ta"
+    args, _ = jobs.build({"command": "run", "profile": "profile-voice.yaml", "language": ""}, clinic)
+    assert "--language" not in args
 
 
 def test_only_one_run_at_a_time(jobs, clinic):

@@ -69,6 +69,9 @@ def snapshot(decision: Mapping[str, Any], info: Mapping[str, Any],
                                         if f["result"] == "FAIL"}),
                     "titles": {f["scenario_id"]: f["title"] for f in safety["findings"]}}
                    if safety else None),
+        # Step 4: the agent's running cost at the owner's prices (costs.py), for A/B and regression.
+        **({"cost": {k: decision["costs"].get(k) for k in ("currency", "per_task", "per_call", "tasks_done", "task_calls")}}
+           if decision.get("costs") and not load else {}),
         **({"load": {"shape": load.get("shape"), "calls_at_once": load.get("calls_at_once"),
                      "capacity": load.get("capacity"), "calls": load.get("calls"), "failed": load.get("failed"),
                      "levels": _levels(load.get("stages") or [])}} if load else {}),

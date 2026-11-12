@@ -22,7 +22,7 @@ import { LoadTestPage } from "./pages/LoadTest";
 import { MonitorPageView, type MonitorTab } from "./pages/Monitor";
 import { MonitorCallPage } from "./pages/MonitorCall";
 import { NewRun } from "./pages/NewRun";
-import { MODE_IDS, ModePage, TestModesPage } from "./pages/TestModes";
+import { MODE_IDS, ModePage } from "./pages/TestModes";
 import type { TestModeId } from "./lib/types";
 import { PrintReport } from "./pages/PrintReport";
 import { ProjectOverviewPage } from "./pages/ProjectOverview";
@@ -46,28 +46,38 @@ const ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), Page][] = [
 ];
 const PROJECT_ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), ProjectPage][] = [
   [new RegExp(`^/p/${K}/?$`), "overview", (p) => <ProjectOverviewPage project={p} />],
-  [new RegExp(`^/p/${K}/test$`), "modes", (p) => <TestModesPage project={p} />],
-  [new RegExp(`^/p/${K}/test/(${MODE_IDS.join("|")})(/reports)?$`), "modes", (p, m, q) =>
-    <ModePage project={p} mode={m[2] as TestModeId} tab={m[3] ? "reports" : "run"} query={q} />],
-  [new RegExp(`^/p/${K}/new$`), "modes", (p, _m, q) => <NewRun project={p} query={q} />],
+  [new RegExp(`^/p/${K}/test$`), "overview", (p) => <SetupRedirect to={projectHref(p.key)} query={new URLSearchParams()} />],
+  [new RegExp(`^/p/${K}/test/(${MODE_IDS.join("|")})(?:/(run|reports))?$`), (m) => `mode:${m[2]}`, (p, m, q) =>
+    <ModePage project={p} mode={m[2] as TestModeId} tab={(m[3] as "run" | "reports" | undefined) || null} query={q} />],
+  [new RegExp(`^/p/${K}/new$`), "overview", (p, _m, q) => <NewRun project={p} query={q} />],
   [new RegExp(`^/p/${K}/live(?:/(j-[\\w-]+))?$`), "results", (p, m) => <Live project={p} jobId={m[2] || null} />],
-  [new RegExp(`^/p/${K}/load$`), "modes", (p, _m, q) => <LoadTestPage project={p} query={q} />],
+  [new RegExp(`^/p/${K}/load$`), "mode:load", (p, _m, q) => <LoadTestPage project={p} query={q} />],
   [new RegExp(`^/p/${K}/runs$`), "results", (p) => <History project={p} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)$`), "results", (p, m) => <RunReport project={p} runId={m[2]} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/print$`), "results", (p, m) => <PrintReport project={p} runId={m[2]} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/calls/(t-[\\w-]+)$`), "results", (p, m, q) => <CallPage project={p} runId={m[2]} testId={m[3]} at={q.get("at") != null ? Number(q.get("at")) : null} />],
   [new RegExp(`^/p/${K}/judges$`), "judges", (p) => <JudgesPageView project={p} />],
-  [new RegExp(`^/p/${K}/compare$`), "compare", (p, _m, q) => <ComparePage project={p} query={q} />],
+  [new RegExp(`^/p/${K}/compare$`), "mode:regression", (p, _m, q) => <ComparePage project={p} query={q} />],
   [new RegExp(`^/p/${K}/labels$`), "judges", (p) => <Labels project={p} />],
   [new RegExp(`^/p/${K}/labels/(r-[\\w-]+)/(t-[\\w-]+)$`), "judges", (p, m) => <Labels project={p} runId={m[2]} testId={m[3]} />],
+  // Test cases and safety tests live on their test type's page now.
+  [new RegExp(`^/p/${K}/setup/(cases|safety)$`), (m) => m[2] === "safety" ? "mode:safety" : "mode:functional", (p, m, q) =>
+    <SetupRedirect to={projectHref(p.key, m[2] === "safety" ? "/test/safety" : `/test/${caseTypeOf(p, q.get("edit"))}`)}
+      query={q.get("edit") ? new URLSearchParams({ edit: q.get("edit") === "new-scenario" ? "new" : q.get("edit")! }) : new URLSearchParams()} />],
   [new RegExp(`^/p/${K}/setup/(\\w+)$`), (m) => setupSection(SETUP_ALIASES[m[2]] || m[2]), (p, m, q) =>
     m[2] in SETUP_ALIASES ? <SetupRedirect to={projectHref(p.key, `/setup/${oldPlanTarget(m[2], q)}`)} query={q} />
       : SETUP_TABS.some((t) => t.value === m[2]) ? <ProjectSetup project={p} tab={m[2] as SetupTab} query={q} /> : null],
   [new RegExp(`^/p/${K}/calls(?:/(list|import|settings))?$`), "calls", (p, m, q) =>
     <MonitorPageView project={p} tab={(m[2] === "list" ? "calls" : m[2] || "overview") as MonitorTab} query={q} />],
   [new RegExp(`^/p/${K}/calls/(c-[\\w-]+)$`), "calls", (p, m) => <MonitorCallPage project={p} callId={m[2]} />],
-  [new RegExp(`^/p/${K}/files$`), "setup:cases", (p, _m, q) => <Files project={p} query={q} />],
+  [new RegExp(`^/p/${K}/files$`), "agent-settings", (p, _m, q) => <Files project={p} query={q} />],
 ];
+
+// The test type page an old "edit this test case" link belongs on.
+function caseTypeOf(p: Project, file: string | null): string {
+  const s = file ? p.profiles.flatMap((x) => x.scenarios).find((x) => x.file === file) : null;
+  return s?.test_type || "functional";
+}
 
 // Set-up addresses from before the redesign go to their new page (a persona being edited goes to Callers).
 const oldPlanTarget = (old: string, q: URLSearchParams) => {
@@ -136,7 +146,7 @@ function Pages() {
   }
   return (
     <Layout section={section} projectKey={projectKey}>
-      <div key={loc.hash} className="animate-view-in">
+      <div key={loc.hash}>
         <Boundary>
           {page ?? <EmptyState title="Page not found" icon="help" action={<a href="#/"><Icon name="back" size={14} /> Back to the dashboard</a>} />}
         </Boundary>

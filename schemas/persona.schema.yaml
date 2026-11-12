@@ -14,7 +14,12 @@ properties:
   description:
     description: One or two plain sentences given to the caller LLM.
     type: string
-  language: {type: string, default: en}
+  language:
+    description: >
+      The language the caller speaks: en (English) or ta (Tamil). Left out: the agent's first language
+      (profile languages). A Tamil caller speaks with a Tamil voice (unless speech.tts_voice is a Tamil
+      voice of your own) and ignores speech.accent, which picks English voices.
+    enum: [en, ta]
   traits:
     description: Grid dimensions. Each is a small fixed scale so personas can be generated as a grid.
     type: object

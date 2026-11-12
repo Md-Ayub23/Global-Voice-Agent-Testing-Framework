@@ -309,14 +309,20 @@ def _entity_fidelity(check, check_id, events, all_events, facts, salt) -> CheckR
 
 
 DIGIT_WORDS = {"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
-               "seven": "7", "eight": "8", "nine": "9"}
+               "seven": "7", "eight": "8", "nine": "9",
+               # Tamil, written and spoken forms, as speech recognition writes them in Tamil script
+               "பூஜ்ஜியம்": "0", "பூஜ்யம்": "0", "சுழியம்": "0", "ஜீரோ": "0",
+               "ஒன்று": "1", "ஒண்ணு": "1", "இரண்டு": "2", "ரெண்டு": "2", "மூன்று": "3", "மூணு": "3",
+               "நான்கு": "4", "நாலு": "4", "ஐந்து": "5", "அஞ்சு": "5", "ஆறு": "6", "ஏழு": "7",
+               "எட்டு": "8", "ஒன்பது": "9"}
 # Words speech recognition often writes for a spoken digit; trusted only between two other digits.
 SOUND_ALIKES = {"oh": "0", "o": "0", "won": "1", "to": "2", "too": "2", "for": "4", "ate": "8"}
 
 
 def spoken_numbers(text: str) -> list[str]:
     """Digit runs as heard: "4 8 2, one nine three" and "482-193" both give "482193"."""
-    tokens = re.findall(r"[a-z]+|\d+", text.lower())
+    tokens = re.findall(r"[a-z]+|\d+|[\u0b80-\u0bff]+", text.lower())
+    tokens = [str(int(t)) if t.isdigit() and not t.isascii() else t for t in tokens]   # Tamil digits ௭ -> 7
     digits = [t if t.isdigit() else DIGIT_WORDS.get(t) for t in tokens]
     for i, t in enumerate(tokens):
         if digits[i] is None and t in SOUND_ALIKES and 0 < i < len(tokens) - 1 \
@@ -381,6 +387,14 @@ def _readback(check, check_id, events, all_events) -> CheckResult:
         return _result(check, check_id, Result.PASS,
                        f'The agent read back {field} {want} correctly ("{_short(hits[0][1])}").',
                        _refs([resp, hits[0][0]]), EvidenceLevel.SPEECH)
+    other_script = any(re.search(r"[\u0900-\u0dff]", t) for _, t in heard)    # Tamil and other Indian scripts
+    if not hits and not problems and other_script and not want_key.isdigit():
+        # The agent spoke another language (Tamil): a code with letters ("R-7731" said as "ஆர் ஏழு...")
+        # can't be matched in its transcript with certainty, so it is left for a person, never failed.
+        return _result(check, check_id, Result.NOT_VERIFIED,
+                       f"The agent spoke another language, so {field} {want} could not be matched in its words "
+                       "with certainty: listen to the recording.", _refs([resp] + [e for e, _ in heard][:3]),
+                       EvidenceLevel.NONE)
     if not hits:
         if not turns:
             problems.append(f"the agent said nothing after {tool} returned {field} {want}")

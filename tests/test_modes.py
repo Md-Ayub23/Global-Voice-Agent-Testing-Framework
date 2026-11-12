@@ -23,16 +23,20 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # ---- modes.py --------------------------------------------------------------------------------
 
-OWN = [{"id": "a"}, {"id": "b", "setup": {"faults": [{"tool": "x", "kind": "timeout"}]}}]
+OWN = [{"id": "a"}, {"id": "b", "setup": {"faults": [{"tool": "x", "kind": "timeout"}]}},
+       {"id": "c", "audio": {"barge_in": [{"agent_turn": 2, "offset_ms": 500, "say": "wait"}]}},
+       {"id": "d", "audio": {"noise": "cafe"}}, {"id": "e", "test_type": "speech"}]
 ATTACKS = [{"id": "safety.off-topic.1"}]
 
 
 @pytest.mark.parametrize("mode,with_safety,expected", [
-    ("functional", False, ["a", "b"]),
-    ("functional", True, ["a", "b", "safety.off-topic.1"]),
+    ("functional", False, ["a"]),               # each test type runs its own test cases
+    ("functional", True, ["a", "safety.off-topic.1"]),
+    ("timing", False, ["a", "c"]),              # Timing and Speech also run the Functional cases
+    ("speech", False, ["a", "d", "e"]),
     ("resilience", True, ["b"]),               # only test cases that break a tool, never attacks
     ("safety", False, ["safety.off-topic.1"]),  # only attacks, whatever the switch says
-    ("full", True, ["a", "b", "safety.off-topic.1"]),
+    ("full", True, ["a", "b", "c", "d", "e", "safety.off-topic.1"]),
 ])
 def test_each_mode_picks_its_own_tests(mode, with_safety, expected):
     assert [s["id"] for s in modes.select(mode, OWN, ATTACKS, with_safety)] == expected
@@ -78,7 +82,7 @@ def test_resilience_mode_runs_only_the_broken_tool_tests_and_says_passed_not_rea
     assert rep["verdict"]["level"] == "ready"
     # a focused mode never claims the whole agent is ready to release
     assert rep["verdict"]["headline"] == "Passed the resilience tests"
-    assert "Full check" in rep["verdict"]["line"]
+    assert "Release check" in rep["verdict"]["line"]
 
 
 def test_safety_mode_runs_only_attack_calls(tmp_path):
@@ -94,7 +98,7 @@ def test_voice_only_mode_on_a_text_channel_is_refused(tmp_path, capsys):
 
 
 def test_a_caught_bug_gives_not_ready_with_proof_and_a_csv(tmp_path):
-    assert _run(tmp_path, "--test-mode", "functional", "--scenario", "clinic.book-checkup.tool-timeout",
+    assert _run(tmp_path, "--test-mode", "resilience", "--scenario", "clinic.book-checkup.tool-timeout",
                 "--repeats", "1", "--agent-opt", "bugs=lie_on_failure") == 1
     run_dir = _only_run(tmp_path)
     rep = readiness.build(run_dir)
@@ -177,4 +181,6 @@ def test_api_gives_the_report_the_csv_and_the_mode_board(tmp_path, server):
     assert board["resilience"]["latest"]["run_id"] == run_id and board["resilience"]["runs"] == 1
     assert board["functional"]["latest"] is None
     assert board["timing"]["available"]["ok"]            # the clinic has a voice channel
-    assert not board["regression"]["available"]["ok"]    # no baseline yet
+    # Regression needs a saved baseline (a local checkout may have one for the clinic)
+    has_baseline = any((ROOT / "examples/clinic/baselines").glob("*.json"))
+    assert board["regression"]["available"]["ok"] == has_baseline

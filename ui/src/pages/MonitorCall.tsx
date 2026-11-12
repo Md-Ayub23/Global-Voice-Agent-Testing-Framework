@@ -29,7 +29,7 @@ const JUDGE_STATE: Record<string, string> = { done: "judged", pending: "waiting 
 
 export function MonitorCallPage({ project, callId }: { project: Project; callId: string }) {
   const home = (path = "") => projectHref(project.key, `/calls${path}`);
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
+  useCrumbs([{ label: project.name, href: projectHref(project.key) },
     { label: "Real calls", href: home() }, { label: "Calls", href: home("/list") }, { label: "Call" }]);
   const { data, error, reload } = useLoad(
     () => api.get<MonitorCallDetail>(`/api/project/${project.key}/monitor/calls/${callId}`), [project.key, callId]);
@@ -131,7 +131,7 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
             <Table compact head={["#", "Who", "What happened"]}>
               {data.story.map((row) => (
                 <tr key={row.seq}>
-                  <td className="font-mono text-[11.5px] text-muted">#{row.seq}</td>
+                  <td className="font-mono text-[13px] text-muted">#{row.seq}</td>
                   <td className="whitespace-nowrap"><b>{row.who}</b></td>
                   <td>{row.text}</td>
                 </tr>
@@ -143,23 +143,23 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
         <div className="flex flex-col gap-4 min-w-0">
           <Tabs value={sideShown} onChange={setSide} tabs={sideTabs} className="mb-0" />
           {sideShown === "checks" && (
-            <Card className="animate-view-in">
+            <Card >
               <CardHead title="Checks" sub={v ? `${own.filter((x) => x.result === "PASS").length} of ${own.length} passed` : undefined} />
-              <div id="checks">{v ? <ChecksList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-[12.5px]">This call has not been scored.</div>}</div>
-              <div className="text-muted text-[11.5px] mt-2">Real calls have no script, so only checks that fit any call run here; the AI judges cover the rest.</div>
+              <div id="checks">{v ? <ChecksList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-[13px]">This call has not been scored.</div>}</div>
+              <div className="text-muted text-[13px] mt-2">Real calls have no script, so only checks that fit any call run here; the AI judges cover the rest.</div>
             </Card>
           )}
           {sideShown === "judges" && v && (
-            <Card id="judges" className="animate-view-in">
+            <Card id="judges" >
               <CardHead title="AI judges" sub={JUDGE_STATE[v.judges?.state] || v.judges?.state}>
                 <Button size="sm" variant="ghost" href={projectHref(project.key, "/judges")}>About</Button>
               </CardHead>
-              {v.judges?.note && <Notice className="mb-3 text-[12.5px]">{v.judges.note}</Notice>}
-              {judgedRan ? <JudgeList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-[12.5px]">The judges haven't looked at this call.</div>}
+              {v.judges?.note && <Notice className="mb-3 text-[13px]">{v.judges.note}</Notice>}
+              {judgedRan ? <JudgeList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-[13px]">The judges haven't looked at this call.</div>}
               {judgedRan && (
                 <div className="mt-3 pt-3 border-t border-line" id="label-items">
                   <div className="font-semibold text-[13px] mb-1">Your labels</div>
-                  <div className="text-muted text-[12px] mb-2">Were the judges right? Your answer replaces theirs on this call and teaches them which items to trust.</div>
+                  <div className="text-muted text-[13px] mb-2">Were the judges right? Your answer replaces theirs on this call and teaches them which items to trust.</div>
                   {judged.map((c) => {
                     const mine = choice[c.check_id] || (c.judge?.human as Vote | undefined);
                     return (
@@ -188,14 +188,14 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
           )}
           {sideShown === "quality" && m.quality && <CallQuality quality={m.quality} defs={data.metric_defs} />}
           {sideShown === "about" && (
-            <Card className="animate-view-in">
+            <Card >
               <CardHead title="About this call" />
               <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-2 text-[13px]">
                 <dt className="text-muted font-semibold">Length</dt><dd className="m-0">{fmtDuration(r.duration_ms ?? m.duration_ms)}</dd>
                 <dt className="text-muted font-semibold">Response p50</dt><dd className="m-0">{r.mode === "voice" ? fmtMs(m.latency_p50_ms) : "no timings in the file"}</dd>
                 <dt className="text-muted font-semibold">How it ended</dt><dd className="m-0">{r.ended_reason || "not given"}</dd>
                 <dt className="text-muted font-semibold">Caller</dt><dd className="m-0">{r.caller_hash ? <span title="The number itself is not kept">caller {r.caller_hash}</span> : "unknown"}</dd>
-                <dt className="text-muted font-semibold">Their id</dt><dd className="m-0 font-mono text-[12px] break-all">{r.external_id || "none"}</dd>
+                <dt className="text-muted font-semibold">Their id</dt><dd className="m-0 font-mono text-[13px] break-all">{r.external_id || "none"}</dd>
                 <dt className="text-muted font-semibold">Received</dt><dd className="m-0">{fmtDate(r.imported_at)}</dd>
                 {v?.judges?.cost_usd ? <><dt className="text-muted font-semibold">Judge cost</dt><dd className="m-0">{money(v.judges.cost_usd)}</dd></> : null}
                 {r.recording_url && <><dt className="text-muted font-semibold">Recording</dt>

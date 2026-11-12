@@ -13,6 +13,7 @@ class PlannedCall:
     scenario_id: str
     persona_id: str | None              # None for scripted scenarios
     repeat: int
+    conditions: str | None = None       # voice, Speech mode sweep: the caller condition of this call
 
 
 class RunOrchestrator(Protocol):

@@ -16,7 +16,13 @@ export interface System {
   models: { folder: string; piper_voices: string[]; whisper: { name: string; bytes: number }[]; bytes: number };
   active_job: Job | null;
   accents?: { id: string; label: string; voice: string }[];
+  /** The languages Vocto's caller speaks (languages.py), each with its own voices. */
+  languages?: { id: string; name: string; voices: { id: string; label: string }[] }[];
   conditions?: { id: string; title: string; about: string }[];
+  /** Speech mode: the caller conditions a run can compare (line and voice, then accents). */
+  sweep_conditions?: SweepCondition[];
+  /** Resilience: the kinds of tool failure a run can drill (drills.py). */
+  drill_failures?: DrillFailure[];
   metrics?: MetricDef[];
   noises?: string[];
 }
@@ -33,8 +39,12 @@ export interface QualityRow {
   id: string; title: string; unit: MetricUnit; better: "lower" | "higher"; value: number | null; band: Band;
   good: number | null; warn: number | null; blocks: boolean; calls: number; about: string; detail?: Record<string, number | string>;
 }
+export interface SweepCondition { id: string; title: string; about: string; group: "line" | "accent"; default: boolean }
 export interface ConditionRow {
-  label: string; calls: number; passed: number; failed: number; pass_rate: number | null;
+  key?: string; label: string; preset?: string | null; lines?: string[];
+  calls: number; passed: number; failed: number; pass_rate: number | null;
+  details_right?: number; details_checked?: number; readback_right?: number; readback_checked?: number;
+  understood_wer?: number | null; understood_words?: number; failed_calls?: string[]; failed_tests?: string[];
   p50_ms: number | null; p90_ms: number | null; talked_over_pct: number | null; behaviours: string[];
 }
 export interface CallConditions { label: string; preset?: string; voice?: string; accent?: string; behaviours?: string[]; [k: string]: unknown }
@@ -42,6 +52,8 @@ export interface CallConditions { label: string; preset?: string; voice?: string
 export interface Scenario {
   id: string;
   title: string;
+  /** The test type it belongs to: its own test_type, or placed by what it does (src/vatf/modes.py type_of). */
+  test_type: "functional" | "timing" | "speech" | "resilience";
   criticality: string;
   style: string;
   modes: string[];
@@ -52,6 +64,8 @@ export interface Scenario {
   expected: string | null;
   checks: number;
   faults: string[];
+  /** Resilience: the test case can be drilled (a simulated call that ends in a booking or order). */
+  drill?: boolean; no_drill_why?: string | null;
   audio: { noise?: string; snr_db?: number; barge_in?: unknown } | null;
 }
 
@@ -75,6 +89,7 @@ export interface Profile {
   judges?: boolean;        // the AI judges are on for this profile
   safety?: SafetyBrief;    // the built-in safety tests, in short
   thresholds?: { repeats?: number; latency_p50_ms?: number; latency_p95_ms?: number };
+  pass_rules?: Record<string, PassRule[]>;
   tools?: { name: string; effect: string }[];
   backend?: string;
   logs?: string;
@@ -119,6 +134,11 @@ export interface ProjectStats {
   personas: number;
 }
 
+export type TypeStatus = "passed" | "watch" | "failed" | "evidence" | "not_run" | "unavailable";
+export interface ModeBrief { id: TestModeId; question?: string | null; status: TypeStatus; why?: string | null; run_id?: string | null; at?: string | null; headline?: string | null; top_finding?: string | null; runs: number }
+export interface ConnectionBrief { kind: string | null; label: string; connected: boolean; text_too: boolean }
+export interface TrendPoint { run_id: string; at: string | null; test_mode: string | null; decision: Decision | null; pass_rate: number | null; p50_ms: number | null; p95_ms: number | null; cost_usd: number | null }
+
 export interface Dashboard {
   totals: {
     projects: number; client_projects: number; examples: number; runs: number; runs_7d: number; decided: number;
@@ -126,12 +146,15 @@ export interface Dashboard {
   };
   agent_types: { domains: { domain: string; projects: number }[]; channels: Record<Mode, number> };
   activity: DecisionDay[];
-  projects: (Pick<Project, "key" | "name" | "description" | "domain" | "example" | "channels" | "ready"> & { stats: ProjectStats })[];
+  projects: (Pick<Project, "key" | "name" | "description" | "domain" | "example" | "channels" | "ready"> & { stats: ProjectStats; connection: ConnectionBrief; modes: ModeBrief[] })[];
   recent_runs: RunSummary[];
 }
 
 export interface JudgeSummary { items: number; calibrated: number; labelled_calls: number; to_review: number; to_label: number; judged_runs: number; to_teach?: number }
-export interface ProjectOverview { project: Project; stats: ProjectStats; activity: DecisionDay[]; recent_runs: RunSummary[]; judges?: JudgeSummary; modes?: ModeCard[] }
+export interface ProjectOverview {
+  project: Project; stats: ProjectStats; activity: DecisionDay[]; recent_runs: RunSummary[]; judges?: JudgeSummary; modes?: ModeCard[];
+  mode_summary: ModeBrief[]; connection: ConnectionBrief; trend: TrendPoint[];
+}
 
 // ---- AI judges (src/vatf/web/judging.py) ----
 export type Vote = "PASS" | "FAIL" | "NOT_APPLICABLE";
@@ -180,8 +203,11 @@ export interface CallLabels { labels: Record<string, Vote | null>; relevant: str
 
 export interface Secret { name: string; projects: string[]; set: boolean; hint: string | null }
 
+/** One side of an A/B test: two agent versions run on the same tests (vatf run --ab-with). */
+export interface ABSide { group: string; side: "A" | "B"; label: string; other?: string; other_label?: string }
 export interface RunSummary {
   run_id: string;
+  ab?: ABSide | null;
   started_at: string;
   finished_at: string | null;
   status: string;
@@ -220,7 +246,7 @@ export interface BaselineCounts {
 }
 export type Direction = "regression" | "worse" | "better" | "new" | "removed" | "same";
 export interface Change {
-  kind: "test" | "latency" | "score" | "metric" | "judge" | "safety" | "load";
+  kind: "test" | "latency" | "score" | "metric" | "judge" | "safety" | "load" | "cost";
   id: string; title: string; direction: Direction; before: number | string | null; after: number | string | null;
   message: string; blocks: boolean; unit?: string; band_before?: string; band_after?: string; criticality?: string;
 }
@@ -241,9 +267,13 @@ export interface Snapshot {
   tests: Record<string, { title: string; criticality: string; k: number; passed: number; failed: number; unverified: number }>;
   scores: Record<string, number | null>;
   latency: { p50_ms: number | null; p95_ms: number | null; turns: number } | null;
+  /** The agent's running cost at the owner's prices (Set up › Connection › Running costs). */
+  cost?: { currency: string; per_task: number | null; per_call: number | null; tasks_done: number; task_calls: number };
 }
 export interface CompareResult extends Comparison {
   runs: { a: RunSummary; b: RunSummary };
+  /** An A/B test of two agent versions: version A is `a`, version B is `b`. */
+  ab?: { labels: { A: string; B: string } } | null;
   same_agent: boolean;
   snapshots: { a: Snapshot; b: Snapshot };
 }
@@ -343,10 +373,14 @@ export interface RunInfo {
   agent_options: Options;
   caller_model: string | null;
   pii_masked: boolean;
-  plan: { scenario_id: string; persona_id: string | null; repeat: number }[];
+  plan: { scenario_id: string; persona_id: string | null; repeat: number; conditions?: string }[];
   judges?: { enabled?: boolean; why?: string; primary_model?: string; secondary_model?: string; tiebreak?: boolean; tiebreak_model?: string } | null;
   safety?: boolean;
   conditions?: string;
+  sweep?: string[];
+  drills?: string[];
+  /** Every caller spoke this language on this run (languages.py); absent = each caller's own. */
+  caller_language?: string;
   trigger?: string;
   baseline?: string;
   speech?: { engine: string; ears_model: string; check_model: string } | null;
@@ -366,6 +400,7 @@ export interface RunDetail {
   load_live?: LoadLive | null;
   alerts?: { events: string[]; text: string; sent: { name: string; type: string; events: string[]; sent: boolean; status?: number; error?: string }[] } | null;
   readiness?: Readiness | { error: string } | null;
+  analysis?: RunAnalysis | null;
 }
 
 export interface Evidence { event: number; note?: string }
@@ -444,7 +479,7 @@ export interface ExitSummary {
 export interface Job {
   id: string;
   kind: "run" | "exit-check" | "health" | "load";
-  request: { project?: string; profile?: string; offline?: boolean; test_mode?: string };
+  request: { project?: string; profile?: string; offline?: boolean; test_mode?: string; ab_with?: string };
   command: string;
   started_at: string;
   finished_at: string | null;
@@ -502,6 +537,7 @@ export interface LoadLimits {
   slowdown: { blocks: boolean; pct: number; ms: number };
   pass_drop: { blocks: boolean; points: number };
   drift: { blocks: boolean; pct: number };
+  recovery: { blocks: boolean; pct: number; ms: number };
   max_lag_ms: number; min_calls: number;
 }
 export interface LoadSettings {
@@ -528,7 +564,9 @@ export interface LoadSummary {
   capacity: number | null; breaking: { level: number; stage: string; why: string[]; untrusted?: boolean } | null;
   stages: LoadStageStats[];
   comparisons: { slowdown?: { low_level: number; top_level: number; low_p95_ms: number; top_p95_ms: number };
-    pass_rate?: { low: number; top: number }; drift?: Record<string, number | null> };
+    pass_rate?: { low: number; top: number }; drift?: Record<string, number | null>;
+    recovery?: { before_p95_ms: number; after_p95_ms: number | null; stage_p95_ms?: number | null; normal_up_to_ms: number; back_to_normal_s: number | null;
+      recovered: boolean; before_failed_pct: number | null; after_failed_pct: number | null } };
   blocking: LoadProblem[]; warnings: LoadProblem[]; unattributed_tool_calls: number;
   lag_p95_ms: number | null; lag_max_ms: number | null;
   timeline: [number, number, number][];   // [seconds from the start, calls in progress, Vocto's event-loop lag ms]
@@ -617,7 +655,7 @@ export interface ModeCard extends ModeDef {
   runs: number;
   latest: { run_id: string; at: string | null; decision: Decision; level: ReadinessLevel | null; headline: string | null; top_finding: string | null; calls: number | null } | null;
 }
-export interface ScoreRow { area: string; title: string; status: AreaStatus; status_text: string; value: string; detail: string; percent?: number | null }
+export interface ScoreRow { area: string; title: string; status: AreaStatus; status_text: string; value: string; detail: string; percent?: number | null; range?: string | null }
 export interface Proof { test_id: string; check_id: string | null; seq: number | null; at: string | null; who: string; quote: string | null; note: string }
 export interface Finding {
   id: string; title: string; area: string; area_title: string; kind: string;
@@ -627,7 +665,7 @@ export interface Finding {
   tests: { id: string; title: string; calls: number }[];
   calls: string[]; messages: string[]; proofs: Proof[];
 }
-export interface MetricLine { group: string; title: string; value: string; note: string; band: Band | null; rate?: number | null }
+export interface MetricLine { group: string; title: string; value: string; note: string; band: Band | null; rate?: number | null; range?: string | null }
 export interface Readiness {
   version: number; run_id: string; agent: string | null; channel: Mode;
   mode: { id: TestModeId; title: string; question: string };
@@ -643,4 +681,38 @@ export interface Readiness {
     calls_planned: number; calls_verified: number | null;
   };
   method: { label: string; value: string }[];
+  /** Voice: results by caller condition (Speech mode compares them side by side). */
+  conditions?: ConditionResult[];
+  /** Resilience failure drills: how the calls ended, per kind of tool failure. */
+  failures?: FailureResult[];
+  /** Functional: the job itself in numbers (every task step, readiness.py _functional). */
+  functional?: FunctionalResult | null;
 }
+export interface FunctionalResult {
+  tasks: { k: number; n: number; range: string | null; unchecked: number };
+  untrue_claims: number;
+  saved: { k: number; n: number; range: string | null };
+  other_changes: { calls: number; of: number };
+  wrong_tools: number;
+  read_by_ai: number;
+  ends: { key: string; title: string; parts: { class: string; label: string; count: number; good: boolean }[] }[];
+  intents: { id: string; title: string; passed: number; failed: number; range: string | null }[];
+}
+export interface DrillFailure { id: string; title: string; about: string; default: boolean; expected: string }
+export interface FailureResult {
+  key: string; title: string; about: string; status: "handled" | "struggled" | "broke" | "no_result"; status_text: string;
+  result: string; pass_rate: number | null; ended: string; recovered: number; honest: number; false_claims: number;
+  duplicates: number; expected: string; failed_tests: string[]; proof: string | null;
+}
+export interface ConditionResult {
+  key: string; title: string; lines: string[]; status: "handled" | "struggled" | "broke" | "no_result"; status_text: string;
+  result: string; pass_rate: number | null; understanding: string; understood_wer: number | null; p50: string | null;
+  worse_than_clean: boolean; failed_tests: string[]; proof: string | null;
+}
+
+// One rule of a test type's "What passes" card (src/vatf/modes.py pass_rules).
+export interface PassRule { text: string; blocks: boolean }
+
+// The AI analysis of a run (src/vatf/analysis.py). Always AI, never part of the decision.
+export interface RunAnalysisCause { title: string; explanation: string; who: string; fix: string; confidence: string; findings: string[]; calls: string[]; blocks: boolean }
+export interface RunAnalysis { run_id: string; created_at: string; model: string; cost_usd: number; fingerprint: string; stale?: boolean; summary: string; check_first: string; causes: RunAnalysisCause[]; not_covered: string[] }

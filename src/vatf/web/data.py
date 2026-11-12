@@ -20,15 +20,17 @@ from typing import Any, Mapping
 
 import yaml
 
-from .. import __version__, attacks, modes, readiness
+from .. import __version__, analysis, attacks, coverage, modes, readiness
 from ..accents import accent_list
+from ..drills import drillable, failure_list
+from ..languages import language_list
 from ..audio.noise import KINDS as NOISE_KINDS
-from ..conditions import preset_list
+from ..conditions import preset_list, sweep_list
 from ..connectors import is_voice
 from ..contracts.models import TraceEvent
 from ..evidence import TEXT_FIELDS, mask_events
 from ..llm import DEFAULT_MODEL
-from ..loader import ProjectError, load_project
+from ..loader import ProjectError, load_project, read_yaml
 from ..metrics import metric_list
 from ..story import database_rows, judgement, story_rows
 from ..util import read_json
@@ -49,7 +51,7 @@ def _rel(root: Path, path: Path) -> str:
 
 def _yaml(path: Path) -> Any:
     try:
-        return yaml.safe_load(path.read_text(encoding="utf-8"))
+        return read_yaml(path)
     except (OSError, yaml.YAMLError):
         return None
 
@@ -104,6 +106,12 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
         doc = _yaml(folder / file) or {}
         info.update(ok=False, problems=str(e).splitlines()[1:] or [str(e)], id=doc.get("id"),
                     name=doc.get("name", file), mode="voice" if is_voice(doc) else "text", scenarios=[], personas=[])
+        # The pages read how the agent is reached even before it is ready (a new agent has no test cases yet).
+        conn = doc.get("connection") if isinstance(doc.get("connection"), dict) else {}
+        info["connection"] = {"type": str(conn.get("type") or ""), "target": str(conn.get("target") or ""),
+                              "launch": str(conn.get("launch") or "")}
+        info["options"] = {k: "" if v is None else str(v) for k, v in (conn.get("options") or {}).items()} \
+            if isinstance(conn.get("options"), dict) else {}
         return info
     p = project.profile
     conn = p["connection"]
@@ -125,6 +133,7 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
         "planted_bugs": [{"id": b["id"], "title": b.get("title", b["id"]), "scenario": b["caught_by"]["scenario"],
                           "judge": b["caught_by"].get("judge")} for b in p.get("planted_bugs", [])],
         "thresholds": th, "limits": p.get("limits", {}),
+        "pass_rules": {m: modes.pass_rules(m, p, mode == "voice") for m in modes.CHOICES + ("load",)},
         "baseline": _baseline_id(folder, file),
         "health_checks": bool((p.get("health_checks") or {}).get("enabled")), "alerts": len(p.get("alerts") or []),
         "judges": (p.get("judges") or {}).get("enabled", True) is not False,
@@ -133,7 +142,8 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
         "backend": p.get("backend", {}).get("access", "none"),
         "logs": p.get("logs", {}).get("source", "none"),
         "scenarios": [{
-            "id": s["id"], "title": s.get("title", s["id"]), "criticality": s.get("criticality", "normal"),
+            "id": s["id"], "title": s.get("title", s["id"]), "test_type": modes.type_of(s),
+            "criticality": s.get("criticality", "normal"),
             "style": s["style"], "modes": s.get("modes", ["text", "voice"]),
             "in_mode": mode in s.get("modes", ["text", "voice"]), "tags": s.get("tags", []),
             "persona": s.get("caller", {}).get("persona"), "repeats": s.get("repeats") or th.get("repeats", 3),
@@ -141,6 +151,7 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
             "checks": len(s.get("checks", [])) + sum(len(t.get("expect", [])) for t in s.get("turns", []))
             + (1 if s.get("outcome") else 0),
             "faults": [f"{f.get('tool')}: {f.get('type')}" for f in s.get("setup", {}).get("faults", [])],
+            "drill": drillable(s) is None, "no_drill_why": drillable(s),
             "audio": s.get("audio", {}),
         } for s in project.scenarios if not attacks.is_safety(s)],
         "personas": [{"id": k, "description": v.get("description", ""),
@@ -358,6 +369,7 @@ def run_summary(runs: Path, run_id: str, active_runs: set[str] = frozenset()) ->
         "trigger": info.get("trigger") or "manual",
         "test_mode": modes.of_run(info) if info else None,
         "vs_baseline": (decision or {}).get("baseline"),
+        "ab": info.get("ab"),        # Step 4: one side of an A/B test of two agent versions
         # Phase 7: load tests are listed with the other runs, marked, and kept out of the GO rate.
         "kind": "load" if info.get("kind") == "load" else "run",
         "load": ({k: (decision or {}).get("load", {}).get(k) for k in ("shape", "calls_at_once", "capacity", "calls", "failed")}
@@ -410,6 +422,7 @@ def readiness_of(root: Path, runs: Path, run_id: str, summary: Mapping[str, Any]
     own: list[str] = []
     tools: list[str] = []
     faulty: list[str] = []
+    intents: dict[str, str] = {}
     if info.get("project"):
         try:
             project = _project_for(root, info)
@@ -419,9 +432,10 @@ def readiness_of(root: Path, runs: Path, run_id: str, summary: Mapping[str, Any]
                    and mode in sc.get("modes", ["text", "voice"])]
             tools = [t["name"] for t in project.profile.get("tools", [])]
             faulty = [sc["id"] for sc in project.scenarios if modes.has_faults(sc)]
+            intents = coverage.intent_of(project.folder)
         except Exception:  # noqa: BLE001 - the report still works from the run's own files
             pass
-    return readiness.build(folder, summary or run_summary(runs, run_id), titles, own, tools, faulty)
+    return readiness.build(folder, summary or run_summary(runs, run_id), titles, own, tools, faulty, intents)
 
 
 def run_detail(runs: Path, run_id: str, active_runs: set[str] = frozenset(), root: Path | None = None) -> dict[str, Any]:
@@ -443,9 +457,32 @@ def run_detail(runs: Path, run_id: str, active_runs: set[str] = frozenset(), roo
             report = {"error": f"{type(e).__name__}: {e}"}
     return {"summary": summary, "info": _safe_json(folder / "run.json"),
             "decision": decision, "calls": calls, "readiness": report,
+            "analysis": analysis.load(folder, report if isinstance(report, dict) and "findings" in report else None),
             "comparison": _safe_json(folder / "comparison.json"), "alerts": _safe_json(folder / "alerts.json"),
             "load": _safe_json(folder / "load.json"), "load_live": _safe_json(folder / "load_live.json"),
             "files": {name: (folder / name).exists() for name in ("report.html", "transcript.txt", "decision.json")}}
+
+
+def run_analysis(root: Path, runs: Path, run_id: str, model: str | None = None) -> dict[str, Any]:
+    """Asks Claude for the run's AI analysis (analysis.py), saves it next to the run and returns it."""
+    import asyncio
+
+    from ..llm import Budget, ClaudeClient, LLMError
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY") or _dotenv_key(root)
+    if not api_key:
+        raise ValueError("add your Claude API key in Settings first: the analysis is written by Claude")
+    folder = _run_dir(runs, run_id)
+    report = readiness_of(root, runs, run_id)
+    if not report.get("findings"):
+        raise ValueError("this run has no findings to explain")
+    llm = ClaudeClient(Budget(2.0), effort="medium", api_key=api_key)
+    try:
+        doc = asyncio.run(analysis.analyse(report, llm, model or analysis.MODEL, log_dir=folder / "llm"))
+    except LLMError as e:
+        raise ValueError(str(e)) from e
+    analysis.save(folder, doc)
+    return analysis.load(folder, report) or doc
 
 
 # Live masking: while a call runs, its events are on disk exactly as spoken. They are masked once the
@@ -478,8 +515,8 @@ def _masked_live(root: Path, info: Mapping[str, Any] | None, record: Mapping[str
             for f in TEXT_FIELDS.get(e["type"], ()):
                 if isinstance(data.get(f), str):
                     data[f] = "(shown when the call is sealed)"
-            if e["type"] in ("tool_request", "tool_response", "probe_result"):
-                data = {k: v for k, v in data.items() if k not in ("args", "body", "rows")}
+            if e["type"] in ("tool_request", "tool_response", "probe_result", "state_diff"):
+                data = {k: v for k, v in data.items() if k not in ("args", "body", "rows", "tables")}
             out.append({**e, "data": data})
         return out
 
@@ -681,8 +718,10 @@ def dashboard(root: Path, runs_dir: Path, active_runs: set[str] = frozenset(),
         domains[d] = domains.get(d, 0) + 1
     rows = []
     for p in projs:
+        mine = [r for r in runs if r.get("project_key") == p["key"]]
         rows.append({k: p[k] for k in ("key", "name", "description", "domain", "example", "channels", "ready")}
-                    | {"stats": project_stats(p, runs)})
+                    | {"stats": project_stats(p, runs), "connection": connection_kind(p),
+                       "modes": mode_summary(mode_board(root, runs_dir, p, mine))})
     return {
         "totals": {
             "projects": len(projs), "client_projects": sum(not p["example"] for p in projs),
@@ -718,8 +757,8 @@ def mode_board(root: Path, runs_dir: Path, project: Mapping[str, Any], runs: lis
     for m in modes.catalog():
         if m["voice_only"] and not voice:
             avail = {"ok": False, "why": "Needs a voice connection: this agent is tested by text."}
-        elif m["id"] == "resilience" and not any(s.get("faults") for s in own):
-            avail = {"ok": False, "why": "No test case breaks a tool on purpose yet.", "fixable": True}
+        elif m["id"] == "resilience" and not any(s.get("faults") or s.get("drill") for s in own):
+            avail = {"ok": False, "why": "No test case breaks a tool or ends in a booking or order to drill.", "fixable": True}
         elif m["id"] == "safety" and not safety_on:
             avail = {"ok": False, "why": "Safety tests are switched off for this agent.", "fixable": True}
         elif m["kind"] == "run" and m["id"] != "safety" and not own:
@@ -748,11 +787,110 @@ def mode_board(root: Path, runs_dir: Path, project: Mapping[str, Any], runs: lis
     return out
 
 
+def mode_status(card: Mapping[str, Any]) -> str:
+    """One test type's state in one word, for the Home grid and the sidebar dots:
+    passed | watch | failed | evidence | not_run | unavailable."""
+    latest = card.get("latest")
+    if not latest:
+        return "not_run" if (card.get("available") or {}).get("ok") else "unavailable"
+    level = latest.get("level")
+    if level is None:   # the report couldn't be built: fall back on the decision code
+        return {"GO": "passed", "NO_GO": "failed"}.get(latest.get("decision") or "", "evidence")
+    return {"ready": "passed", "ready_with_notes": "watch", "not_ready": "failed",
+            "not_enough_evidence": "evidence"}.get(level, "not_run")
+
+
+def mode_summary(board: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The test-type board in brief: id, state, why it can't run, the latest run."""
+    out = []
+    for c in board:
+        latest = c.get("latest") or {}
+        out.append({"id": c["id"], "question": c.get("question"), "status": mode_status(c), "why": (c.get("available") or {}).get("why"),
+                    "run_id": latest.get("run_id"), "at": latest.get("at"), "headline": latest.get("headline"),
+                    "top_finding": latest.get("top_finding"), "runs": c.get("runs", 0)})
+    return out
+
+
+def connection_kind(project: Mapping[str, Any]) -> dict[str, Any]:
+    """How Vocto reaches the agent, in a few words: the main connection (the voice one when there is one) and
+    whether a text connection is there too. Used for the agent's label on Home and in the sidebar."""
+    profiles = project.get("profiles") or []
+    main = main_profile(project)
+    voice = [p for p in profiles if p.get("mode") == "voice"]
+    if not main:
+        return {"kind": None, "label": "Not connected", "connected": False, "text_too": False}
+    kind, label = connection_label(main, bool(project.get("example")))
+    conn = main.get("connection") or {}
+    connected = bool(main.get("ok") and (conn.get("target") or conn.get("launch")))
+    text_too = bool(voice) and any(p.get("mode") == "text" for p in profiles)
+    return {"kind": kind, "label": label, "connected": connected, "text_too": text_too}
+
+
+VOICE_ORDER = ("phone_call", "websocket_audio", "twilio_media_stream")
+
+
+def main_profile(project: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The agent's main connection: profile.yaml when it is a voice one, else the first voice profile (a real
+    phone number before a WebSocket before a Twilio stream), else profile.yaml or the first profile."""
+    profiles = list(project.get("profiles") or [])
+    if not profiles:
+        return None
+    first = next((p for p in profiles if p["file"] == "profile.yaml"), profiles[0])
+    if first.get("mode") == "voice":
+        return first
+    voice = [p for p in profiles if p.get("mode") == "voice"]
+    if voice:
+        rank = {t: i for i, t in enumerate(VOICE_ORDER)}
+        return sorted(voice, key=lambda p: rank.get((p.get("connection") or {}).get("type"), 9))[0]
+    return first
+
+
+def connection_label(profile: Mapping[str, Any], example: bool = False) -> tuple[str, str]:
+    """(kind, plain words) for one profile's connection: phone, a voice WebSocket, a Twilio stream, text, or code."""
+    conn = profile.get("connection") or {}
+    ctype = conn.get("type") or ""
+    if ctype == "phone_call":
+        prov = str((profile.get("options") or {}).get("provider") or "twilio")
+        return "phone", f"Phone · {prov.capitalize()}"
+    if ctype == "twilio_media_stream":
+        return "twilio_stream", "Twilio media stream"
+    if ctype == "text_http":
+        return "text_http", "Text (HTTP)"
+    if ctype == "text_python":
+        return "in_repo", "Practice agent (text)" if example else "Python function"
+    if conn.get("launch") and example:
+        return "websocket_audio", "Practice agent (voice)"
+    return "websocket_audio", "Voice WebSocket"
+
+
+def trend(runs: list[dict[str, Any]], last: int = 12) -> list[dict[str, Any]]:
+    """This agent over time (oldest first): each decided test run's share of passed calls, answer times and cost.
+    Load runs and runs with bug switches are left out (they don't judge the agent as it is)."""
+    rows = [r for r in _gated(runs)][:last]
+    out = []
+    for r in reversed(rows):
+        counts = r.get("counts") or {}
+        judged = sum(counts.get(k, 0) for k in ("PASS", "FAIL"))
+        out.append({"run_id": r["run_id"], "at": r.get("started_at"), "test_mode": r.get("test_mode"),
+                    "decision": r.get("decision"), "pass_rate": round(counts.get("PASS", 0) / judged, 3) if judged else None,
+                    "p50_ms": r.get("p50_ms"), "p95_ms": r.get("p95_ms"), "cost_usd": r.get("cost_usd")})
+    return out
+
+
+def project_modes(root: Path, runs_dir: Path, key: str, active_runs: set[str] = frozenset()) -> list[dict[str, Any]]:
+    """Each test type's state for one agent (the sidebar's dots)."""
+    project = project_by_key(root, key)
+    runs = [r for r in with_projects(list_runs(runs_dir, active_runs), [project]) if r["project_key"] == key]
+    return mode_summary(mode_board(root, runs_dir, project, runs))
+
+
 def project_overview(root: Path, runs_dir: Path, key: str, active_runs: set[str] = frozenset()) -> dict[str, Any]:
     project = project_by_key(root, key)
     runs = [r for r in with_projects(list_runs(runs_dir, active_runs), [project]) if r["project_key"] == key]
+    board = mode_board(root, runs_dir, project, runs)
     return {"project": project, "stats": project_stats(project, runs), "activity": activity(runs, 14),
-            "recent_runs": runs[:8], "modes": mode_board(root, runs_dir, project, runs)}
+            "recent_runs": runs[:8], "modes": board, "mode_summary": mode_summary(board),
+            "connection": connection_kind(project), "trend": trend(runs)}
 
 
 # ---- secrets: the ${NAME} values projects refer to, kept in .env ---------------------------
@@ -860,7 +998,7 @@ def system(root: Path, runs: Path) -> dict[str, Any]:
         "models": {"folder": str(models), "piper_voices": piper, "whisper": whisper,
                    "bytes": _size(models) if models.is_dir() else 0},
         # Phase 5: what the Callers, Test cases, Pass rules and Run tests forms offer.
-        "accents": accent_list(), "conditions": preset_list(), "metrics": metric_list(),
+        "accents": accent_list(), "languages": language_list(), "conditions": preset_list(), "sweep_conditions": sweep_list(), "drill_failures": failure_list(), "metrics": metric_list(),
         "noises": list(NOISE_KINDS),
     }
 

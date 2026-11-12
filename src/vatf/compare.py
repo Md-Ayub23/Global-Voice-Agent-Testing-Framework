@@ -29,9 +29,12 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     # Phase 7, load runs vs the load baseline, level by level: slower p95 (the latency limits above),
     # more failed calls (failed_points), lower pass rate (pass_drop_points), lower capacity.
     "load": {"blocks": False, "failed_points": 2, "pass_drop_points": 20},
+    # Step 4: the agent's cost per completed task (and per call) at the owner's prices.
+    "cost": {"blocks": False, "increase_pct": 10},
 }
 KIND_RULE = {"test": "new_failures", "latency": "latency", "score": "scores", "metric": "metrics",
-             "judge": "judges", "safety": "safety", "load": "load"}
+             "judge": "judges", "safety": "safety", "load": "load",
+             "cost": "cost"}
 BAND_RANK = {"good": 0, "warn": 1, "bad": 2}
 SCORE_TITLES = {"accuracy": "Accuracy", "experience": "Experience", "security": "Security", "safety": "Safety"}
 # Differences in these make two runs not like-for-like (compared, never gated).
@@ -143,6 +146,34 @@ def _metric_changes(base: Mapping[str, Any], cur: Mapping[str, Any]) -> list[dic
     return out
 
 
+def _cost_changes(base: Mapping[str, Any] | None, cur: Mapping[str, Any] | None, r: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Cost per completed task and per call, when both runs have prices in the same currency. A change
+    counts when it moved by more than increase_pct (either way)."""
+    if not base or not cur or base.get("currency") != cur.get("currency"):
+        return []
+    from .costs import money
+
+    out, limit = [], float(r["increase_pct"]) / 100
+    for key, title in (("per_task", "Agent cost per completed task"), ("per_call", "Agent cost per call")):
+        b, c = base.get(key), cur.get(key)
+        if b is None and c is None:
+            continue
+        if b is None or c is None:      # tasks got done in only one of the two runs
+            if key == "per_task":
+                out.append({"kind": "cost", "id": key, "title": title, "direction": "better" if b is None else "worse",
+                            "before": b, "after": c, "unit": cur["currency"],
+                            "message": f"{title}: {money(b, cur['currency']) if b is not None else 'no task done'} before, "
+                                       f"{money(c, cur['currency']) if c is not None else 'no task done'} now."})
+            continue
+        if b == c or abs(c - b) <= limit * max(b, 1e-9):
+            continue
+        out.append({"kind": "cost", "id": key, "title": title, "direction": "worse" if c > b else "better",
+                    "before": b, "after": c, "unit": cur["currency"],
+                    "message": f"{title} went from {money(b, cur['currency'])} to {money(c, cur['currency'])} "
+                               f"({(c - b) / b:+.0%})." if b else f"{title} went from {money(b, cur['currency'])} to {money(c, cur['currency'])}."})
+    return out
+
+
 def _load_changes(base: Mapping[str, Any] | None, cur: Mapping[str, Any] | None, r: Mapping[str, Any],
                   lat: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Load run vs load baseline, level by level (calls at once), plus the capacity."""
@@ -246,7 +277,8 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any], profile: Mapping[st
                + _metric_changes(base.get("quality") or {}, cur.get("quality") or {})
                + _judge_changes(base.get("judges") or {}, cur.get("judges") or {}, r["judges"])
                + (_safety_changes(base.get("safety"), cur.get("safety")) if hb.get("safety") and hc.get("safety") else [])
-               + _load_changes(base.get("load"), cur.get("load"), r["load"], r["latency"]))
+               + _load_changes(base.get("load"), cur.get("load"), r["load"], r["latency"])
+               + _cost_changes(base.get("cost"), cur.get("cost"), r["cost"]))
     for c in changes:
         rule = r[KIND_RULE[c["kind"]]]
         bad = c["direction"] in ("regression", "worse")
@@ -263,3 +295,21 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any], profile: Mapping[st
         "changes": changes, "counts": counts,
         "blocking": sum(c["blocks"] for c in changes),
     }
+
+
+def as_ab(cmp: dict[str, Any]) -> dict[str, Any]:
+    """The comparison worded as an A/B test (version B against version A) instead of before / now."""
+    tests = {"regression": "{t} passed every call with version A ({b}) and failed with version B ({a}).",
+             "better": "{t} failed with version A ({b}) and passed every call with version B ({a}).",
+             "same": "{t} fails with both versions ({b} with A, {a} with B).",
+             "new": "{t}: run with version B only ({a} passed).",
+             "removed": "{t}: run with version A only ({b} passed)."}
+    for c in cmp["changes"]:
+        if c["kind"] == "test":
+            c["message"] = tests[c["direction"]].format(t=c["title"], b=c["before"], a=c["after"])
+        else:
+            c["message"] = (c["message"].replace("in the baseline", "with version A").replace(" before, ", " with A, ")
+                            .replace(" now.", " with B.").replace("before it", "with version A"))
+    cmp["source"] = "ab"
+    return cmp
+

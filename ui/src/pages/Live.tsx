@@ -8,7 +8,7 @@ import { LoadLiveCard } from "../components/load";
 import { SHAPE_LABEL } from "../lib/load";
 import { Timeline, whoIsNext, type TimelineHandle } from "../components/Timeline";
 import { Badge, Button, Card, CardHead, Chip, EmptyState, Notice, Progress, Skeleton, Spinner, Table } from "../components/ui";
-import { api } from "../lib/api";
+import { api, reviver } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx, fmtDuration, fmtMs, shortScenario } from "../lib/format";
 import { decisionTitle } from "../lib/status";
@@ -19,7 +19,7 @@ import type { CallDetail, Job, Limits, Project, RunDetail } from "../lib/types";
 export function Live({ project, jobId }: { project: Project; jobId: string | null }) {
   const { activeJob, projects } = useApp();
   const { data, error } = useLoad<Job | Job[]>(() => (jobId ? api.get<Job>(`/api/jobs/${jobId}`) : api.get<Job[]>("/api/jobs")), [jobId]);
-  const base = [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }];
+  const base = [{ label: project.name, href: projectHref(project.key) }];
   useCrumbs(jobId ? [...base, { label: "Results", href: projectHref(project.key, "/runs") }, { label: data && !Array.isArray(data) && data.kind === "exit-check" ? "Exit check" : data && !Array.isArray(data) && data.kind === "load" ? "Load test" : "Test run" }]
     : [...base, { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Live" }]);
 
@@ -82,7 +82,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
       setActiveJob(j.status === "running" ? j : null);
     });
     es.addEventListener("run", (e) => {
-      const d = JSON.parse((e as MessageEvent).data) as RunDetail;
+      const d = JSON.parse((e as MessageEvent).data, reviver) as RunDetail;
       const id = d.summary.run_id;
       setRuns((m) => new Map(m).set(id, { ...d, limits: limitsFor.current.get(id) ?? m.get(id)?.limits ?? null }));
       if (d.info && !limitsFor.current.has(id)) {
@@ -98,7 +98,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
       }
     });
     es.addEventListener("call", (e) => {
-      const d = JSON.parse((e as MessageEvent).data) as CallDetail;
+      const d = JSON.parse((e as MessageEvent).data, reviver) as CallDetail;
       setCalls((m) => new Map(m).set(d.record.test_id, d));
     });
     es.addEventListener("end", () => { closed = true; es.close(); setEnded(true); poll(); });
@@ -194,14 +194,14 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
         <div id="result"><Result job={job} ended={ended} exit={false} /></div>
         {info?.load ? <LoadLiveCard stages={info.load.stages} live={run?.load_live ?? null} voice={runMode === "voice"} />
           : <Card className="mb-4"><div className="flex items-center gap-2 text-ink-2">{finished ? "No load plan was written." : <><Spinner />{phase || "Getting ready…"}</>}</div></Card>}
-        {!finished && phase && !run?.load_live && <div className="text-muted text-[12.5px] -mt-2 mb-4 flex items-center gap-2"><Spinner />{phase}</div>}
+        {!finished && phase && !run?.load_live && <div className="text-muted text-[13px] -mt-2 mb-4 flex items-center gap-2"><Spinner />{phase}</div>}
         <Card id="load-recent">
           <CardHead title="Latest calls" sub="each one is a normal test call; open the run's report for every call and its checks" />
           {recent.length ? (
-            <div className="grid gap-0.5 font-mono text-[12px]">
+            <div className="grid gap-0.5 font-mono text-[13px]">
               {recent.map((l, i) => <div key={i} className={/: (PASS|ok)/.test(l) ? "text-ink-2" : /FAIL|failed|ERROR|couldn't|error/i.test(l) ? "text-bad" : "text-ink-2"}>{l.trim()}</div>)}
             </div>
-          ) : <div className="text-muted text-[12.5px]">{finished ? "No calls finished." : "Waiting for the first calls to finish…"}</div>}
+          ) : <div className="text-muted text-[13px]">{finished ? "No calls finished." : "Waiting for the first calls to finish…"}</div>}
         </Card>
         <Console lines={lines} open={finished && job.status !== "finished" && job.status !== "stopped"} />
       </>
@@ -233,9 +233,9 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
           setViewRun(r); setFollow(false);
           setSelected(callsOf(r)[0]?.record.test_id || null);
         }} />}
-        <div className="flex items-center gap-2.5 mb-2"><b id="prog-text">{progressText}</b><span className="flex-1" /><span className="text-muted text-[12.5px] tabular-nums" id="prog-num">{planAll ? `${doneAll} of ${planAll} calls` : ""}</span></div>
+        <div className="flex items-center gap-2.5 mb-2"><b id="prog-text">{progressText}</b><span className="flex-1" /><span className="text-muted text-[13px] tabular-nums" id="prog-num">{planAll ? `${doneAll} of ${planAll} calls` : ""}</span></div>
         <Progress value={ratio} running={!finished} />
-        <div className="text-muted text-[12.5px] mt-2 min-h-[18px]">{phase && <span className="flex items-center gap-2"><Spinner />{phase}</span>}</div>
+        <div className="text-muted text-[13px] mt-2 min-h-[18px]">{phase && <span className="flex items-center gap-2"><Spinner />{phase}</span>}</div>
       </Card>
 
       <div className="grid gap-4 items-start grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[280px_minmax(0,1fr)_340px]">
@@ -247,7 +247,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
               const c = attempts[attempts.length - 1];
               return <CallRow key={`${p.scenario_id}-${p.repeat}`} p={p} c={c} attempts={attempts.length} selected={!!c && c.record.test_id === selected} live={job.status === "running"}
                 onClick={() => { if (c) { setSelected(c.record.test_id); setFollow(false); } }} />;
-            }) : <div className="text-muted text-[12.5px] p-2">Planning the calls…</div>}
+            }) : <div className="text-muted text-[13px] p-2">Planning the calls…</div>}
           </div>
         </Card>
         <Conversation call={sel} limits={run?.limits ?? null} follow={follow} ended={ended} running={job.status === "running"}
@@ -284,7 +284,7 @@ function ListenLive({ jobId }: { jobId: string }) {
   };
   return (
     <>
-      {on && <span id="hearing" className="text-[12.5px] text-muted inline-flex items-center gap-1.5">
+      {on && <span id="hearing" className="text-[13px] text-muted inline-flex items-center gap-1.5">
         <span className="size-2 rounded-full bg-bad animate-pulse" aria-hidden="true" />
         {hearing ? <>Hearing <b className="text-ink">{shortScenario(hearing)}</b></> : "Waiting for the call audio…"}
       </span>}
@@ -306,7 +306,7 @@ function CallRow({ p, c, attempts, selected, live, onClick }: { p: { scenario_id
   const sub = s === "queued" ? (live ? "waiting" : "not run") : s === "interrupted" ? "interrupted" : s === "running" ? "on the call…" : s === "evaluating" ? "judging…" : statusText(s);
   return (
     <div data-test={c?.record.test_id || ""} onClick={onClick}
-      className={cx("flex gap-2.5 items-center px-2.5 py-[9px] rounded-[10px] border transition-colors duration-150",
+      className={cx("flex gap-2.5 items-center px-2.5 py-[9px] rounded-[12px] border transition-colors duration-150",
         c ? "cursor-pointer" : "cursor-default",
         selected ? "bg-accent-soft border-[color-mix(in_srgb,var(--accent)_30%,transparent)]" : "border-transparent hover:bg-surface-2")}>
       <span className={cx("size-[22px] rounded-full grid place-items-center flex-none", ring)}>
@@ -314,7 +314,7 @@ function CallRow({ p, c, attempts, selected, live, onClick }: { p: { scenario_id
       </span>
       <div className="flex-1 min-w-0">
         <div className="font-semibold text-[13px] truncate">{shortScenario(p.scenario_id)}</div>
-        <div className="text-muted text-[11.5px]">repeat {p.repeat} · {sub}{attempts > 1 ? ` · ${attempts} attempts` : ""}</div>
+        <div className="text-muted text-[13px]">repeat {p.repeat} · {sub}{attempts > 1 ? ` · ${attempts} attempts` : ""}</div>
       </div>
     </div>
   );
@@ -352,7 +352,7 @@ function Conversation({ call, limits, follow, ended, running, onFollow }: {
         {call ? (
           <Timeline key={testId} ref={tl} events={call.events} limits={limits} typing={call.verdict || !running ? null : whoIsNext(call.events)} />
         ) : (
-          <div className="text-muted text-[12.5px] p-[30px] text-center">
+          <div className="text-muted text-[13px] p-[30px] text-center">
             {running ? <span className="flex items-center justify-center gap-2"><Spinner />Waiting for the first call…</span> : "No calls."}
           </div>
         )}
@@ -369,7 +369,7 @@ function SidePanel({ call, limits, live }: { call: CallDetail; limits: Limits | 
   const last = ev[ev.length - 1];
   const m = call.verdict?.metrics;
   const stat = (label: string, value: React.ReactNode) => (
-    <div className="grid gap-1"><div className="text-ink-2 font-semibold text-[12.5px]">{label}</div><div className="text-[22px] font-semibold tabular-nums leading-[1.15]">{value}</div></div>
+    <div className="grid gap-1"><div className="text-ink-2 font-semibold text-[13px]">{label}</div><div className="text-[22px] font-semibold tabular-nums leading-[1.15]">{value}</div></div>
   );
   return (
     <>
@@ -379,10 +379,10 @@ function SidePanel({ call, limits, live }: { call: CallDetail; limits: Limits | 
           {stat("Caller turns", turns)}
           {stat("Tool calls", <>{tools}{faults > 0 && <small className="text-sm font-semibold text-muted ml-1">{faults} broken</small>}</>)}
           {stat("Call time", fmtDuration(m?.duration_ms ?? last?.t_ms ?? 0))}
-          <div className="grid gap-1"><div className="text-ink-2 font-semibold text-[12.5px]">Persona</div><div className="text-[15px] font-bold pt-1.5">{call.record.persona_id || "scripted"}</div></div>
+          <div className="grid gap-1"><div className="text-ink-2 font-semibold text-[13px]">Persona</div><div className="text-[15px] font-bold pt-1.5">{call.record.persona_id || "scripted"}</div></div>
         </div>
         {call.live && call.pii_masked && (
-          <div className="text-muted text-[11.5px] mt-2.5 flex items-center gap-1.5"><Icon name="shield" size={13} /> Personal data is masked here, the same way it is saved.</div>
+          <div className="text-muted text-[13px] mt-2.5 flex items-center gap-1.5"><Icon name="shield" size={13} /> Personal data is masked here, the same way it is saved.</div>
         )}
       </Card>
       {m?.latency_turns && (
@@ -394,9 +394,9 @@ function SidePanel({ call, limits, live }: { call: CallDetail; limits: Limits | 
       <Card className="lg:col-start-2 lg:row-start-1 lg:row-span-2 2xl:col-start-auto 2xl:row-start-auto 2xl:row-span-1">
         <CardHead title="Checks">{call.verdict && <Badge status={call.verdict.status} />}</CardHead>
         {call.verdict ? <ChecksList verdict={call.verdict} /> : !live ? (
-          <div className="text-muted text-[12.5px]">The run was stopped during this call, so it was never judged.</div>
+          <div className="text-muted text-[13px]">The run was stopped during this call, so it was never judged.</div>
         ) : (
-          <div className="text-muted text-[12.5px] flex items-center gap-2"><Spinner />{call.record.locked ? "Judging the call…" : "Checks run when the call ends."}</div>
+          <div className="text-muted text-[13px] flex items-center gap-2"><Spinner />{call.record.locked ? "Judging the call…" : "Checks run when the call ends."}</div>
         )}
       </Card>
     </>
@@ -419,7 +419,7 @@ function ExitSteps({ job, runMode, onPick }: { job: Job; runMode: string | null;
             <button type="button" data-run={run || ""} disabled={!run} onClick={() => run && onPick(run)}
               className={cx("inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border bg-surface font-semibold text-[13px] transition-colors",
                 cur ? "border-accent" : "border-line", run ? "cursor-pointer hover:bg-surface-2" : "cursor-default")}>
-              <span className={cx("size-5 rounded-full grid place-items-center text-[11px]",
+              <span className={cx("size-5 rounded-full grid place-items-center text-[13px]",
                 row ? (row.ok ? "bg-good text-white" : "bg-bad text-white") : cur ? "bg-accent text-white" : "bg-surface-3 text-ink-2")}>
                 {row ? <Icon name={row.ok ? "check" : "x"} size={12} strokeWidth={3} /> : i + 1}
               </span>
@@ -449,8 +449,8 @@ function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean 
               <tr key={r.label}>
                 <td><Badge status={r.ok ? "PASS" : "FAIL"} label={r.ok ? "OK" : "MISS"} /></td>
                 <td><b>{r.label === "clean" ? "Clean agent" : r.label}</b>
-                  {r.title && r.label !== "clean" && <div className="text-ink-2 text-[12px]">{r.title}</div>}
-                  {r.scenario_id && <div className="text-muted text-[11.5px] font-mono">caught by {r.scenario_id}</div>}</td>
+                  {r.title && r.label !== "clean" && <div className="text-ink-2 text-[13px]">{r.title}</div>}
+                  {r.scenario_id && <div className="text-muted text-[13px] font-mono">caught by {r.scenario_id}</div>}</td>
                 <td>{r.detail}</td>
                 <td><a href={runHref({ run_id: r.run_id })}><Badge status={r.decision} /></a></td>
               </tr>
@@ -463,13 +463,29 @@ function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean 
             : sum?.error ? `The agent could not be started: ${sum.error}`
             : job.status !== "finished" ? "It was stopped or Vocto failed; the activity log below says why." : "At least one row below missed. Open its run to see why."}
           {!!sum?.skipped?.length && (
-            <div className="mt-1.5 text-[12.5px]">Not checked this time: {sum.skipped.map((x) => `${x.bug} (${x.why})`).join("; ")}.</div>
+            <div className="mt-1.5 text-[13px]">Not checked this time: {sum.skipped.map((x) => `${x.bug} (${x.why})`).join("; ")}.</div>
           )}
         </div>
       </Hero>
     );
   }
   if (!runId) return <Notice tone="bad" className="mb-4"><b>The run didn't start.</b> The activity log below says why.</Notice>;
+  if (job.request?.ab_with) {   // an A/B test: two runs, then version B against version A
+    const [a, b] = job.run_ids;
+    const both = job.status === "finished" && !!b;
+    return (
+      <Hero tone={both ? "good" : "warn"} icon="compare" className="mb-4" eyebrow="A/B test"
+        title={both ? "Both versions ran" : "The A/B test did not finish"}
+        actions={<>
+          {a && <Button href={runHref({ run_id: a })} icon="file">Version A report</Button>}
+          {b && <Button href={runHref({ run_id: b })} icon="file">Version B report</Button>}
+          {both && <Button href={`${pl("/compare")}?a=${a}&b=${b}`} variant="primary" icon="compare">Compare B with A</Button>}
+        </>}>
+        <div className="text-ink-2">{both ? "The same tests ran with version A, then version B. Compare them side by side: tests passed, answer times, call quality and cost per task."
+          : "It was stopped or Vocto failed; the activity log below says why. Finished calls are saved."}</div>
+      </Hero>
+    );
+  }
   if (!detail) return null;
   const d = detail.decision;
   if (!d) {
@@ -497,13 +513,13 @@ function Console({ lines, open }: { lines: string[]; open: boolean }) {
     : /warning|harness/i.test(l) ? "text-[#f2b84b]" : /^vatf/.test(l) ? "text-[#7c869a]" : "";
   const rendered = useMemo(() => lines.map((l, i) => <div key={i} className={cls(l)}>{l || " "}</div>), [lines]);
   return (
-    <details className="bg-surface border border-line rounded-[10px] p-[18px] mt-4" id="console-box" open={isOpen}
+    <details className="glass rounded-[20px] p-[18px] mt-4" id="console-box" open={isOpen}
       onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
       <summary className="flex items-center cursor-pointer list-none">
         <Icon name="arrow" size={14} className={cx("mr-2 transition-transform", isOpen && "rotate-90")} />
-        <h3 className="flex-1 font-semibold text-sm">Activity log</h3><span className="text-muted text-[12.5px]">technical details</span>
+        <h3 className="flex-1 font-semibold text-sm">Activity log</h3><span className="text-muted text-[13px]">technical details</span>
       </summary>
-      <div ref={box} id="console" className="mt-3 font-mono text-xs leading-[1.55] bg-[#0b0f17] text-[#c9d1e3] rounded-[10px] px-3.5 py-3 max-h-[260px] overflow-auto whitespace-pre-wrap break-words">
+      <div ref={box} id="console" className="mt-3 font-mono text-[13px] leading-[1.55] bg-[#0b0f17] text-[#c9d1e3] rounded-[12px] px-3.5 py-3 max-h-[260px] overflow-auto whitespace-pre-wrap break-words">
         {rendered}
       </div>
     </details>

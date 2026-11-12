@@ -32,6 +32,19 @@ export const setupApi = {
   testBackend: (project: string, file: string, probe?: string, binds?: Obj) => api.post<TestOutcome>("/api/setup/test-backend", { project, file, probe, binds }),
   testLogs: (project: string, file: string) => api.post<TestOutcome>("/api/setup/test-logs", { project, file }),
   newProject: (body: Obj) => api.post<{ path: string; id: string; key: string }>("/api/setup/new-project", body),
+  /** A recording of a caller line (WAV), saved in the agent's recordings/ folder. */
+  uploadRecording: async (project: string, file: File) => {
+    let res: Response;
+    try {
+      res = await fetch(`/api/setup/recording?${qs({ project, name: file.name })}`, { method: "POST", headers: { "X-VATF": "1", "Content-Type": "audio/wav" }, body: file });
+    } catch {
+      throw new Error("The dashboard server isn't answering. Is the `vatf ui` window still open?");
+    }
+    const data = await res.json().catch(() => ({ error: `${res.status} ${res.statusText}` }));
+    if (!res.ok) throw new Error((data as { error?: string }).error || `${res.status} ${res.statusText}`);
+    return data as { path: string; seconds: number };
+  },
+  recordingUrl: (project: string, path: string) => `/api/setup/recording?${qs({ project, path })}`,
 };
 
 // Which file a shared section (tools, backend, logs, the agent's name) is saved in: the selected

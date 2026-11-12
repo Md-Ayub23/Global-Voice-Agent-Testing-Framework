@@ -15,36 +15,66 @@ It needs nothing beyond `uv sync`. Forms save into the same YAML files as before
 
 ## How it is organised
 
-The app is built around **agents**: one per voice agent you test (each is a project folder underneath).
-The sidebar has the workspace pages at the top. Once you open an agent, its own pages appear below in the
-order the work happens: **Overview**, then **1 Set up**, **2 Test** and **3 Quality**, with a switcher to jump
-to another agent. Pages that belong together are tabs of one page, so nothing is hidden inside another page.
+The app is built around **agents** (one per voice agent you test; each is a project folder underneath) and,
+inside each agent, around **test types**. Home shows every agent side by side. Once you open an agent, the
+sidebar shows only that agent: nothing from other agents is on its pages.
 
 | Page | What it is for |
 |---|---|
-| **Home** | Every agent at a glance: *Needs attention* (agents whose latest run was not ready or had not enough evidence, and your agents not ready to run), how many agents and which kinds, test runs, the ready rate, runs per day for 14 days, each agent's last result and the latest runs. Runs with bug switches on are bug tests: listed but left out of the ready rate. |
-| **Agents** | Your agents and Vocto's practice agents as cards. *New agent* asks for the agent's name, industry, voice or text, and (optionally) its address. |
-| **Settings** | The Anthropic API key, the speech models, **Secrets** (every `${NAME}` your agents use; kept on this computer only) and a link to each agent's pass rules. |
+| **Home** | Every agent side by side: key numbers, *Needs attention* (failed test types, agents not connected yet), **Agents by test type** (each agent's latest result in every test type; a result opens its report), runs per day for 14 days and the latest runs. |
+| **Agents** | Your agents and Vocto's practice agents. *New agent* asks for the agent's name, industry, voice or text, and (optionally) its address. |
+| **Settings** | The Anthropic API key, the speech models and **Secrets** (every `${NAME}` your agents use; kept on this computer only). |
 
 Inside an agent:
 
 | Group | Page | What it is for |
 |---|---|---|
-| | **Overview** | The agent, **Release readiness by test mode** (the latest result of each mode and its top finding), a set-up checklist with a link to each step, its numbers and recent runs. |
-| 1 Set up | **Connection** | Who the agent is and how Vocto reaches it (a real phone number rung through your Twilio or Plivo account, see [phone-guide.md](phone-guide.md); voice format, Twilio Media Streams or Vocto's protocol; *Starting the agent* and its planted bugs). |
-| | **Tools & data** | Three tabs: **Tools** (the APIs the agent calls), **Database** (read-only access to check what really got saved) and **Logs**. |
-| | **Test cases** | The scenarios as a list and forms, and *Write tests for me* (Claude drafts a plan from the agent's instructions). *Advanced* opens the raw file editor. |
-| | **Callers** | Personas (who calls): accent, voice, speed, loudness and behaviour (cuts in, says "mm-hm", pauses mid-sentence, says um, goes quiet once), and *Add from library*. A test's own **Audio** block (Test cases) sets its noise and phone line (narrowband, lost packets). See [phase5-guide.md](phase5-guide.md). |
-| | **Safety tests** | How hard to push, which attacks, your own questions, planted secrets. |
-| | **Pass rules** | What *Ready* needs for this agent: p50 / p95 limits, repeats, coverage, budget, and **Call quality**: each metric's good and warn values and a *Blocks* switch. |
-| 2 Test | **Test modes** | Pick what to find out: the **Full check** (before a release) or one thing in depth: Functional, Timing & turns, Speech & accents, Safety & security, Resilience, Load & capacity, Regression, Real calls. Each mode has a **Run** tab (the form for that kind of testing: channel, test cases, caller, conditions, repeats) and a **Reports** tab (only its runs). See [test-modes-guide.md](test-modes-guide.md). The old *Run tests* and *Load test* addresses still work. |
-| | **Results** | A run in progress is pinned on top (*Watch live* shows the calls as they happen; for voice, *Listen live* plays them). Below, every run, filterable, and an *Exit checks* tab. A run opens its **release readiness report**: the verdict in plain words, an executive summary, a scorecard by area (no overall score), then tabs for **Findings** (each problem once, how often, who to look at, and quotes from the calls as proof; a quote opens the call at that moment), **Numbers & coverage**, **Calls**, **Reliability**, **Response times**, **Call quality** (metric tiles with bands, results by caller condition), **AI judges**, **Safety** and **Run setup**. *PDF report* opens the whole report laid out for paper (*Save as PDF*); *CSV* downloads the verdict, scorecard, findings and numbers for a spreadsheet. A call shows its recording and conversation, with tabs beside it for **Checks**, **AI judges**, **Timing**, **Quality**, **Database** and **Evidence**. |
-| 3 Quality | **AI judges** | Three tabs: **Scores** (what the judges score, whether each item is trusted to block yet, *Teach the judges*), **Review calls** (label calls, the most useful first, without seeing the judges' answers) and **Judge settings** (on/off, the agent's policy, items, models). See [phase3-guide.md](phase3-guide.md). |
+| | **Overview** | Only this agent: one line on where it stands, **Results by test type** (latest result, top finding and runs of each type), the findings to look at, **This agent over time** (calls passed and slowest answers per run; a dot opens its report), recent runs and what is left to set up. |
+| | **Connect** | How Vocto reaches the agent, for any kind of agent: a phone number (Twilio or Plivo, see [phone-guide.md](phone-guide.md)), a voice WebSocket, Twilio Media Streams, a text API or a Python function. Tabs: **Connection** (with the **Agent brief**: its instructions, which Claude reads to draft test cases), **Tools**, **Database** and **Logs**. |
+| | **Release check** | Every test case of every type plus the safety attacks in one run and one report. Run it before a release. |
+| Tests | **Functional**, **Conversation & timing**, **Speech & accents**, **Safety**, **Resilience**, **Load & capacity**, **Regression** | One page per test type, with a status dot in the sidebar. Each has its own **Test cases** (Safety: **Attack calls**), a **Run** tab (the form for that kind of testing) and **Reports** (only its runs). See below. |
+| Results | **All runs** | Every run, filterable, the run in progress on top and the exit checks. |
+| | **AI judges** | Scores, review calls and judge settings. See [phase3-guide.md](phase3-guide.md). |
+| | **Real calls** | Production calls, see [phase8-guide.md](phase8-guide.md). |
+| | **Agent settings** | What every test type shares: pass rules, callers, AI judge settings, CI & alerts, and the raw files. |
 
-Each set-up page has a *Next* button, so a new agent can be set up in order. Addresses from before this layout
-(for example `#/p/<agent>/setup/plan`) still work and open the new page. See [onboarding-guide.md](onboarding-guide.md).
+### Test cases per test type
 
-The app never shows terminal commands or folder locations. Everything a run needs is set up in it.
+Each test case belongs to one test type (`test_type` in its file). Older files without one are placed by what
+they do: a broken tool is Resilience, the caller cutting in is Timing, noise or a phone line is Speech, the rest
+Functional. You can change it on the test case's form.
+
+- **New test case** opens a form that starts with what the type needs (Timing: a voice call with a cut-in;
+  Speech: a voice call on a noisy line).
+- **Draft with AI** has Claude draft cases for that type only, written for this agent from its brief, tools and
+  database checks: Functional drafts normal calls, edge cases and misuse; Timing drafts cut-ins, corrections,
+  "mm-hm", pauses and silence; Speech drafts noise, phone lines, a bad signal, accents, a quiet voice and spelled
+  details; Resilience drafts broken tools. Vocto checks every draft; only the ones you tick become test cases.
+  Timing and Speech drafts use callers made for them (says "mm-hm", pauses, goes quiet, accents, quiet voice),
+  added from the library when you add the case.
+- A run of a type runs its own cases. Timing and Speech also run the Functional cases (answer times are measured
+  on every call, and the harder callers are tried on normal calls); Resilience also drills the Functional cases
+  that end in a booking or order.
+
+### Reports
+
+A run opens its **release readiness report**: the verdict in plain words, an executive summary and a scorecard,
+then **Findings** and an **Analysis** tab with the numbers and charts of the run's own test type:
+
+| Test type | Analysis |
+|---|---|
+| Functional, Release check, Regression | Calls passed, test cases that passed every repeat, blocking findings, coverage; each test case's repeats (failed first); results by area |
+| Conversation & timing | Typical and slowest answers against the limits, answers over the limit, stop time after a cut-in, "mm-hm" handled, check-in after silence; a histogram of every answer time; slowest answers per test case |
+| Speech & accents | Calls passed, conditions handled, numbers heard right, words misheard; calls passed and words misheard per caller condition |
+| Safety | Attacks handled safely, unsafe answers, calls for you to label; results per kind of attack |
+| Resilience | Failures handled, recovered or honest, untrue claims, duplicates; how calls ended per kind of failure |
+| Load & capacity | The load report (its own tab) |
+
+The other tabs (Calls, Reliability, Response times, Call quality, AI judges, Safety, Vs baseline, Numbers &
+coverage, Run setup) are as before. *PDF report* and *CSV* export the whole report.
+
+Old addresses (for example `#/p/<agent>/setup/cases` or `#/p/<agent>/setup/safety`) still work and open the
+new page. The app never shows terminal commands or folder locations.
 
 ## Where things are saved
 
@@ -86,7 +116,7 @@ Commit both `ui/` and `src/vatf/web/static/`. To add a page for a later phase, a
 
 - Results: a Baseline card (per channel, with Remove), a "baseline" mark on that run, "N new failures vs baseline" under a run, a Health checks filter, and CI / health check chips.
 - Run report: **Set as baseline** and **Compare** buttons, a **Vs baseline** tab listing every change worst first, and "Started by", "Compared with" and "Alerts" under Run setup.
-- Quality › **Compare runs**: any two runs side by side.
+- Quality › **Compare runs**: any two runs side by side, or *Test two versions (A/B)*: the same tests on two versions of the agent, then version B against version A.
 - Set up › Pass rules: the **Regression gate** table (what may not get worse, and whether it blocks).
 - Set up › **CI & alerts** (step 7): alert targets with Send test, health check schedule, and a ready CI file to copy.
 See [phase6-guide.md](phase6-guide.md).

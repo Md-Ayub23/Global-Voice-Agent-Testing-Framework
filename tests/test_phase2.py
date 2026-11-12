@@ -270,10 +270,19 @@ def test_slow_answers_make_a_voice_run_no_go():
     profile = {"id": "p", "thresholds": {"latency_p50_ms": 800, "latency_p95_ms": 1500, "repeats": 2}}
     scen = [{"id": "s", "criticality": "critical"}]
     fast = LocalDecisionEngine().decide("r", [verdict(1, [600, 700]), verdict(2, [650, 900])], scen, profile)
-    slow = LocalDecisionEngine().decide("r", [verdict(1, [600, 700]), verdict(2, [650, 2600])], scen, profile)
+    slow = LocalDecisionEngine().decide("r", [verdict(1, [600, 2700]), verdict(2, [650, 2600])], scen, profile)
     assert fast["decision"] == "GO" and fast["latency"]["within_limits"] is True
     assert slow["decision"] == "NO_GO" and slow["reasons"][0]["rule"] == "latency"
-    assert slow["reasons"][0]["refs"] == ["t2"]
+    assert slow["reasons"][0]["refs"] == ["t1", "t2"] and "clearly more than the 5% allowed" in slow["reasons"][0]["message"]
+    # One slow answer in four can't be told from bad luck: not enough evidence, never "too slow" or "ready".
+    unsure = LocalDecisionEngine().decide("r", [verdict(1, [600, 700]), verdict(2, [650, 2600])], scen, profile)
+    assert unsure["decision"] == "NO_GO_INSUFFICIENT_EVIDENCE" and unsure["reasons"][0]["rule"] == "latency_sample"
+    assert unsure["latency"]["within_limits"] is None and unsure["latency"]["p95_enough"] is False
+    assert unsure["latency"]["over_p95_limit"] == 1 and unsure["reasons"][0]["refs"] == ["t2"]
+    # With 20 answers p95 decides on its own, as before.
+    many = [verdict(i, [600] * 9 + [2600]) for i in range(1, 3)]
+    big = LocalDecisionEngine().decide("r", many, scen, profile)
+    assert big["latency"]["p95_enough"] and big["decision"] == "NO_GO" and big["reasons"][0]["rule"] == "latency"
 
 
 def test_voice_profile_extends_the_text_profile():

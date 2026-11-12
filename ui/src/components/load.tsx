@@ -1,7 +1,7 @@
 // Load tests (Phase 7): the shape chart (calls at once over time, planned and as it happened), the
 // answer time per stage against its limit, the stage table and the load report on a run's page.
 import { useEffect, useState, type ReactNode } from "react";
-import { fmtMs } from "../lib/format";
+import { fmtMs, plural } from "../lib/format";
 import { SHAPE_LABEL, fmtSeconds } from "../lib/load";
 import type { LoadLive, LoadStage, LoadStageStats, LoadSummary } from "../lib/types";
 import { TipG } from "./feedback";
@@ -111,8 +111,7 @@ export function StageP95Chart({ rows, limit, width = 760 }: { rows: LoadStageSta
         return (
           <TipG key={r.index} content={<><b>{r.name}</b> · {r.level} at once<br />p95 {fmtMs(v)} · p50 {fmtMs(r.latency.p50_ms)}<br />{r.latency.turns} answers timed{!r.trusted ? <><br />not trusted: {r.untrusted_why}</> : null}</>}>
             <rect x={cx - step / 2} y={T} width={step} height={H - T - B} fill="transparent" />
-            <path d={`M${cx - bw / 2},${y(0)} V${top + 4} q0,-4 4,-4 H${cx + bw / 2 - 4} q4,0 4,4 V${y(0)} Z`} fill={fill}
-              style={{ animation: `rise .5s cubic-bezier(.2,.8,.2,1) ${i * 0.05}s both` }} />
+            <path d={`M${cx - bw / 2},${y(0)} V${top + 4} q0,-4 4,-4 H${cx + bw / 2 - 4} q4,0 4,4 V${y(0)} Z`} className="bar-grow" fill={fill} />
             {v != null && <text x={cx} y={top - 5} textAnchor="middle" style={{ fill: "var(--ink-2)", fontWeight: 600 }}>{over ? "! " : ""}{step < 58 ? `${(v / 1000).toFixed(1)}s` : fmtMs(v)}</text>}
             <text x={cx} y={H - 10} textAnchor="middle">{r.level}×</text>
           </TipG>
@@ -142,9 +141,9 @@ export function StageTable({ rows, voice, callHref }: { rows: LoadStageStats[]; 
         <tr key={r.index} data-stage={r.index}>
           <td className="min-w-[180px]">
             <b>{r.name}</b>
-            <div className="text-muted text-[11.5px]">{fmtSeconds(r.seconds)}{r.in_flight_max != null ? ` · up to ${r.in_flight_max} in progress` : ""}</div>
-            {r.problems.map((p, i) => <div key={i} className="text-[12px] text-bad mt-0.5">{p.message}</div>)}
-            {!r.trusted && <div className="text-[12px] text-ink-2 mt-0.5">{r.untrusted_why}</div>}
+            <div className="text-muted text-[13px]">{fmtSeconds(r.seconds)}{r.in_flight_max != null ? ` · up to ${r.in_flight_max} in progress` : ""}</div>
+            {r.problems.map((p, i) => <div key={i} className="text-[13px] text-bad mt-0.5">{p.message}</div>)}
+            {!r.trusted && <div className="text-[13px] text-ink-2 mt-0.5">{r.untrusted_why}</div>}
             {Object.keys(r.blockers).length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1">{Object.entries(r.blockers).map(([k, ids]) => (
                 <a key={k} href={callHref(ids[0])} className="hover:no-underline"><Chip tone="bad" icon="alert">{k} · {ids.length}</Chip></a>
@@ -155,12 +154,12 @@ export function StageTable({ rows, voice, callHref }: { rows: LoadStageStats[]; 
           <td className="tabular-nums">{r.finished}</td>
           <td className="tabular-nums whitespace-nowrap">
             {r.failed ? <a href={callHref(r.failed_refs[0])} className={r.problems.some((p) => p.rule === "failed_calls") ? "text-bad font-semibold" : "text-ink"}>{r.failed} ({pctText(r.failed_pct)})</a> : <span className="text-muted">0</span>}
-            {Object.keys(r.failed_why).length > 0 && <div className="text-muted text-[11.5px]">{Object.entries(r.failed_why).map(([k, n]) => `${n} ${k}`).join(" · ")}</div>}
+            {Object.keys(r.failed_why).length > 0 && <div className="text-muted text-[13px]">{Object.entries(r.failed_why).map(([k, n]) => `${n} ${k}`).join(" · ")}</div>}
           </td>
           {voice && <td className="tabular-nums whitespace-nowrap">{fmtMs(r.latency.p50_ms)}</td>}
           {voice && <td className={"tabular-nums whitespace-nowrap " + (r.problems.some((p) => p.rule === "latency") ? "text-bad font-semibold" : "")}>{fmtMs(r.latency.p95_ms)}</td>}
           {voice && <td className="tabular-nums whitespace-nowrap">{fmtMs(r.latency.p99_ms)}</td>}
-          <td className="tabular-nums whitespace-nowrap">{r.pass_rate == null ? "—" : `${pctText(r.pass_rate)}`}<div className="text-muted text-[11.5px]">{r.passed} of {r.passed + r.failed_tests}</div></td>
+          <td className="tabular-nums whitespace-nowrap">{r.pass_rate == null ? "—" : `${pctText(r.pass_rate)}`}<div className="text-muted text-[13px]">{r.passed} of {r.passed + r.failed_tests}</div></td>
           <td><StageStatus r={r} /></td>
         </tr>
       ))}
@@ -171,9 +170,9 @@ export function StageTable({ rows, voice, callHref }: { rows: LoadStageStats[]; 
 function Kpi({ label, value, foot, tone }: { label: string; value: ReactNode; foot?: ReactNode; tone?: "good" | "bad" | "warn" }) {
   return (
     <Card className="grid gap-1">
-      <div className="text-ink-2 font-semibold text-[12.5px]">{label}</div>
+      <div className="text-ink-2 font-semibold text-[13px]">{label}</div>
       <div className={"text-[26px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15] " + (tone ? `text-${tone}` : "")}>{value}</div>
-      {foot && <div className="text-muted text-xs">{foot}</div>}
+      {foot && <div className="text-muted text-[13px]">{foot}</div>}
     </Card>
   );
 }
@@ -187,7 +186,7 @@ export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice
   const cmp = load.comparisons;
   return (
     <div className="flex flex-col gap-4" id="load-report">
-      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(190px,1fr))] stagger">
+      <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(190px,1fr))]">
         <Kpi label="Capacity" tone={load.capacity == null ? undefined : load.capacity >= top ? "good" : "bad"}
           value={<span id="load-capacity">{load.capacity == null ? "—" : load.capacity}</span>}
           foot={load.capacity == null ? "no stage had enough evidence" : load.capacity >= top ? `held the target of ${top} at once`
@@ -198,6 +197,12 @@ export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice
           foot={load.p95_limit_ms != null ? `limit ${fmtMs(load.p95_limit_ms)}${cmp.slowdown ? ` · ${fmtMs(cmp.slowdown.low_p95_ms)} at ${cmp.slowdown.low_level} at once` : ""}` : "no limit"} />}
         <Kpi label="Tests passed, top level" value={cmp.pass_rate ? pctText(cmp.pass_rate.top) : pctText(load.stages[load.stages.length - 1]?.pass_rate)}
           foot={cmp.pass_rate ? `${pctText(cmp.pass_rate.low)} at the lowest level` : "of the calls that finished"} />
+        {cmp.recovery && (
+          <Kpi label="Recovery after the spike" tone={cmp.recovery.recovered ? "good" : "bad"}
+            value={<span id="load-recovery">{cmp.recovery.recovered ? (cmp.recovery.back_to_normal_s != null ? `${cmp.recovery.back_to_normal_s} s` : "yes") : "Didn't recover"}</span>}
+            foot={cmp.recovery.recovered ? `until answers were back to normal speed (p95 ${fmtMs(cmp.recovery.after_p95_ms)} once back, ${fmtMs(cmp.recovery.before_p95_ms)} before the spike)`
+              : `p95 ${fmtMs(cmp.recovery.after_p95_ms)} after the spike, ${fmtMs(cmp.recovery.before_p95_ms)} before it`} />
+        )}
       </div>
 
       {load.breaking && (
@@ -237,7 +242,7 @@ export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice
               <li className="flex gap-2"><Icon name="activity" size={14} className="text-muted mt-[3px] flex-none" />
                 Vocto's own computer kept up: event-loop lag p95 {load.lag_p95_ms} ms, worst {load.lag_max_ms} ms (a stage over {load.limits.max_lag_ms} ms is not trusted).</li>
             )}
-            {load.harness_errors > 0 && <li className="flex gap-2"><Icon name="alert" size={14} className="text-warn mt-[3px] flex-none" />{load.harness_errors} call(s) failed because of Vocto itself; they are not counted against the agent.</li>}
+            {load.harness_errors > 0 && <li className="flex gap-2"><Icon name="alert" size={14} className="text-warn mt-[3px] flex-none" />{plural(load.harness_errors, "call")} failed because of Vocto itself; they are not counted against the agent.</li>}
           </ul>
         </Card>
       )}
@@ -253,14 +258,14 @@ export function LoadLiveCard({ stages, live, voice }: { stages: LoadStage[]; liv
     <Card className="mb-4" id="load-live">
       <CardHead level={2} title="Load" sub={live ? `${live.stage_name} · ${live.level} at once · ${live.in_flight} in progress now` : "Starting the first calls…"} />
       <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-3 text-[13px]">
-        <div><div className="text-muted text-[12px]">Time</div><b className="tabular-nums">{live ? `${fmtSeconds(Math.min(live.elapsed_s, total))} of ${fmtSeconds(total)}` : `0 of ${fmtSeconds(total)}`}</b></div>
-        <div><div className="text-muted text-[12px]">Calls started</div><b className="tabular-nums" id="load-started">{live?.started ?? 0}</b></div>
-        <div><div className="text-muted text-[12px]">Finished</div><b className="tabular-nums">{live?.finished ?? 0}</b></div>
-        <div><div className="text-muted text-[12px]">Failed</div><b className={"tabular-nums " + (live?.failed ? "text-bad" : "")}>{live?.failed ?? 0}</b>
-          {live && live.harness > 0 && <span className="text-muted text-[12px]"> · {live.harness} Vocto error(s)</span>}</div>
+        <div><div className="text-muted text-[13px]">Time</div><b className="tabular-nums">{live ? `${fmtSeconds(Math.min(live.elapsed_s, total))} of ${fmtSeconds(total)}` : `0 of ${fmtSeconds(total)}`}</b></div>
+        <div><div className="text-muted text-[13px]">Calls started</div><b className="tabular-nums" id="load-started">{live?.started ?? 0}</b></div>
+        <div><div className="text-muted text-[13px]">Finished</div><b className="tabular-nums">{live?.finished ?? 0}</b></div>
+        <div><div className="text-muted text-[13px]">Failed</div><b className={"tabular-nums " + (live?.failed ? "text-bad" : "")}>{live?.failed ?? 0}</b>
+          {live && live.harness > 0 && <span className="text-muted text-[13px]"> · {plural(live.harness, "Vocto error")}</span>}</div>
       </div>
       <div ref={box}><LoadChart stages={stages} timeline={live?.timeline} width={w} now={live?.elapsed_s ?? 0} /></div>
-      <div className="text-muted text-[12px] mt-1.5">
+      <div className="text-muted text-[13px] mt-1.5">
         {voice ? "Each call is a normal test call: answer times are measured and every check runs. " : "Each call is a normal test call: every check runs. "}
         Vocto's own lag now: {live ? `${Math.round(live.lag_ms)} ms` : "—"}.
       </div>

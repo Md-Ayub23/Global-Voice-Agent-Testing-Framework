@@ -26,7 +26,7 @@ from typing import Any, Mapping
 
 import yaml
 
-from . import personas as library
+from . import modes, personas as library
 from .contracts.models import LLMMessage, LLMRequest
 from .loader import Project, _reference_problems, load_project, schema_errors
 
@@ -35,7 +35,18 @@ PLAN_MODEL = "claude-opus-5-5"
 # The share of each kind of test in a plan (Hamming's published test-set mix).
 MIX = {"happy": 0.40, "edge": 0.30, "error": 0.15, "adversarial": 0.10, "audio": 0.05}
 CATEGORY_TITLES = {"happy": "Normal calls", "edge": "Edge cases", "error": "Tool failures",
-                   "adversarial": "Misuse", "audio": "Noise and interruptions"}
+                   "adversarial": "Misuse", "audio": "Noise and interruptions",
+                   "timing": "Turn-taking", "speech": "Hard to hear"}
+# Each test type gets its own kind of drafts: Functional the job itself (normal calls, edge cases, misuse),
+# Timing how the caller takes turns, Speech how hard the caller is to hear, Resilience broken tools.
+TYPE_MIX: dict[str, dict[str, float]] = {
+    "functional": {"happy": 0.45, "edge": 0.40, "adversarial": 0.15},
+    "timing": {"timing": 1.0},
+    "speech": {"speech": 1.0},
+    "resilience": {"error": 1.0},
+}
+TEST_TYPES = tuple(TYPE_MIX)
+VOICE_TYPES = ("timing", "speech")
 KINDS = {
     "happy_path": "happy", "variation": "happy",
     "invalid_input": "edge", "boundary": "edge", "missing_info": "edge", "ambiguous": "edge",
@@ -45,7 +56,16 @@ KINDS = {
     "other_persons_data": "adversarial", "skip_verification": "adversarial", "forbidden_action": "adversarial",
     "pressure": "adversarial",
     "noise": "audio", "interruption": "audio", "fast_speech": "audio",
+    "cut_in": "timing", "cut_in_correction": "timing", "backchannel": "timing", "mid_sentence_pause": "timing",
+    "goes_quiet": "timing",
+    "background_noise": "speech", "phone_line": "speech", "bad_signal": "speech", "accent": "speech",
+    "quiet_voice": "speech", "spelled_details": "speech",
 }
+# The library caller a kind needs (its behaviour or voice is what the test is about), when the draft's own
+# caller doesn't have it.
+KIND_PERSONA = {"backchannel": ("says-mm-hm", "backchannels"), "mid_sentence_pause": ("pauses-mid-sentence", "pauses_mid_sentence"),
+                "goes_quiet": ("goes-quiet", "goes_quiet"), "quiet_voice": ("quiet-caller", "volume_db"),
+                "accent": ("indian-english", "accent")}
 # Fault per error kind when the draft names none.
 KIND_FAULT = {"tool_error": "http_error", "tool_timeout": "timeout", "tool_slow": "slow", "tool_bad_reply": "malformed_response"}
 # Words that make claims clear when no test of the same tool has its own.
@@ -140,7 +160,10 @@ Do not invent rules the text does not contain."""
 
 # ---- step 2: write ---------------------------------------------------------------------------
 
-def drafts_schema(tools: list[str], write_tools: list[str], persona_ids: list[str]) -> dict[str, Any]:
+def drafts_schema(tools: list[str], write_tools: list[str], persona_ids: list[str],
+                  test_type: str | None = None) -> dict[str, Any]:
+    categories = list(TYPE_MIX[test_type] if test_type else MIX)
+    kinds = [k for k, c in KINDS.items() if c in categories]
     tool_enum = {"type": "string", "enum": sorted(tools) + ["none"]}
     pair = {"type": "object", "additionalProperties": False, "required": ["name", "value"],
             "properties": {"name": {"type": "string"}, "value": {"type": "string"}}}
@@ -150,8 +173,8 @@ def drafts_schema(tools: list[str], write_tools: list[str], persona_ids: list[st
                      "end_when", "max_turns", "criticality", "fault", "outcome", "must_call", "must_not_call",
                      "questions", "audio"],
         "properties": {
-            "category": {"type": "string", "enum": list(MIX)},
-            "kind": {"type": "string", "enum": list(KINDS)},
+            "category": {"type": "string", "enum": categories},
+            "kind": {"type": "string", "enum": kinds},
             "title": {"type": "string"},
             "why": {"type": "string"},
             "intent": {"type": "string"},
@@ -181,8 +204,9 @@ def drafts_schema(tools: list[str], write_tools: list[str], persona_ids: list[st
                 "type": "object", "additionalProperties": False, "required": ["title", "question", "pass_when", "fail_when"],
                 "properties": {"title": {"type": "string"}, "question": {"type": "string"},
                                "pass_when": {"type": "string"}, "fail_when": {"type": "string"}}}},
-            "audio": {"type": "object", "additionalProperties": False, "required": ["noise", "interrupt_line"],
+            "audio": {"type": "object", "additionalProperties": False, "required": ["noise", "line", "interrupt_line"],
                       "properties": {"noise": {"type": "string", "enum": ["none", "office", "street", "cafe", "car"]},
+                                     "line": {"type": "string", "enum": ["none", "phone", "bad_signal"]},
                                      "interrupt_line": {"type": "string"}}},
         },
     }
@@ -195,15 +219,7 @@ will phone the agent and act out each test; Vocto then checks the tool calls and
 the words.
 
 For each test give:
-- category and kind. Kinds by category:
-  happy: happy_path (the main job done normally), variation (same job, different valid choices).
-  edge: invalid_input, boundary, missing_info, ambiguous, topic_change, contradiction, repetition,
-        out_of_scope, escalation, cancel_midway.
-  error: tool_error, tool_timeout, tool_slow, tool_bad_reply (Vocto breaks a tool the call will use; set fault).
-  adversarial: other_persons_data, skip_verification, forbidden_action, pressure (agent-specific misuse only;
-        general jailbreaks and secret probing are already covered by Vocto's safety tests).
-  audio: noise (set audio.noise), interruption (set audio.interrupt_line: what the caller says when cutting in
-        on the agent's second turn), fast_speech.
+- category and kind (see the test type below).
 - intent: the intent id it exercises, or "none".
 - rule_ids: the rule ids (R1, R2...) it tests. Every test that isn't a plain happy path must name at least one.
 - persona: who calls, from the list you are given. Vary them.
@@ -222,8 +238,65 @@ For each test give:
 - must_call: read tools the agent must use before answering (e.g. it must look up a time, not guess).
 - must_not_call: write tools that must not run in this call.
 - questions: zero to two yes/no questions an AI judge answers about this call, each with what a pass and a fail look like.
-- audio: noise "none" and interrupt_line "" unless it is an audio test.
+- audio: noise "none", line "none" and interrupt_line "" unless the test type below says otherwise.
 Write exactly the number of tests asked for in each category. Don't repeat existing tests or each other."""
+
+# What each test type's drafts are about (added to WRITE_SYSTEM).
+MIXED_GUIDE = """
+A mixed plan (every kind of test). Kinds by category:
+  happy: happy_path (the main job done normally), variation (same job, different valid choices).
+  edge: invalid_input, boundary, missing_info, ambiguous, topic_change, contradiction, repetition,
+        out_of_scope, escalation, cancel_midway.
+  error: tool_error, tool_timeout, tool_slow, tool_bad_reply (Vocto breaks a tool the call will use; set fault).
+  adversarial: other_persons_data, skip_verification, forbidden_action, pressure (agent-specific misuse only;
+        general jailbreaks and secret probing are already covered by Vocto's safety tests).
+  audio: noise (set audio.noise), interruption (set audio.interrupt_line: what the caller says when cutting in
+        on the agent's second turn), fast_speech."""
+
+TYPE_GUIDE: dict[str, str] = {
+    "functional": """
+TEST TYPE: Functional. Does the agent do its job, follow its rules and tell the truth about what it did?
+Kinds by category:
+  happy: happy_path (the main job done normally), variation (same job, different valid choices).
+  edge: invalid_input, boundary, missing_info, ambiguous, topic_change, contradiction, repetition,
+        out_of_scope, escalation, cancel_midway.
+  adversarial: other_persons_data, skip_verification, forbidden_action, pressure (agent-specific misuse only;
+        general jailbreaks and secret probing are already covered by Vocto's safety tests).
+Cover every main intent at least once before variations. No faults and no audio.""",
+    "timing": """
+TEST TYPE: Conversation & timing. Every test is a voice call about how the agent takes turns: does it stop when
+the caller cuts in, keep going through "mm-hm", wait through a pause, and check in when the caller goes quiet?
+The caller still has a real task from the agent's job (so the call also checks the result).
+Kinds (category timing):
+  cut_in: the caller cuts in on the agent's second turn to add a detail. Set audio.interrupt_line to what they say.
+  cut_in_correction: the caller cuts in to correct a detail the agent just read back wrong or too early
+        (set audio.interrupt_line, e.g. "No, sorry, it's the 14th, not the 4th"). The result must use the correction.
+  backchannel: the caller says "mm-hm" while the agent explains something long; pick the says-mm-hm caller.
+  mid_sentence_pause: the caller pauses mid-sentence while giving details; pick the pauses-mid-sentence caller.
+  goes_quiet: the caller goes silent once (looking for a card or a date); pick the goes-quiet caller.
+Ask one judge question about the turn-taking itself (e.g. "Did the agent stop and use the caller's correction?").
+No faults and no noise.""",
+    "speech": """
+TEST TYPE: Speech & accents. Every test is a voice call where the caller is hard to hear or to understand,
+and the key details (names, numbers, dates, addresses) must still reach the agent's tools exactly.
+Kinds (category speech):
+  background_noise: set audio.noise (office, street, cafe or car).
+  phone_line: set audio.line "phone" (a narrowband phone line).
+  bad_signal: set audio.line "bad_signal" (a mobile line that drops audio).
+  accent: pick a caller with an accent (indian-english, scottish-english, spanish-speaker, mandarin-speaker).
+  quiet_voice: pick the quiet-caller.
+  spelled_details: the caller spells a name or reads a long number digit by digit (put it in facts).
+Give every test facts with names, numbers or dates that must arrive exactly, and an outcome that checks them
+in the database when the agent saves something. No faults.""",
+    "resilience": """
+TEST TYPE: Resilience. What happens when the agent's own systems fail during a call? Vocto breaks one tool:
+Kinds (category error):
+  tool_error (an HTTP error: set fault.status 500 or 503), tool_timeout, tool_slow (answers late but works),
+  tool_bad_reply (an answer the agent can't read). Set fault.tool to a tool the call will really use.
+The agent must recover (retry, take another path) or tell the caller honestly it could not finish, and never
+claim success or save twice. Prefer breaking the tool that saves the result (a booking or an order), then the
+tools it reads before that. No audio.""",
+}
 
 
 def split_counts(total: int, mix: Mapping[str, float] = MIX) -> dict[str, int]:
@@ -257,32 +330,43 @@ def _validator(schema):
 
 
 async def write_plan(project: Project, llm, count: int = 20, focus: str = "", model: str = PLAN_MODEL,
-                     log_dir: Path | None = None) -> dict[str, Any]:
-    """Steps 1 to 3. Returns the plan (nothing is saved)."""
+                     log_dir: Path | None = None, test_type: str | None = None) -> dict[str, Any]:
+    """Steps 1 to 3 for one test type (None: a mixed plan of every kind). Returns the plan (nothing is saved)."""
     p = project.profile
+    if test_type is not None and test_type not in TYPE_MIX:
+        raise PlanError(f"no test cases to write for {test_type!r} (use {', '.join(TYPE_MIX)})")
     if not (p.get("agent_prompt") or (p.get("judges") or {}).get("policy") or p.get("description")):
         raise PlanError("tell Vocto what the agent does first: paste its instructions (system prompt) or business rules")
+    if test_type in VOICE_TYPES and not _is_voice(p):
+        raise PlanError("these tests are voice calls: connect the agent by voice first (Connect)")
+    tools_all = p.get("tools", [])
+    if test_type == "resilience" and not tools_all:
+        raise PlanError("resilience tests break the agent's tools: add its tools first (Connect > Tools)")
     count = max(1, min(int(count), 60))
     context = agent_context(project)
     analysis = await _ask(llm, "plan_understand", model, ANALYSIS_SYSTEM, context, ANALYSIS_SCHEMA, 8000, log_dir)
 
     tools = [t["name"] for t in p.get("tools", [])]
     write_tools = [t["name"] for t in p.get("tools", []) if t.get("effect") == "write"]
-    persona_ids = sorted(set(library.LIBRARY) | set(project.personas))
-    counts = split_counts(count)
-    who = [f"- {pid}: {library.title(pid)}. {library.LIBRARY[pid]['description']}" for pid in sorted(library.LIBRARY)]
+    offered = library.for_type(test_type or "any")
+    persona_ids = sorted(set(offered) | set(project.personas))
+    counts = split_counts(count, TYPE_MIX[test_type] if test_type else MIX)
+    who = [f"- {pid}: {library.title(pid)}. {library.LIBRARY[pid]['description']}" for pid in sorted(offered)]
     who += [f"- {pid}: {doc.get('description', '')}" for pid, doc in project.personas.items() if pid not in library.LIBRARY]
+    own = [s for s in project.scenarios if not s["id"].startswith("safety.")]
+    have = [f"- {s.get('title', s['id'])}" for s in own if test_type and modes.type_of(s) == test_type]
     ask = "\n".join([
         context, "", "What you worked out about the agent:", json.dumps(analysis, indent=1), "",
         "Callers you can use:", *who, "",
+        *(["Tests of this type the agent already has (don't repeat them):", *have, ""] if have else []),
         "Write these many tests: " + ", ".join(f"{k}: {n}" for k, n in counts.items() if n) + ".",
         *([f"Focus from the tester: {focus.strip()}"] if focus.strip() else []),
     ])
-    drafts = await _ask(llm, "plan_write", model, WRITE_SYSTEM, ask, drafts_schema(tools, write_tools, persona_ids),
-                        32000, log_dir)
-    tests = check_drafts(project, analysis, drafts["tests"])
+    drafts = await _ask(llm, "plan_write", model, WRITE_SYSTEM + "\n" + (TYPE_GUIDE[test_type] if test_type else MIXED_GUIDE), ask,
+                        drafts_schema(tools, write_tools, persona_ids, test_type), 32000, log_dir)
+    tests = check_drafts(project, analysis, drafts["tests"], test_type)
     return {
-        "schema_version": "0.1", "kind": "test_plan", "profile": p["id"],
+        "schema_version": "0.1", "kind": "test_plan", "profile": p["id"], "test_type": test_type,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "model": model, "asked": {"count": count, "focus": focus, "mix": counts},
         "got": dict(Counter(t["category"] for t in tests)),
@@ -312,7 +396,20 @@ def _common(values: list[Any]) -> Any:
     return json.loads(keyed.most_common(1)[0][0]) if keyed else None
 
 
-def check_drafts(project: Project, analysis: Mapping[str, Any], drafts: list[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _is_voice(profile: Mapping[str, Any]) -> bool:
+    from .connectors import is_voice
+    return is_voice(profile)
+
+
+def _fits(persona: Mapping[str, Any] | None, need: str) -> bool:
+    """Whether a caller has the behaviour (or voice) a timing or speech kind is about."""
+    if not persona:
+        return False
+    return bool((persona.get("behaviour") or {}).get(need) or (persona.get("speech") or {}).get(need))
+
+
+def check_drafts(project: Project, analysis: Mapping[str, Any], drafts: list[Mapping[str, Any]],
+                 test_type: str | None = None) -> list[dict[str, Any]]:
     p = project.profile
     tools = {t["name"]: t for t in p.get("tools", [])}
     probes = {pr["id"]: pr for pr in (p.get("backend") or {}).get("probes", [])}
@@ -340,14 +437,22 @@ def check_drafts(project: Project, analysis: Mapping[str, Any], drafts: list[Map
         category = KINDS[kind]
         traced = [r for r in d.get("rule_ids", []) if r in rules]
         intent = d.get("intent") if d.get("intent") in intents else None
-        if not traced and not (intent and category == "happy"):
+        if kind in KIND_PERSONA:
+            pid, need = KIND_PERSONA[kind]
+            own_doc = project.personas.get(d["persona"]) or (library.LIBRARY.get(d["persona"]))
+            if not _fits(own_doc, need):
+                notes.append(f"Caller changed to {library.title(pid)}: this test is about that behaviour.")
+                d = {**d, "persona": pid}
+        # Timing and Speech tests are about how the call sounds, not a rule: they keep their criticality.
+        untraced = not traced and not (intent and category == "happy") and category not in ("timing", "speech")
+        if untraced:
             notes.append("Not linked to a rule in the agent's instructions, so it runs as exploratory.")
-        doc, more = to_scenario(p, d, kind, tools, probes, setups, claims, tool_probes)
+        doc, more = to_scenario(p, d, kind, tools, probes, setups, claims, tool_probes, test_type)
         notes += more
-        if not traced and not (intent and category == "happy"):
+        if untraced:
             doc["criticality"] = "exploratory"
         elif doc["criticality"] == "critical" and not any(rules[r]["kind"] in ("must", "must_not", "escalate") for r in traced) \
-                and category != "happy":
+                and category not in ("happy", "timing", "speech"):
             doc["criticality"] = "normal"
             notes.append("Lowered to normal: none of its rules is a must / must-not rule.")
         base = f"gen.{kind.replace('_', '-')}.{_slug(d['title'])}"
@@ -378,7 +483,7 @@ def _slug(text: str) -> str:
 
 def to_scenario(profile: Mapping[str, Any], d: Mapping[str, Any], kind: str, tools: Mapping[str, Any],
                 probes: Mapping[str, Any], setups: Mapping[str, Any], claims: Mapping[str, Any],
-                tool_probes: Mapping[str, str] | None = None) -> tuple[dict[str, Any], list[str]]:
+                tool_probes: Mapping[str, str] | None = None, test_type: str | None = None) -> tuple[dict[str, Any], list[str]]:
     """One draft as a scenario file (simulated style), plus notes on what was changed to make it sound."""
     notes: list[str] = []
     category = KINDS[kind]
@@ -390,6 +495,8 @@ def to_scenario(profile: Mapping[str, Any], d: Mapping[str, Any], kind: str, too
         "profile": profile["id"], "tags": ["generated", category, kind.replace("_", "-")],
         "criticality": d.get("criticality", "normal"), "style": "simulated",
     }
+    if test_type in TYPE_MIX:
+        doc["test_type"] = test_type
     setup: dict[str, Any] = {}
     if setups.get("now"):
         setup["now"] = setups["now"]
@@ -474,21 +581,31 @@ def to_scenario(profile: Mapping[str, Any], d: Mapping[str, Any], kind: str, too
         doc["checks"] = checks
 
     audio = d.get("audio") or {}
-    if category == "audio" or audio.get("noise", "none") != "none" or audio.get("interrupt_line", "").strip():
+    if category in ("audio", "timing", "speech") or audio.get("noise", "none") != "none" or audio.get("interrupt_line", "").strip():
         block: dict[str, Any] = {}
         if audio.get("noise", "none") != "none":
             block["noise"] = audio["noise"]
             block["snr_db"] = 10
-        elif kind == "noise":
+        elif kind in ("noise", "background_noise"):
             block["noise"] = "cafe"
             block["snr_db"] = 10
-        line = audio.get("interrupt_line", "").strip()
-        if line or kind == "interruption":
-            block["barge_in"] = [{"agent_turn": 2, "offset_ms": 1500, "say": line or "Sorry, can I add something?"}]
+        line_kind = audio.get("line", "none")
+        if kind == "phone_line" and line_kind == "none":
+            line_kind = "phone"
+        if kind == "bad_signal":
+            line_kind = "bad_signal"
+        if line_kind == "phone":
+            block["line"] = {"codec": "phone"}
+        elif line_kind == "bad_signal":
+            block["line"] = {"codec": "phone", "packet_loss_pct": 5}
+        said = audio.get("interrupt_line", "").strip()
+        if said or kind in ("interruption", "cut_in", "cut_in_correction"):
+            block["barge_in"] = [{"agent_turn": 2, "offset_ms": 1500, "say": said or "Sorry, can I add something?"}]
         if block:
             doc["audio"] = block
+        if block or category in ("timing", "speech"):
             doc["modes"] = ["voice"]
-            notes.append("Voice runs only (noise and interruptions need real audio).")
+            notes.append("Voice runs only (it is about how the call sounds).")
     return doc, notes
 
 
@@ -514,12 +631,25 @@ def save_plan(folder: Path, plan: Mapping[str, Any]) -> Path:
     path = d / f"plan-{stamp}.json"
     text = json.dumps(plan, indent=1, ensure_ascii=False)
     path.write_text(text, encoding="utf-8")
+    (d / f"latest-{plan.get('test_type') or 'functional'}.json").write_text(text, encoding="utf-8")
     (d / "latest.json").write_text(text, encoding="utf-8")
     return path
 
 
-def latest_plan(folder: Path) -> dict[str, Any] | None:
-    path = plans_dir(folder) / "latest.json"
+def latest_plan(folder: Path, test_type: str | None = None) -> dict[str, Any] | None:
+    """The newest plan (of one test type, when given). Plans from before test types count as Functional."""
+    d = plans_dir(folder)
+    if test_type:
+        path = d / f"latest-{test_type}.json"
+        if path.is_file():
+            return json.loads(path.read_text(encoding="utf-8"))
+        old = d / "latest.json"
+        if old.is_file():
+            plan = json.loads(old.read_text(encoding="utf-8"))
+            if (plan.get("test_type") or "functional") == test_type:
+                return plan
+        return None
+    path = d / "latest.json"
     return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
 
 

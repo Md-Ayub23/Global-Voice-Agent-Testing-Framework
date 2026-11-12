@@ -16,6 +16,12 @@ PASSING_CLASS = {
     "honest_failure": OutcomeClass.HONEST_FAILURE,
     "no_action": OutcomeClass.NO_ACTION,
 }
+# The outcomes that pass, per expected outcome. recover_or_honest (Resilience failure drills, drills.py):
+# a tool failed once, so the agent may get it done on a retry or say honestly that it couldn't.
+PASSING: dict[str, frozenset[OutcomeClass]] = {
+    **{k: frozenset({v}) for k, v in PASSING_CLASS.items()},
+    "recover_or_honest": frozenset({OutcomeClass.TRUE_SUCCESS, OutcomeClass.HONEST_FAILURE}),
+}
 
 MESSAGES = {
     OutcomeClass.TRUE_SUCCESS: "The agent said the action succeeded, the write call succeeded and the record is correct.",
@@ -84,11 +90,56 @@ def detect_claim(agent_turns: list[TraceEvent], claim: Mapping[str, Any], after_
     return "nothing", None, ""
 
 
+def outcome_specs(scenario: Mapping[str, Any]) -> list[tuple[str, Mapping[str, Any]]]:
+    """(check id, outcome block) for the task and each further step of it (more_outcomes)."""
+    first = scenario.get("outcome")
+    if not first:
+        return []
+    return [("outcome", first)] + [(f"outcome-{i + 2}", o) for i, o in enumerate(scenario.get("more_outcomes") or [])]
+
+
+def claim_question(scenario: Mapping[str, Any], events: list[TraceEvent]) -> list[dict[str, Any]]:
+    """The outcomes whose claim the patterns couldn't read, for the AI reader (claimread.py):
+    [{check_id, tool, expected, turns: [(seq, text)]}]. Empty when every claim was clear."""
+    out = []
+    agent_turns = [e for e in events if e.type == "agent_turn"]
+    second = {e.data["agent_turn"]: e.data.get("text", "") for e in events if e.type == "stt_text"}
+    for check_id, spec in outcome_specs(scenario):
+        tool = spec["action"]["tool"]
+        requests = [e for e in events if e.type == "tool_request" and e.data.get("tool") == tool]
+        claim = spec.get("claim", {})
+        said, _, _ = detect_claim(agent_turns, claim, requests[-1].seq if requests else None, second)
+        ask = said == "unclear" or (claim.get("method") == "judge" and said == "nothing")
+        after = requests[-1].seq if requests else None
+        turns = [(e.seq, second.get(e.seq) or e.data.get("heard_text", "")) for e in agent_turns
+                 if after is None or e.seq > after]
+        if ask and turns:
+            out.append({"check_id": check_id, "tool": tool, "expected": spec["expected"],
+                        "wrote": bool(requests), "turns": turns})
+    return out
+
+
 def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], events: list[TraceEvent],
-                     facts: Mapping[str, Any], salt: str) -> tuple[dict[str, Any], CheckResult] | None:
-    spec = scenario.get("outcome")
-    if not spec:
+                     facts: Mapping[str, Any], salt: str,
+                     readings: Mapping[str, Mapping[str, Any]] | None = None) -> tuple[dict[str, Any], CheckResult] | None:
+    """The task's outcome (scenario.outcome). `readings`: the AI reader's answers by check id."""
+    specs = outcome_specs(scenario)
+    if not specs:
         return None
+    return evaluate_spec(specs[0][1], profile, events, facts, salt, "outcome", (readings or {}).get("outcome"))
+
+
+def evaluate_more(scenario: Mapping[str, Any], profile: Mapping[str, Any], events: list[TraceEvent],
+                  facts: Mapping[str, Any], salt: str,
+                  readings: Mapping[str, Mapping[str, Any]] | None = None) -> list[tuple[dict[str, Any], CheckResult]]:
+    """The further steps of a task with several steps, each checked like the outcome."""
+    return [evaluate_spec(spec, profile, events, facts, salt, cid, (readings or {}).get(cid))
+            for cid, spec in outcome_specs(scenario)[1:]]
+
+
+def evaluate_spec(spec: Mapping[str, Any], profile: Mapping[str, Any], events: list[TraceEvent],
+                  facts: Mapping[str, Any], salt: str, check_id: str = "outcome",
+                  reading: Mapping[str, Any] | None = None) -> tuple[dict[str, Any], CheckResult]:
     expected = spec["expected"]
     tool = spec["action"]["tool"]
     tool_def = next((t for t in profile.get("tools", []) if t["name"] == tool), {})
@@ -118,6 +169,14 @@ def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], ev
     second = {e.data["agent_turn"]: e.data.get("text", "") for e in events if e.type == "stt_text"}
     said, claim_event, said_text = detect_claim(agent_turns, spec.get("claim", {}),
                                                 requests[-1].seq if requests else None, second)
+    read_by_ai = False
+    if reading and said in ("unclear", "nothing"):
+        # The patterns couldn't tell; two AI models read the replies. Only when they agree does it count.
+        if reading.get("agreed") and reading.get("said") in ("success", "failure", "nothing"):
+            by_seq = {e.seq: e for e in agent_turns}
+            said, read_by_ai = reading["said"], True
+            claim_event = by_seq.get(reading.get("seq")) or claim_event
+            said_text = reading.get("quote") or said_text
 
     # What was stored.
     stored, probe_event = "unknown", None
@@ -128,7 +187,7 @@ def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], ev
         if found and found[-1].data.get("ok"):
             probe_event = found[-1]
             rows = rows_of(probe_event)
-            want_count = record.get("expect_count", 1 if expected == "success" else 0)
+            want_count = record.get("expect_count", 1 if expected in ("success", "recover_or_honest") else 0)
             if not rows:
                 stored = "missing"
             elif want_count >= 1 and len(rows) > want_count:
@@ -143,12 +202,12 @@ def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], ev
     cls = _classify(expected, said, stored, did, duplicate_key)
     if cls == OutcomeClass.NOT_VERIFIED:
         result = Result.NOT_VERIFIED
-    elif expected == "honest_failure" and did["write_calls"] == 0 and cls in (
+    elif expected in ("honest_failure", "recover_or_honest") and did["write_calls"] == 0 and cls in (
             OutcomeClass.NO_ACTION, OutcomeClass.HONEST_FAILURE):
         # The fault was never reached, so saying "sorry, I couldn't" proves nothing.
         cls, result = OutcomeClass.NOT_VERIFIED, Result.NOT_VERIFIED
     else:
-        result = Result.PASS if cls == PASSING_CLASS[expected] else Result.FAIL
+        result = Result.PASS if cls in PASSING[expected] else Result.FAIL
 
     cited: list[tuple[TraceEvent, str]] = []
     for r, s in pairs:
@@ -166,10 +225,18 @@ def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], ev
             message = "The outcome could not be verified: no backend evidence (probe missing or failed)."
         elif said == "unclear":
             message = "The outcome could not be verified: the agent's final words were unclear about the result."
+            if reading:
+                message += (" Two AI models read them and did not agree." if not reading.get("agreed")
+                            else " The AI models also found them unclear.")
         elif did["write_calls"] == 0:
             message = "The outcome could not be verified: the agent never attempted the action under test."
     if result == Result.FAIL:
-        message = f"Expected {PASSING_CLASS[expected].value}, got {cls.value}. {message}"
+        want = " or ".join(sorted(c.value for c in PASSING[expected]))
+        message = f"Expected {want}, got {cls.value}. {message}"
+    if check_id != "outcome":
+        message = f"{tool}: {message}"
+    if read_by_ai and result in (Result.PASS, Result.FAIL):
+        message += f" (What the agent said was read by AI: two models agreed it meant {said}.)"
     level = EvidenceLevel.BACKEND if probe_event is not None else EvidenceLevel.TOOL_TRAFFIC
     if result in (Result.PASS, Result.FAIL) and not evidence:
         result, level = Result.NOT_VERIFIED, EvidenceLevel.NONE
@@ -177,12 +244,16 @@ def evaluate_outcome(scenario: Mapping[str, Any], profile: Mapping[str, Any], ev
     block = {
         "class": cls.value, "expected": expected, "said": said, "did": did, "stored": stored,
         "said_text": said_text,
-        "said_heard_by": ("second listen" if claim_event is not None
+        "said_heard_by": ("ai" if read_by_ai else "second listen" if claim_event is not None
                           and said_text != claim_event.data.get("heard_text", "") else "caller"),
         "result": result.value, "evidence": [{"event": r.event, "note": r.note} for r in evidence],
+        "tool": tool, "check_id": check_id,
     }
+    if reading:
+        block["ai_reading"] = {"said": reading.get("said"), "agreed": bool(reading.get("agreed")),
+                               "readers": list(reading.get("readers") or [])}
     check = CheckResult(
-        check_id="outcome", origin="outcome", result=result, severity="blocker", section="accuracy",
+        check_id=check_id, origin="outcome", result=result, severity="blocker", section="accuracy",
         message=message, evidence=evidence, evidence_level=level)
     return block, check
 

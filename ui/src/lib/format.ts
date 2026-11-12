@@ -29,7 +29,16 @@ export function ago(iso: string | null | undefined): string {
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   const days = Math.round(s / 86400);
-  return days === 1 ? "yesterday" : `${days} days ago`;
+  if (days === 1) return "yesterday";
+  // After a week "23 days ago" is harder to place than the date itself.
+  return days < 7 ? `${days} days ago` : new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short", ...(days > 300 ? { year: "numeric" } : {}) });
+}
+
+const PLURAL = new Intl.PluralRules("en");
+/** "1 call", "3 calls", "1,284 calls": a count with its noun, never "call(s)". */
+export function plural(n: number | null | undefined, word: string, many = `${word}s`): string {
+  const v = Number(n) || 0;
+  return `${v.toLocaleString()} ${PLURAL.select(v) === "one" ? word : many}`;
 }
 
 export const pct = (v: number | null | undefined) => (v == null ? "—" : `${Math.round(v * 100)}%`);
@@ -41,3 +50,13 @@ export const shortScenario = (id: string | null | undefined) => String(id || "")
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return twMerge(parts.filter(Boolean).join(" "));
 }
+
+/** An amount in the owner's currency, like costs.money: $0.42, ₹3.50, 0.420 AED. */
+export function moneyIn(x: number | null | undefined, currency: string): string {
+  if (x == null) return "—";
+  const places = Math.abs(x) >= 1 ? 2 : Math.abs(x) >= 0.01 ? 3 : 4;
+  const sign = ({ USD: "$", INR: "₹", EUR: "€", GBP: "£" } as Record<string, string>)[currency];
+  const n = x.toLocaleString("en-US", { minimumFractionDigits: places, maximumFractionDigits: places });
+  return sign ? `${sign}${n}` : `${n} ${currency}`;
+}
+

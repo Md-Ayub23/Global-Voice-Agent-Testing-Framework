@@ -35,7 +35,7 @@ T0 = 1793610000000          # epoch ms, 2026-11-02 around 09:00 UTC
 def recent_start() -> str:
     """09:00 UTC within the last 24 hours: alerts only look at the last window_hours (24 by default)."""
     now = datetime.now(timezone.utc)
-    return (now - timedelta(days=1 if now.hour < 10 else 0)).strftime("%Y-%m-%dT09:00:00.000Z")
+    return (now - timedelta(days=1 if now.hour < 9 else 0)).strftime("%Y-%m-%dT09:00:00.000Z")
 
 
 def vapi_call(call_id="call-abc-123", reply="You're all set, Maria, you're booked for 9 am tomorrow.",
@@ -380,7 +380,8 @@ def test_metric_and_safety_rules():
 def test_retention_deletes_old_calls(clinic):
     m = mon(clinic, privacy={"retention_days": 7})
     old = (datetime.now(timezone.utc) - timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    keep = m.ingest(json.dumps(vocto_call(1)), "v")["added"][0]
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")     # a fixed date ages out of the period
+    keep = m.ingest(json.dumps(vocto_call(1, started=today)), "v")["added"][0]
     out = m.ingest(json.dumps(vocto_call(2, started=old)), "v")
     assert out["added"] == [] and "retention period" in out["problems"][0]     # never written
     assert list(m.store.index()) == [keep] and len(list(m.store.calls.iterdir())) == 1

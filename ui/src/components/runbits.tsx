@@ -1,6 +1,6 @@
 // Pieces several pages share: a run's setting chips, a call's checks, the big decision banner.
 import type { ReactNode } from "react";
-import { cx } from "../lib/format";
+import { cx, plural } from "../lib/format";
 import { tone as toneOf } from "../lib/status";
 import { JUDGE_NAME, judgeState, modelName, VOTE_LABEL } from "../lib/judges";
 import type { Check, Options, Verdict } from "../lib/types";
@@ -30,7 +30,7 @@ const ORDER: Record<string, number> = { FAIL: 0, ERROR: 1, NEEDS_REVIEW: 2, NOT_
 
 export function ChecksList({ verdict, onEvidence }: { verdict: Verdict | null | undefined; onEvidence?: (seq: number) => void }) {
   const own = (verdict?.checks || []).filter((c) => c.origin !== "judge");
-  if (!own.length) return <div className="text-muted text-[12.5px]">No checks.</div>;
+  if (!own.length) return <div className="text-muted text-[13px]">No checks.</div>;
   const checks = [...own].sort((a, b) => (ORDER[a.result] ?? 9) - (ORDER[b.result] ?? 9));
   return (
     <div>
@@ -39,14 +39,14 @@ export function ChecksList({ verdict, onEvidence }: { verdict: Verdict | null | 
           <div><Badge status={c.result} /></div>
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-1.5">
-              <b className="font-mono text-[12.5px]">{c.check_id}</b>
+              <b className="font-mono text-[13px]">{c.check_id}</b>
               <Chip>{c.severity}</Chip>
               <Chip>{SECTION[c.section] || c.section}</Chip>
             </div>
             <div className="mt-1">{c.message}</div>
           </div>
           <div className="col-start-2 flex gap-1.5 flex-wrap items-center">
-            <span className="text-muted text-[11.5px]">{LEVEL[c.evidence_level] || c.evidence_level}{c.can_block === false ? " · can't block on its own" : ""}</span>
+            <span className="text-muted text-[13px]">{LEVEL[c.evidence_level] || c.evidence_level}{c.can_block === false ? " · can't block on its own" : ""}</span>
             {(c.evidence || []).map((r) => (
               <Tip key={r.event} content={r.note}>
                 <EvRef onClick={() => onEvidence?.(r.event)} data-ev={r.event}>#{r.event}</EvRef>
@@ -77,9 +77,9 @@ export function JudgeBadge({ c }: { c: Check }) {
 // The AI judges' results for one call: what each judge said and why.
 export function JudgeList({ verdict, onEvidence, labelHref }: { verdict: Verdict | null | undefined; onEvidence?: (seq: number) => void; labelHref?: string }) {
   const judged = (verdict?.checks || []).filter((c) => c.origin === "judge");
-  if (!judged.length) return <div className="text-muted text-[12.5px]">This project has no judge items.</div>;
+  if (!judged.length) return <div className="text-muted text-[13px]">This project has no judge items.</div>;
   const ran = judged.some((c) => c.judge?.votes?.length);
-  if (!ran) return <div className="text-muted text-[12.5px]">{judged[0].message}</div>;
+  if (!ran) return <div className="text-muted text-[13px]">{judged[0].message}</div>;
   const shown = [...judged].sort((a, b) => (ORDER[a.result] ?? 9) - (ORDER[b.result] ?? 9));
   const quiet = shown.filter((c) => c.result === "NOT_APPLICABLE");
   const loud = shown.filter((c) => c.result !== "NOT_APPLICABLE");
@@ -95,12 +95,12 @@ export function JudgeList({ verdict, onEvidence, labelHref }: { verdict: Verdict
         <div className={cx("mt-1 text-[13px]", judgeState(c).kind.startsWith("opinion") && "text-ink-2")}>{c.message}</div>
         {(c.judge?.votes?.length ?? 0) > 0 && (
           <details className="mt-1.5 group">
-            <summary className="cursor-pointer text-[12px] text-muted list-none flex items-center gap-1 hover:text-ink">
+            <summary className="cursor-pointer text-[13px] text-muted list-none flex items-center gap-1 hover:text-ink">
               <Icon name="chevron" size={13} className="transition-transform group-open:rotate-90" />What each judge said
             </summary>
             <div className="mt-1.5 grid gap-1.5">
               {c.judge!.votes.map((v) => (
-                <div key={v.judge} className="text-[12.5px] rounded-lg bg-surface-2 px-2.5 py-1.5">
+                <div key={v.judge} className="text-[13px] rounded-lg bg-surface-2 px-2.5 py-1.5">
                   <div className="flex items-center gap-1.5 flex-wrap"><b>{JUDGE_NAME[v.judge]}</b><span className="text-muted">{modelName(v.model)}</span>
                     <Badge status={v.result} label={VOTE_LABEL[v.result]} /></div>
                   {v.reason && <div className="mt-0.5 text-ink-2">{v.reason}</div>}
@@ -122,20 +122,20 @@ export function JudgeList({ verdict, onEvidence, labelHref }: { verdict: Verdict
       {loud.map(row)}
       {quiet.length > 0 && (
         <details className="py-2 group">
-          <summary className="cursor-pointer text-[12.5px] text-muted list-none flex items-center gap-1 hover:text-ink">
-            <Icon name="chevron" size={13} className="transition-transform group-open:rotate-90" />{quiet.length} item(s) didn't come up in this call
+          <summary className="cursor-pointer text-[13px] text-muted list-none flex items-center gap-1 hover:text-ink">
+            <Icon name="chevron" size={13} className="transition-transform group-open:rotate-90" />{plural(quiet.length, "item")} didn't come up in this call
           </summary>
           <div className="mt-1">{quiet.map(row)}</div>
         </details>
       )}
-      {(verdict?.judge_notes || []).map((n, i) => <Notice key={i} tone="warn" className="mt-2 text-[12.5px]">{n}</Notice>)}
+      {(verdict?.judge_notes || []).map((n, i) => <Notice key={i} tone="warn" className="mt-2 text-[13px]">{n}</Notice>)}
       {labelHref && <div className="mt-2.5"><a href={labelHref} className="inline-flex items-center gap-1.5 text-[13px] font-semibold"><Icon name="tag" size={14} />Label this call</a></div>}
     </div>
   );
 }
 
 export function EvRef({ children, onClick, href, ...rest }: { children: ReactNode; onClick?: () => void; href?: string; "data-ev"?: number }) {
-  const cls = "font-mono text-[11.5px] text-muted border border-line rounded-md px-[5px] bg-surface cursor-pointer hover:text-accent-ink hover:border-accent hover:no-underline";
+  const cls = "font-mono text-[13px] text-muted border border-line rounded-md px-[5px] bg-surface cursor-pointer hover:text-accent-ink hover:border-accent hover:no-underline";
   return href ? <a className={cls} href={href}>{children}</a> : <button type="button" className={cls} onClick={onClick} {...rest}>{children}</button>;
 }
 
@@ -158,16 +158,16 @@ export function Hero({ tone, icon, eyebrow, title, children, actions, reasons, f
   const t = HERO_TONE[tone];
   const ic: IconName = icon || (tone === "good" ? "check" : tone === "bad" ? "x" : tone === "warn" ? "alert" : "play");
   return (
-    <div data-hero={tone} className={cx("relative overflow-hidden rounded-[10px] px-4 sm:px-6 py-5 border border-line bg-surface animate-reveal", className)}>
+    <div data-hero={tone} className={cx("relative overflow-hidden rounded-[20px] px-4 sm:px-6 py-5 glass animate-reveal", className)}>
       <div className={cx("absolute left-0 inset-y-0 w-1", t.bar)} />
       <div className="relative">
         <div className="flex flex-wrap items-start gap-5">
           <div className="flex items-center gap-4 flex-[1_1_320px] min-w-0">
-            <div className={cx("size-11 sm:size-14 rounded-[10px] grid place-items-center flex-none animate-pop [&_svg]:size-6 sm:[&_svg]:size-7", t.seal)}>
+            <div className={cx("size-11 sm:size-14 rounded-[12px] grid place-items-center flex-none animate-pop [&_svg]:size-6 sm:[&_svg]:size-7", t.seal)}>
               <Icon name={ic} size={34} strokeWidth={2.4} />
             </div>
             <div className="min-w-0">
-              {eyebrow && <div className="text-muted text-[12.5px] font-semibold">{eyebrow}</div>}
+              {eyebrow && <div className="text-muted text-[13px] font-semibold">{eyebrow}</div>}
               <div className={cx("text-[26px] sm:text-[30px] font-bold tracking-[-.03em] leading-[1.1]", t.text)}>{title}</div>
               {children}
             </div>
@@ -198,7 +198,7 @@ export function OutcomeNotice({ verdict }: { verdict: Verdict | null }) {
   const t = verdict.status === "PASS" ? "good" : verdict.status === "FAIL" ? "bad" : "warn";
   const cls = { good: "bg-good-soft text-good", bad: "bg-bad-soft text-bad", warn: "bg-warn-soft text-warn" }[t];
   return (
-    <div className={cx("flex gap-2.5 items-start px-[13px] py-[11px] rounded-[11px] text-[13px] mb-4", cls.split(" ")[0])}>
+    <div className={cx("flex gap-2.5 items-start px-[13px] py-[11px] rounded-[12px] text-[13px] mb-4", cls.split(" ")[0])}>
       <Icon name={t === "good" ? "check" : "alert"} size={17} className={cx("flex-none mt-px", cls.split(" ")[1])} />
       <div className="text-ink">
         {o ? (
@@ -207,7 +207,7 @@ export function OutcomeNotice({ verdict }: { verdict: Verdict | null }) {
         {others.length > 0 && (
           <div className="mt-1">
             The call {verdict.status === "FAIL" ? "failed" : `is marked ${verdict.status}`} on:{" "}
-            {others.map((x, i) => <span key={x.check_id}>{i > 0 && ", "}<b className="font-mono text-[12.5px]">{x.check_id}</b></span>)}.
+            {others.map((x, i) => <span key={x.check_id}>{i > 0 && ", "}<b className="font-mono text-[13px]">{x.check_id}</b></span>)}.
           </div>
         )}
       </div>

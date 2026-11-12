@@ -396,7 +396,26 @@ def scenario_items(profile: Mapping[str, Any], scenario: Mapping[str, Any]) -> l
                               c.get("pass_when", ""), c.get("fail_when", ""), c.get("applies_when") or "Always.",
                               c.get("section", "experience"), c.get("severity", "major"), "scenario")
         out.append((item, c))
+    if scenario.get("expected_answer"):
+        out.append((expected_answer_item(scenario["expected_answer"]), {"type": "judge", "id": EXPECTED_ANSWER}))
     return out
+
+
+EXPECTED_ANSWER = "expected-answer"
+
+
+def expected_answer_item(answer: str) -> RubricItem:
+    """The judge question for a scenario's expected_answer: does the agent's answer agree with it?"""
+    return RubricItem(
+        EXPECTED_ANSWER, "Gave the right answer",
+        f'The right answer to the caller\'s question is: "{answer.strip()}". Did the agent give an answer '
+        "that agrees with it?",
+        pass_when="The agent's answer has the same facts (times, prices, numbers, names, yes or no) as the right "
+                  "answer, in any words. Extra details that don't contradict it are fine.",
+        fail_when="The agent gave a different fact, number, time or rule, left out the key part of the answer, "
+                  "said it didn't know when the answer exists, or never answered the question.",
+        applies_when="The caller asked the question this answer is for.",
+        section="accuracy", severity="major", pack="scenario")
 
 
 def items_for_call(profile: Mapping[str, Any], scenario: Mapping[str, Any]) -> list[RubricItem]:

@@ -23,7 +23,7 @@ export function fixHref(key: string, m: ModeCard): string {
 export function LevelPill({ level, mode, className }: { level: ReadinessLevel | null; mode?: string; className?: string }) {
   const lv = LEVEL[level || "no_result"];
   return (
-    <span className={cx("inline-flex items-center gap-1 h-[22px] px-2 rounded-md text-[12px] font-semibold whitespace-nowrap", TONE_SOFT[lv.tone], className)}>
+    <span className={cx("inline-flex items-center gap-1 h-[22px] px-2 rounded-md text-[13px] font-semibold whitespace-nowrap", TONE_SOFT[lv.tone], className)}>
       <Icon name={lv.icon} size={12} strokeWidth={2.5} />{levelShort(level, mode)}
     </span>
   );
@@ -31,7 +31,7 @@ export function LevelPill({ level, mode, className }: { level: ReadinessLevel | 
 
 function ModeIcon({ id, size = 36 }: { id: string; size?: number }) {
   return (
-    <span className="rounded-[10px] grid place-items-center bg-accent-soft text-accent flex-none" style={{ width: size, height: size }}>
+    <span className="rounded-[12px] grid place-items-center bg-accent-soft text-accent flex-none" style={{ width: size, height: size }}>
       <Icon name={(MODE_ICON[id] || "play") as IconName} size={Math.round(size / 2)} />
     </span>
   );
@@ -39,14 +39,14 @@ function ModeIcon({ id, size = 36 }: { id: string; size?: number }) {
 
 function Latest({ m, k }: { m: ModeCard; k: string }) {
   const l = m.latest;
-  if (!l) return <div className="text-[12.5px] text-muted">Not run yet</div>;
+  if (!l) return <div className="text-[13px] text-muted">Not run yet</div>;
   return (
     <a href={projectHref(k, `/runs/${l.run_id}`)} className="block rounded-lg -mx-1 px-1 py-0.5 hover:bg-surface-2 hover:no-underline text-ink">
       <div className="flex items-center gap-2 flex-wrap">
         <LevelPill level={l.level} mode={m.id} />
-        <span className="text-[12px] text-muted"><When iso={l.at} />{m.runs > 1 ? ` · ${m.runs} runs` : ""}</span>
+        <span className="text-[13px] text-muted"><When iso={l.at} />{m.runs > 1 ? ` · ${m.runs} runs` : ""}</span>
       </div>
-      {l.top_finding && <div className="text-[12.5px] text-ink-2 mt-1 line-clamp-2">Top finding: {l.top_finding}</div>}
+      {l.top_finding && <div className="text-[13px] text-ink-2 mt-1 line-clamp-2">Top finding: {l.top_finding}</div>}
     </a>
   );
 }
@@ -62,15 +62,15 @@ export function ModeTile({ m, k }: { m: ModeCard; k: string }) {
           <div className="text-[13px] text-ink-2 mt-0.5">{m.question}</div>
         </div>
       </div>
-      <div className="text-[12.5px] text-muted">{m.about}</div>
+      <div className="text-[13px] text-muted">{m.about}</div>
       {m.checks.length > 0 && (
-        <ul className="grid gap-1 text-[12.5px] text-ink-2">
+        <ul className="grid gap-1 text-[13px] text-ink-2">
           {m.checks.map((c) => <li key={c} className="flex gap-2"><Icon name="check" size={13} className="text-good mt-[3px] flex-none" />{c}</li>)}
         </ul>
       )}
       <div className="mt-auto pt-3 border-t border-line grid gap-2.5">
-        {ok ? (m.kind === "monitor" ? <div className="text-[12.5px] text-muted">Results live on the Real calls pages.</div> : <Latest m={m} k={k} />) : (
-          <div className="text-[12.5px] text-warn flex gap-1.5"><Icon name="alert" size={14} className="mt-px flex-none" />{m.available.why}</div>
+        {ok ? (m.kind === "monitor" ? <div className="text-[13px] text-muted">Results live on the Real calls pages.</div> : <Latest m={m} k={k} />) : (
+          <div className="text-[13px] text-warn flex gap-1.5"><Icon name="alert" size={14} className="mt-px flex-none" />{m.available.why}</div>
         )}
         <div className="flex flex-wrap gap-2">
           {ok ? (
@@ -108,9 +108,9 @@ export function ReadinessBoard({ modes, k }: { modes: ModeCard[]; k: string }) {
                 className="flex items-center gap-3 px-[18px] py-3 hover:bg-surface-2 hover:no-underline text-ink flex-wrap">
                 <ModeIcon id={m.id} size={30} />
                 <span className="min-w-[150px] flex-[0_0_180px]"><b className="text-[13.5px] font-medium">{m.title}</b>
-                  <span className="block text-[11.5px] text-muted"><When iso={l.at} /></span></span>
+                  <span className="block text-[13px] text-muted"><When iso={l.at} /></span></span>
                 <LevelPill level={l.level} mode={m.id} />
-                <span className={cx("flex-1 min-w-[200px] text-[12.5px]", l.top_finding ? TONE_TEXT[tone] : "text-ink-2")}>
+                <span className={cx("flex-1 min-w-[200px] text-[13px]", l.top_finding ? TONE_TEXT[tone] : "text-ink-2")}>
                   {l.top_finding ? l.top_finding : `No findings${l.calls ? ` in ${l.calls} calls` : ""}`}
                 </span>
                 <Icon name="chevron" size={15} className="text-muted" />
@@ -122,7 +122,7 @@ export function ReadinessBoard({ modes, k }: { modes: ModeCard[]; k: string }) {
         <div className="px-[18px] pb-4 text-[13px] text-ink-2">No test mode has a result yet. <a href={projectHref(k, "/test")}>Pick a test mode</a> to start.</div>
       )}
       {tried.length > 0 && untried.length > 0 && (
-        <div className="px-[18px] py-3 border-t border-line text-[12.5px] text-muted flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="px-[18px] py-3 border-t border-line text-[13px] text-muted flex flex-wrap items-center gap-x-2 gap-y-1">
           Not tested yet:
           {untried.map((m) => <a key={m.id} href={modeHref(k, m.id)} className="text-ink-2 hover:text-accent-ink">{m.title}</a>)}
         </div>

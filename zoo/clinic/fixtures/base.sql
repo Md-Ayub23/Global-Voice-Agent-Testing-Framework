@@ -54,3 +54,8 @@ INSERT INTO slots VALUES
   ('D-2', '2026-11-03T10:00:00'),
   ('D-2', '2026-11-03T13:30:00'),
   ('D-2', '2026-11-04T09:30:00');
+
+-- Another patient's booking that is already in the diary (made before the call, no test_id).
+-- A call about someone else must never touch it: the "nothing else changed" check watches it.
+INSERT INTO appointments (patient_id, doctor_id, slot_start, status, reference, test_id, created_at) VALUES
+  ('P-1044', 'D-2', '2026-11-20T10:00:00', 'booked', 'RC-0100', NULL, '2026-10-30T09:00:00+00:00');

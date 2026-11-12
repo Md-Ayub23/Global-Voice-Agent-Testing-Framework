@@ -12,6 +12,10 @@
   "dependencies": {
     "@fontsource-variable/geist": "5.3.0",
     "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource-variable/host-grotesk": "5.3.0",
+    "@fontsource-variable/jetbrains-mono": "5.3.0",
+    "@fontsource-variable/plus-jakarta-sans": "^5.3.0",
+    "@fontsource/redaction-10": "^5.3.0",
     "lucide-react": "1.57.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",

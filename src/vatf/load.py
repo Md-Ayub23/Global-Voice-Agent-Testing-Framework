@@ -29,6 +29,7 @@ Profile `load` (every field optional; the defaults are below):
         slowdown: {blocks: false, pct: 50, ms: 300}   # p95 at the top level vs the lowest level
         pass_drop: {blocks: false, points: 20}        # pass rate at the top level vs the lowest level
         drift: {blocks: false, pct: 50}               # soak: the last window vs the first
+        recovery: {blocks: false, pct: 25, ms: 200}   # spike: after the spike, back within this of before it
         max_lag_ms: 100      # Vocto's own computer: event-loop lag p95 above this makes a stage untrustworthy
         min_calls: 3         # a stage needs this many finished calls to decide anything
 
@@ -57,6 +58,7 @@ LIMIT_DEFAULTS: dict[str, Any] = {
     "slowdown": {"blocks": False, "pct": 50, "ms": 300},
     "pass_drop": {"blocks": False, "points": 20},
     "drift": {"blocks": False, "pct": 50},
+    "recovery": {"blocks": False, "pct": 25, "ms": 200},
     "max_lag_ms": 100, "min_calls": 3,
 }
 DEFAULTS: dict[str, Any] = {

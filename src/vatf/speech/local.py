@@ -15,9 +15,25 @@ from ..accents import speaker_id, split_voice
 from ..audio.pcm import from_pcm16, resample, to_pcm16
 from ..contracts.models import AudioClip
 from ..contracts.speech import Transcript
+from ..languages import COMMUNITY_VOICES
 
 log = logging.getLogger(__name__)
 SENTENCE_PAUSE_S = 0.25
+
+
+def _download_community(name: str, folder: Path) -> None:
+    """A voice that is not in Piper's own list (languages.COMMUNITY_VOICES): its .onnx.json and .onnx,
+    each written under a temporary name first so a broken download never looks like a voice."""
+    import shutil
+    import urllib.request
+
+    for ext in (".onnx.json", ".onnx"):
+        target = folder / f"{name}{ext}"
+        part = target.with_name(target.name + ".part")
+        with urllib.request.urlopen(f"{COMMUNITY_VOICES[name]}{name}{ext}?download=true", timeout=60) as r, \
+                open(part, "wb") as f:
+            shutil.copyfileobj(r, f)
+        part.replace(target)
 
 
 class PiperTTS:
@@ -39,7 +55,10 @@ class PiperTTS:
                 model = self.folder / f"{name}.onnx"
                 if not model.exists() or not (self.folder / f"{name}.onnx.json").exists():
                     print(f"vatf: downloading Piper voice {name} into {self.folder} (once only)...")
-                    download_voice(name, self.folder)
+                    if name in COMMUNITY_VOICES:
+                        _download_community(name, self.folder)
+                    else:
+                        download_voice(name, self.folder)
                 self._voices[name] = PiperVoice.load(model)
             return self._voices[name]
 

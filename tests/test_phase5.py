@@ -300,7 +300,9 @@ def test_run_quality_and_a_blocking_metric():
     rows = {r["id"]: r for r in metrics.run_quality(vs, PROFILE)}
     assert rows["longest_silence_ms"]["value"] == 9000 and rows["longest_silence_ms"]["band"] == "bad"
     assert rows["talked_over"]["value"] == 50.0 and rows["talked_over"]["band"] == "bad"
-    assert rows["response_p90_ms"]["value"] == 800 and rows["response_p90_ms"]["detail"] == {"turns": 3}
+    assert rows["response_p90_ms"]["value"] == 800 and rows["response_p90_ms"]["detail"]["turns"] == 3
+    # 3 answers are too few for a p90 (10 needed): shown, never banded, so it can never block.
+    assert rows["response_p90_ms"]["detail"]["too_few"] and rows["response_p90_ms"]["band"] is None
 
     d = LocalDecisionEngine().decide("r", vs, SCENARIOS, PROFILE)
     assert d["decision"] == "GO"                                   # nothing blocks by default

@@ -37,7 +37,7 @@ properties:
       additionalProperties: false
       required: [rule, message]
       properties:
-        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings, metric, metric_warnings, regression, regression_warnings, load_failed_calls, load_latency, load_metric, load_blocker, load_slowdown, load_pass_drop, load_drift, load_evidence, load_ok, load_warnings]}
+        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings, metric, metric_warnings, regression, regression_warnings, load_failed_calls, load_latency, load_metric, load_blocker, load_slowdown, load_pass_drop, load_drift, load_recovery, load_evidence, load_ok, load_warnings, latency_sample]}
         message: {type: string}
         refs:
           description: test_id or test_id/check_id pointing at the verdicts behind this reason.
@@ -81,7 +81,10 @@ properties:
       p95_ms: {type: [integer, "null"]}
       p50_limit_ms: {type: integer}
       p95_limit_ms: {type: integer}
-      within_limits: {type: [boolean, "null"]}
+      within_limits: {description: "null when not decided: text mode, or too few answers to judge the slowest 5%.", type: [boolean, "null"]}
+      p95_enough: {description: "Enough timed answers (p95_needs) for p95 to decide on its own.", type: [boolean, "null"]}
+      p95_needs: {type: integer}
+      over_p95_limit: {description: "Timed answers slower than the p95 limit.", type: integer}
 
   coverage:
     type: object
@@ -153,7 +156,7 @@ properties:
       type: object
       required: [id, title, unit, better, value, band, blocks, calls]
       properties:
-        id: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, turns_to_goal, escalated, duration_s]}
+        id: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, turns_to_goal, escalated, duration_s]}
         title: {type: string}
         unit: {enum: [ms, "%", wpm, turns, s]}
         better: {enum: [lower, higher]}
@@ -182,6 +185,45 @@ properties:
         p90_ms: {type: [integer, "null"]}
         talked_over_pct: {type: [number, "null"]}
         behaviours: {type: array, items: {type: string}}
+
+  costs:
+    description: What the agent cost to run in this run, from the owner's prices (profile costs, costs.py).
+    type: object
+    additionalProperties: false
+    required: [currency, prices, calls, minutes, total, per_call, task_calls, tasks_done, per_task]
+    properties:
+      currency: {type: string}
+      prices: {type: object, additionalProperties: {type: number}}
+      calls: {type: integer}
+      minutes: {type: number}
+      total: {type: number}
+      per_call: {type: number}
+      task_calls: {description: "Calls that should have done a task (book, order).", type: integer}
+      tasks_done: {type: integer}
+      per_task: {description: "What those calls cost, divided by the tasks really done; null when none was.", type: [number, "null"]}
+
+  by_failure:
+    description: Resilience failure drills (drills.py). How the calls ended, per kind of tool failure tried.
+    type: array
+    items:
+      type: object
+      required: [failure, title, calls, passed, failed]
+      properties:
+        failure: {type: string}
+        title: {type: string}
+        about: {type: string}
+        expected: {enum: [success, recover_or_honest]}
+        calls: {type: integer}
+        passed: {type: integer}
+        failed: {type: integer}
+        recovered: {type: integer}
+        honest: {type: integer}
+        false_claims: {type: integer}
+        duplicates: {type: integer}
+        unverified: {type: integer}
+        pass_rate: {type: [number, "null"]}
+        failed_tests: {type: array, items: {type: string}}
+        failed_calls: {type: array, items: {type: string}}
 
   load:
     description: Phase 7, load runs only (decision.apply_load). The full numbers are in the run's load.json.

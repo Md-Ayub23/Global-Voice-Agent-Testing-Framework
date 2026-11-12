@@ -144,6 +144,22 @@ def answers_in(stage: Stage, verdicts: Sequence[Mapping[str, Any]], samples: Seq
     return out
 
 
+def timed_answers(stage: Stage, verdicts: Sequence[Mapping[str, Any]], samples: Sequence[Sequence[float]]) -> list[tuple[float, int]]:
+    """answers_in with their times (seconds from the load's start), in time order."""
+    out = []
+    for v in verdicts:
+        f = v.get("load") or {}
+        if f.get("outcome") != "ok":
+            continue
+        for t_s, ms in f.get("answers", []):
+            if stage.start_s <= t_s < stage.end_s and _in_flight_at(samples, t_s) <= stage.level:
+                out.append((float(t_s), int(ms)))
+    return sorted(out)
+
+
+RECOVERED_RUN = 3   # answers in a row back at normal speed: the agent has recovered
+
+
 def _in_flight_at(samples: Sequence[Sequence[float]], t_s: float) -> int:
     """Calls in flight at t_s: the most seen in the monitor's readings within 0.2 s of it (samples are in time order)."""
     times = [x[0] for x in samples] if not isinstance(samples, _Timed) else samples.times
@@ -317,6 +333,42 @@ def summarise(settings: Mapping[str, Any], stage_list: Sequence[Stage], verdicts
             item = {"rule": "drift", "message": "Over the soak, " + " and ".join(msgs)
                                                 + ". Something builds up while the agent runs (memory, connections, a queue)."}
             (blocking if rule["blocks"] else warnings).append(item)
+
+    # Spike: did the agent come back to normal after it, and how soon?
+    before = next((r for r in rows if r["kind"] == "normal" and r["finished"]), None)
+    after = next((r for r in rows if r["kind"] == "recovery"), None)
+    if before and after and after["finished"]:
+        b = before["latency"]["p95_ms"]
+        rule = limits["recovery"]
+        if b is not None:
+            normal_ms = b + max(float(rule["ms"]), b * float(rule["pct"]) / 100)
+            stage = stage_list[after["index"]]
+            answers = timed_answers(stage, verdicts, samples)
+            back_at, settled = None, None
+            for i in range(len(answers) - RECOVERED_RUN + 1):
+                if all(ms <= normal_ms for _, ms in answers[i:i + RECOVERED_RUN]):
+                    back_at = round(answers[i][0] - stage.start_s, 1)
+                    settled = answers[i:]
+                    break
+            # Once back, it must stay back: p95 of the answers from then on (the slow ones just after the
+            # spike are the recovery time, not a failure to recover).
+            a = _p([ms for _, ms in settled], 95) if settled else after["latency"]["p95_ms"]
+            failed_more = (after["failed_pct"] or 0) > max(before["failed_pct"] or 0, float(limits["max_failed_pct"]))
+            recovered = back_at is not None and a is not None and a <= normal_ms and not failed_more
+            comparisons["recovery"] = {"before_p95_ms": b, "after_p95_ms": a, "normal_up_to_ms": round(normal_ms),
+                                       "stage_p95_ms": after["latency"]["p95_ms"],
+                                       "back_to_normal_s": back_at, "recovered": recovered,
+                                       "before_failed_pct": before["failed_pct"], "after_failed_pct": after["failed_pct"]}
+            if not recovered:
+                why = []
+                if back_at is None or (a is not None and a > normal_ms):
+                    why.append(f"answers stayed slow (p95 {a if a is not None else '?':,} ms after the spike, {b:,} ms "
+                               "before it)" if a is not None else "too few answers after the spike to tell")
+                if failed_more:
+                    why.append(f"more calls failed ({after['failed_pct']:g}% after, {before['failed_pct'] or 0:g}% before)")
+                item = {"rule": "recovery", "message": "The agent didn't come back to normal after the spike: "
+                                                       + " and ".join(why) + "."}
+                (blocking if rule["blocks"] else warnings).append(item)
 
     calls = len(verdicts)
     harness = sum(1 for v in verdicts if (v.get("load") or {}).get("outcome") == "harness")

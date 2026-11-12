@@ -1,4 +1,5 @@
 // Phase 8 real calls: the calls-per-day chart and the words for why a call was flagged.
+import { plural } from "../lib/format";
 import { useEffect, useRef, useState } from "react";
 import type { MetricDef, MonitorDay, MonitorFlag } from "../lib/types";
 import { Chip, type ChipTone } from "./ui";
@@ -71,14 +72,14 @@ export function CallsPerDay({ days }: { days: MonitorDay[] }) {
           const x = left + i * slot + (slot - bar) / 2;
           return (
             <g key={d.day} data-day={d.day}>
-              <title>{`${dayLabel(d.day)}: ${d.calls} call(s), ${d.passed} passed, ${d.failed} failed, ${d.flagged} flagged`
+              <title>{`${dayLabel(d.day)}: ${plural(d.calls, "call")}, ${d.passed} passed, ${d.failed} failed, ${d.flagged} flagged`
                 + (d.p90_ms != null ? `, p90 ${d.p90_ms} ms` : "")}</title>
               <rect x={left + i * slot} y={top} width={slot} height={y0 - top} fill="transparent" />
               {SERIES.map((s) => {
                 const h = parts[s.key] * scale;
                 if (!h) return null;
                 y -= h;
-                return <rect key={s.key} x={x} y={y} width={bar} height={Math.max(1, h - 1)} rx={2} fill={s.color} />;
+                return <rect key={s.key} className="bar-grow" x={x} y={y} width={bar} height={Math.max(1, h - 1)} rx={2} fill={s.color} />;
               })}
             </g>
           );
@@ -88,7 +89,7 @@ export function CallsPerDay({ days }: { days: MonitorDay[] }) {
             textAnchor={i === days.length - 1 ? "end" : "middle"}>{i === days.length - 1 ? "Today" : dayLabel(d.day)}</text>
         ))}
       </svg>
-      <div className="flex gap-3.5 flex-wrap text-xs text-ink-2 mt-2">
+      <div className="flex gap-3.5 flex-wrap text-[13px] text-ink-2 mt-2">
         {SERIES.map((s) => <span key={s.key}><i className="inline-block size-2.5 rounded-[3px] mr-1.5 -mb-px" style={{ background: s.color }} />{s.label}</span>)}
       </div>
     </div>

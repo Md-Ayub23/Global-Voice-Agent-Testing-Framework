@@ -9,22 +9,22 @@ import { Badge, Button, Card, CardHead, Chip, Legend, Notice, Seg, Skeleton, Tab
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { projectHref } from "../lib/links";
-import { fmtDate, fmtDuration, fmtMs, money, shortScenario } from "../lib/format";
+import { fmtDate, fmtDuration, fmtMs, money, shortScenario, plural } from "../lib/format";
 import type { CallDetail, Check, Project, RunDetail } from "../lib/types";
 
 function Kpi({ label, value, foot }: { label: string; value: ReactNode; foot?: ReactNode }) {
   return (
     <Card className="grid gap-1">
-      <div className="text-ink-2 font-semibold text-[12.5px]">{label}</div>
+      <div className="text-ink-2 font-semibold text-[13px]">{label}</div>
       <div className="text-[26px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">{value}</div>
-      {foot && <div className="text-muted text-xs">{foot}</div>}
+      {foot && <div className="text-muted text-[13px]">{foot}</div>}
     </Card>
   );
 }
 
 export function CallPage({ project, runId, testId, at }: { project: Project; runId: string; testId: string; at?: number | null }) {
   const runAt = (path = "") => projectHref(project.key, `/runs/${runId}${path}`);
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
+  useCrumbs([{ label: project.name, href: projectHref(project.key) },
     { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run", href: runAt() }, { label: "Call" }]);
   const { data, error } = useLoad(
     () => Promise.all([api.get<CallDetail>(`/api/runs/${runId}/calls/${testId}`), api.get<RunDetail>(`/api/runs/${runId}`)]),
@@ -99,7 +99,7 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
             {final === false && <Chip tone="warn" icon="refresh">attempt {r.attempt}: Vocto error, rerun · not counted</Chip>}
           </div>
           <div className="mt-1 text-ink-2 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[12.5px]">{r.scenario_id}</span><span className="text-muted">·</span>repeat {r.repeat}
+            <span className="font-mono text-[13px]">{r.scenario_id}</span><span className="text-muted">·</span>repeat {r.repeat}
             {r.persona_id && <><span className="text-muted">·</span><Chip tone="caller" icon="user">{r.persona_id}</Chip></>}
             <Chip tone={voice ? "agent" : "caller"} icon={voice ? "mic" : "text"}>{r.mode}</Chip>
             {c.pii_masked ? <Chip icon="shield">personal data masked</Chip> : <Chip tone="bad" icon="alert">personal data NOT masked</Chip>}
@@ -114,13 +114,13 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
 
       <OutcomeNotice verdict={v} />
 
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 stagger mb-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 mb-4">
         <Kpi label="Caller turns" value={m.turns ?? "—"} />
         <Kpi label="Call length" value={fmtDuration(m.duration_ms)} foot={fmtDate(r.started_at)} />
         <Kpi label={voice ? "Response time p50" : "Agent processing p50"} value={fmtMs(m.latency_p50_ms)}
           foot={voice ? `p95 ${fmtMs(m.latency_p95_ms)}${limits ? ` · limit ${fmtMs(limits.p95)}` : ""}` : "text mode: not gated"} />
         <Kpi label="Framework cost" value={money((r.cost_usd || 0) + (m.judge_cost_usd || 0))}
-          foot={`caller + validator${m.judge_cost_usd ? ` + judges ${money(m.judge_cost_usd)}` : ""}${c.llm_logs ? ` · ${c.llm_logs} AI log(s)` : ""}`} />
+          foot={`caller + validator${m.judge_cost_usd ? ` + judges ${money(m.judge_cost_usd)}` : ""}${c.llm_logs ? ` · ${plural(c.llm_logs, "AI log")}` : ""}`} />
       </div>
 
       <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_400px]">
@@ -132,7 +132,7 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
               <audio id="audio" ref={setAudio} controls preload="metadata" src={c.recording.url} className="w-full mt-2.5" />
               <div className="mt-2 flex flex-wrap items-center gap-3.5">
                 <Legend items={[["var(--caller)", "Caller"], ["var(--agent)", "Agent"]]} />
-                <span className="text-muted text-xs">Click the waveform or a ▶ time to jump there.</span>
+                <span className="text-muted text-[13px]">Click the waveform or a ▶ time to jump there.</span>
               </div>
               {c.phone && <PhoneLine p={c.phone} />}
             </Card>
@@ -149,13 +149,13 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
                 <Table compact head={["#", "Who", "What happened"]}>
                   {c.story.map((row) => (
                     <tr key={row.seq}>
-                      <td className="font-mono text-[11.5px] text-muted">#{row.seq}</td>
+                      <td className="font-mono text-[13px] text-muted">#{row.seq}</td>
                       <td className="whitespace-nowrap"><b>{row.who}</b></td>
                       <td>{row.text}</td>
                     </tr>
                   ))}
                 </Table>
-                <div className="text-muted text-[11.5px] mt-2">The same lines as story.txt and the terminal output.</div>
+                <div className="text-muted text-[13px] mt-2">The same lines as story.txt and the terminal output.</div>
               </div>
             )}
           </Card>
@@ -176,21 +176,21 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
             </Card>
           )}
           <Tabs value={sideShown} onChange={setSide} tabs={sideTabs} className="mb-0 -mt-1" />
-          {sideShown === "checks" && <Card className="animate-view-in">
+          {sideShown === "checks" && <Card >
             <CardHead title="Checks" sub={v ? `${own.filter((x) => x.result === "PASS").length} of ${own.length} passed` : undefined} />
             <div id="checks">
               {v ? <ChecksList verdict={v} onEvidence={onEvidence} />
-                : <div className="text-muted text-[12.5px]">{running ? "This call has no verdict yet." : "The run was stopped during this call, so it was never judged."}</div>}
+                : <div className="text-muted text-[13px]">{running ? "This call has no verdict yet." : "The run was stopped during this call, so it was never judged."}</div>}
             </div>
-            <div className="text-muted text-[11.5px] mt-2">Click an event number to see it in the conversation.</div>
+            <div className="text-muted text-[13px] mt-2">Click an event number to see it in the conversation.</div>
           </Card>}
           {sideShown === "judges" && v && judged.length > 0 && (
-            <Card id="judges" className="animate-view-in">
+            <Card id="judges" >
               <CardHead title="AI judges" sub={judgedRan ? judgeSub(judged) : "not run"}>
                 <Button size="sm" variant="ghost" href={projectHref(project.key, "/judges")}>About</Button>
               </CardHead>
               {v.status === "PASS" && judged.some((x) => ["FAIL", "NEEDS_REVIEW"].includes(x.result) && !x.can_block) && (
-                <Notice className="mb-3 text-[12.5px]">
+                <Notice className="mb-3 text-[13px]">
                   <b>Why the call still passed:</b> hard checks decide a call (tools, database, what must and mustn't be said),
                   plus judge items you have learned to trust. The items marked <i>not trusted yet</i> are the judges' opinion:
                   shown, never counted. Label this call to tell them whether they were right; that is how an item earns trust.
@@ -200,30 +200,30 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
             </Card>
           )}
           {sideShown === "times" && m.latency_turns && m.latency_turns.length > 0 && (
-            <Card className="animate-view-in">
+            <Card >
               <CardHead title="Response times" sub="end of the caller's words → first sound of the answer" />
               <LatencyBars rows={m.latency_turns} limits={limits} width={330} />
             </Card>
           )}
           {sideShown === "quality" && m.quality && <CallQuality quality={m.quality} conditions={v?.conditions} defs={system?.metrics || []} />}
           {sideShown === "db" && c.database.length > 0 && (
-            <Card className="animate-view-in">
+            <Card >
               <CardHead title="Database after the call" />
               <div className="flex flex-col gap-3">
                 {c.database.map((d) => (
                   <div key={d.probe} className="min-w-0">
-                    <div className="font-mono text-[11.5px] text-muted mb-1.5 break-all">{d.probe}</div>
-                    {d.rows.length ? <RowsTable rows={d.rows} /> : <div className="text-muted text-[12.5px]">No rows: nothing was stored by this call.</div>}
+                    <div className="font-mono text-[13px] text-muted mb-1.5 break-all">{d.probe}</div>
+                    {d.rows.length ? <RowsTable rows={d.rows} /> : <div className="text-muted text-[13px]">No rows: nothing was stored by this call.</div>}
                   </div>
                 ))}
               </div>
             </Card>
           )}
-          {sideShown === "files" && <Card className="animate-view-in">
+          {sideShown === "files" && <Card >
             <CardHead title="Evidence downloads" sub={`${r.locked ? "sealed" : "still open"}${r.events_sha256 ? ` · sha256 ${r.events_sha256.slice(0, 10)}…` : ""}`} />
             <div className="flex flex-col gap-1.5">
               {c.files.map((f) => (
-                <a key={f} className="flex items-center gap-2 text-[12.5px]" href={`/runs/${runId}/calls/${testId}/${f}`} target="_blank" rel="noreferrer">
+                <a key={f} className="flex items-center gap-2 text-[13px]" href={`/runs/${runId}/calls/${testId}/${f}`} target="_blank" rel="noreferrer">
                   <Icon name="file" /><span className="font-mono">{f}</span>
                 </a>
               ))}
@@ -239,14 +239,14 @@ function judgeSub(judged: Check[]): string {
   const problems = judged.filter((x) => x.result === "FAIL" && (x.can_block || x.judge?.human)).length;
   const opinions = judged.filter((x) => x.result === "FAIL" && !x.can_block && !x.judge?.human).length;
   const you = judged.filter((x) => x.result === "NEEDS_REVIEW").length;
-  return [`${problems} problem(s)`, opinions ? `${opinions} opinion(s) not trusted yet` : "", you ? `${you} need you` : ""].filter(Boolean).join(" · ");
+  return [`${plural(problems, "problem")}`, opinions ? `${plural(opinions, "opinion")} not trusted yet` : "", you ? `${you} need you` : ""].filter(Boolean).join(" · ");
 }
 
 // A real phone call: what the phone provider itself recorded (the number rung, length, its price).
 function PhoneLine({ p }: { p: NonNullable<CallDetail["phone"]> }) {
   const cost = p.price != null ? `${p.price.toFixed(4)} ${p.price_unit || ""}`.trim() : "not reported yet";
   return (
-    <div id="phone-call" className="mt-3 text-[12.5px] text-muted flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2.5">
+    <div id="phone-call" className="mt-3 text-[13px] text-muted flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2.5">
       <span><b className="text-ink font-medium">Real phone call</b> from {p.from} to {p.to}</span>
       <span>{p.duration_s != null ? `${p.duration_s} s on the line` : p.status}</span>
       <span>{p.provider === "twilio" ? "Twilio" : p.provider} cost: {cost}</span>

@@ -11,7 +11,7 @@ import { QualityTiles } from "../components/quality";
 import { Badge, Button, Card, CardHead, Chip, EmptyState, Field, LinkTabs, Notice, PageHead, Seg, Skeleton, Switch, Table, rowLink } from "../components/ui";
 import { api, qs } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
-import { cx, fmtMs } from "../lib/format";
+import { cx, fmtMs, plural } from "../lib/format";
 import { projectHref } from "../lib/links";
 import { navigate } from "../lib/router";
 import type { MonitorPage as Page, MonitorRow, MonitorSettings, Project } from "../lib/types";
@@ -44,7 +44,7 @@ function change(now: number | null, before: number | null, unit = "%", lowerBett
 }
 
 export function MonitorPageView({ project, tab, query }: { project: Project; tab: MonitorTab; query: URLSearchParams }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Real calls" }]);
+  useCrumbs([{ label: project.name, href: projectHref(project.key) }, { label: "Real calls" }]);
   const { data, error, reload } = useLoad(() => api.get<Page>(`/api/project/${project.key}/monitor`), [project.key]);
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton />;
@@ -93,7 +93,7 @@ function Overview({ page, project, reload }: { page: Page; project: Project; rel
     setBusy(true);
     try {
       const r = await api.post<{ active: Record<string, unknown>; sent: unknown[] }>(`/api/project/${project.key}/monitor/check`);
-      toast(Object.keys(r.active).length ? `${Object.keys(r.active).length} alert(s) active` : "No alerts");
+      toast(Object.keys(r.active).length ? `${plural(Object.keys(r.active).length, "alert")} active` : "No alerts");
       reload();
     } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(false); }
   };
@@ -114,19 +114,19 @@ function Overview({ page, project, reload }: { page: Page; project: Project; rel
       )}
       {page.pending > 0 && (
         <Notice icon="scale">
-          {page.pending} call(s) waiting for the AI judges.{" "}
+          {plural(page.pending, "call")} waiting for the AI judges.{" "}
           {page.have_key ? (page.judging ? "They are being judged now." : <Button size="sm" busy={busy} onClick={checkNow}>Judge them now</Button>)
             : "Add a Claude API key under Settings to judge them."}
         </Notice>
       )}
-      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 stagger">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-5">
         <Kpi icon="phone" label={`Calls, last ${hours} h`} value={w.calls} foot={`${tw.calls} this week · ${lw.calls} the week before`} />
         <Kpi icon="check-circle" label="Pass rate" tone={w.pass_rate == null ? "accent" : w.pass_rate >= (page.settings.alerts.pass_rate_below ?? 0) ? "good" : "bad"}
           value={pctText(w.pass_rate)} foot={change(tw.pass_rate, lw.pass_rate) || `${w.passed} passed · ${w.failed} failed`} />
         <Kpi icon="flag" label="Flagged" tone={w.flagged ? "warn" : "good"} value={pctText(w.flagged_pct)}
-          foot={change(tw.flagged_pct, lw.flagged_pct, "%", true) || `${w.flagged} call(s) worth a look`} />
+          foot={change(tw.flagged_pct, lw.flagged_pct, "%", true) || `${plural(w.flagged, "call")} worth a look`} />
         <Kpi icon="clock" label="Response time p90" value={fmtMs(w.p90_ms)} foot={w.answers ? `${w.answers} timed answers` : "needs turn times in the import"} />
-        <Kpi icon="user" label="Handed to a person" value={pctText(w.escalated_pct)} foot={`${w.repeat_callers} repeat caller(s)`} />
+        <Kpi icon="user" label="Handed to a person" value={pctText(w.escalated_pct)} foot={`${plural(w.repeat_callers, "repeat caller")}`} />
       </div>
       <Card>
         <CardHead level={2} title="Calls per day" sub="last 14 days · hover a day for its numbers">
@@ -142,7 +142,7 @@ function Overview({ page, project, reload }: { page: Page; project: Project; rel
             <Table compact head={["Reason", "Calls", ""]}>
               {page.top_flags.map((f) => (
                 <tr key={`${f.kind}:${f.id}`}>
-                  <td><b>{flagLabel(f, page.metric_defs)}</b><div className="text-muted text-[11.5px]">{f.kind === "metric" ? "call quality" : f.kind === "check" ? "real-call check" : "AI judge"}</div></td>
+                  <td><b>{flagLabel(f, page.metric_defs)}</b><div className="text-muted text-[13px]">{f.kind === "metric" ? "call quality" : f.kind === "check" ? "real-call check" : "AI judge"}</div></td>
                   <td className="tabular-nums">{f.calls}</td>
                   <td className="text-right"><a href={`${projectHref(project.key, "/calls/list")}?${qs({ filter: "flagged" })}`}>See calls</a></td>
                 </tr>
@@ -156,7 +156,7 @@ function Overview({ page, project, reload }: { page: Page; project: Project; rel
             <Table compact head={["Version", "Calls", "Pass rate", "Flagged", "p90"]}>
               {page.versions.map((v) => (
                 <tr key={v.version} className={rowLink} onClick={() => navigate(`${projectHref(project.key, "/calls/list")}?${qs({ version: v.version })}`)}>
-                  <td className="font-mono text-[12.5px]">{v.version}<div className="text-muted text-[11.5px] font-sans"><When iso={v.first_seen} /></div></td>
+                  <td className="font-mono text-[13px]">{v.version}<div className="text-muted text-[13px] font-sans"><When iso={v.first_seen} /></div></td>
                   <td className="tabular-nums">{v.calls}</td>
                   <td className="tabular-nums">{pctText(v.pass_rate)}</td>
                   <td className="tabular-nums">{pctText(v.flagged_pct)}</td>
@@ -216,11 +216,11 @@ function CallsList({ page, project, query }: { page: Page; project: Project; que
             {data.rows.map((r) => (
               <tr key={r.call_id} data-call={r.call_id} className={rowLink} onClick={() => navigate(projectHref(project.key, `/calls/${r.call_id}`))}>
                 <td className="whitespace-nowrap"><When iso={r.started_at || r.imported_at} />
-                  <div className="text-muted text-[11.5px]">{SOURCE[r.source] || r.source}{r.agent_version ? ` · ${r.agent_version}` : ""}</div></td>
+                  <div className="text-muted text-[13px]">{SOURCE[r.source] || r.source}{r.agent_version ? ` · ${r.agent_version}` : ""}</div></td>
                 <td className="max-w-[380px]"><div className="truncate">{r.summary || <span className="text-muted">(the caller said nothing)</span>}</div>
-                  {r.redacted > 0 && <div className="text-muted text-[11.5px]"><Icon name="shield" size={11} className="inline -mt-0.5" /> {r.redacted} personal detail(s) removed</div>}</td>
+                  {r.redacted > 0 && <div className="text-muted text-[13px]"><Icon name="shield" size={11} className="inline -mt-0.5" /> {plural(r.redacted, "personal detail")} removed</div>}</td>
                 <td><Badge status={r.status} />
-                  {r.judge_state === "pending" && <div className="text-muted text-[11.5px] mt-0.5">judges waiting</div>}</td>
+                  {r.judge_state === "pending" && <div className="text-muted text-[13px] mt-0.5">judges waiting</div>}</td>
                 <td><div className="flex flex-wrap gap-1">{r.flags.slice(0, 2).map((f, i) => <FlagChip key={i} f={f} defs={page.metric_defs} />)}
                   {r.flags.length > 2 && <Chip>+{r.flags.length - 2}</Chip>}
                   {r.escalated && <Chip icon="user">handed over</Chip>}</div></td>
@@ -228,7 +228,7 @@ function CallsList({ page, project, query }: { page: Page; project: Project; que
               </tr>
             ))}
           </Table>
-          <div className="px-[18px] py-3 flex items-center gap-3 text-muted text-[12.5px]">
+          <div className="px-[18px] py-3 flex items-center gap-3 text-muted text-[13px]">
             Showing {data.rows.length} of {data.total}
             {data.rows.length < data.total && <Button size="sm" onClick={() => setLimit(limit + 100)}>Show more</Button>}
           </div>
@@ -270,7 +270,7 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
       const r = await api.post<ImportResult>(`/api/project/${project.key}/monitor/import`, body);
       setResult(r);
       setFiles([]);
-      toast(r.added ? `${r.added} call(s) imported` : "No new calls", r.added ? undefined : "bad");
+      toast(r.added ? `${plural(r.added, "call")} imported` : "No new calls", r.added ? undefined : "bad");
       reload();
     } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(false); }
   };
@@ -279,14 +279,14 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
       <Card>
         <CardHead level={2} title="Import call files" sub="Personal data is removed in this step: only the cleaned copy is kept." />
         <div
-          className={cx("border-2 border-dashed rounded-[10px] p-8 grid place-items-center text-center gap-2 transition-colors cursor-pointer",
+          className={cx("border-2 border-dashed rounded-[12px] p-8 grid place-items-center text-center gap-2 transition-colors cursor-pointer",
             over ? "border-accent bg-accent-soft" : "border-line hover:border-line-strong")}
           onClick={() => input.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
           onDrop={(e) => { e.preventDefault(); setOver(false); setFiles([...files, ...Array.from(e.dataTransfer.files)]); }}>
           <Icon name="file" size={26} className="text-muted" />
           <div className="font-semibold">Drop call files here, or click to choose</div>
-          <div className="text-muted text-[12.5px]">JSON, JSON lines or plain-text transcripts · up to 25 MB each</div>
+          <div className="text-muted text-[13px]">JSON, JSON lines or plain-text transcripts · up to 25 MB each</div>
           <input ref={input} id="import-files" type="file" multiple accept=".json,.jsonl,.ndjson,.txt" className="hidden"
             onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
         </div>
@@ -297,7 +297,7 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
                 <span className="text-muted">{(f.size / 1024).toFixed(1)} KB</span>
                 <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove" onClick={() => setFiles(files.filter((_, j) => j !== i))} /></div>
             ))}
-            <div><Button id="import-send" variant="primary" icon="plus" busy={busy} onClick={send}>Import {files.length} file(s)</Button></div>
+            <div><Button id="import-send" variant="primary" icon="plus" busy={busy} onClick={send}>Import {plural(files.length, "file")}</Button></div>
           </div>
         )}
         {!page.settings.enabled && <Notice tone="warn" className="mt-3">Monitoring is switched off for this agent (Settings), so imports are refused.</Notice>}
@@ -306,9 +306,9 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
             {result.files.map((f, i) => (
               <Notice key={i} tone={f.error ? "bad" : f.added ? "good" : "info"} icon={f.error ? "alert" : "check"}>
                 <b>{f.name}:</b>{" "}
-                {f.error ? f.error : <>{f.added} call(s) added{f.duplicates ? `, ${f.duplicates} already imported` : ""}.
+                {f.error ? f.error : <>{plural(f.added, "call")} added{f.duplicates ? `, ${f.duplicates} already imported` : ""}.
                   {f.first && <> <a href={projectHref(project.key, `/calls/${f.first}`)}>Open the first</a></>}</>}
-                {f.problems?.map((p, j) => <div key={j} className="text-[12.5px]">{p}</div>)}
+                {f.problems?.map((p, j) => <div key={j} className="text-[13px]">{p}</div>)}
               </Notice>
             ))}
             {result.judging && <Notice icon="scale">The AI judges are scoring the new calls in the background.</Notice>}
@@ -324,8 +324,8 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
           <li><b>Plain transcripts</b>: one turn per line, starting <span className="font-mono">Agent:</span> or <span className="font-mono">Caller:</span>.</li>
           <li><b>Vocto JSON</b> from any other platform, one call per file, a list, or one per line:</li>
         </ul>
-        <pre className="mt-2 text-[11.5px] font-mono bg-surface-2 border border-line rounded-lg p-3 overflow-x-auto">{EXAMPLE}</pre>
-        <div className="text-muted text-[12px] mt-2">Turn times (start_ms, end_ms) are optional. With them, response time, silences and talk share are measured too.</div>
+        <pre className="mt-2 text-[13px] font-mono bg-surface-2 border border-line rounded-lg p-3 overflow-x-auto">{EXAMPLE}</pre>
+        <div className="text-muted text-[13px] mt-2">Turn times (start_ms, end_ms) are optional. With them, response time, silences and talk share are measured too.</div>
       </Card>
     </div>
   );
@@ -372,7 +372,7 @@ function SettingsTab({ page, project, reload }: { page: Page; project: Project; 
   const deleteAll = async () => {
     try {
       const r = await api.post<{ deleted: number }>(`/api/project/${project.key}/monitor/delete`, { all: true });
-      toast(`${r.deleted} real call(s) deleted`);
+      toast(`${plural(r.deleted, "real call")} deleted`);
       setConfirmAll(false);
       reload();
     } catch (e) { toast((e as Error).message, "bad"); }
@@ -405,7 +405,7 @@ function SettingsTab({ page, project, reload }: { page: Page; project: Project; 
             </Notice>
           )}
           {page.intake.error && <Notice tone="bad">{page.intake.error}</Notice>}
-          <div className="text-muted text-[12.5px] grid gap-1">
+          <div className="text-muted text-[13px] grid gap-1">
             <div><b className="text-ink-2">Vapi:</b> set the assistant's Server URL to this address and its server secret to the token.</div>
             <div><b className="text-ink-2">Retell:</b> set the webhook URL to this address followed by <span className="font-mono">?token=</span> and the token.</div>
             <div><b className="text-ink-2">Any other platform:</b> POST each call as Vocto JSON with the header <span className="font-mono">Authorization: Bearer</span> and the token.</div>
@@ -422,7 +422,7 @@ function SettingsTab({ page, project, reload }: { page: Page; project: Project; 
               onChange={(on) => set("privacy", { redact: on ? [...privacy.redact, d] : privacy.redact.filter((x) => x !== d) })} />
           ))}
         </div>
-        <div className="text-muted text-[12.5px] mt-2">Always removed as well: personal values the agent sends to its tools (the tools' personal fields, email, phone, date of birth, names) and this agent's own patterns.</div>
+        <div className="text-muted text-[13px] mt-2">Always removed as well: personal values the agent sends to its tools (the tools' personal fields, email, phone, date of birth, names) and this agent's own patterns.</div>
         <div className="mt-3 grid gap-2">
           <div className="font-semibold text-[13px]">Your own patterns</div>
           {(privacy.patterns || []).map((p, i) => (
@@ -472,7 +472,7 @@ function SettingsTab({ page, project, reload }: { page: Page; project: Project; 
       <Card>
         <CardHead level={2} title="Delete real calls" sub="Removes every real call of this agent from this computer. This can't be undone." />
         {confirmAll ? (
-          <div className="flex gap-2 items-center flex-wrap"><span className="text-[13px]">Delete all {page.totals.calls} real call(s)?</span>
+          <div className="flex gap-2 items-center flex-wrap"><span className="text-[13px]">Delete all {plural(page.totals.calls, "real call")}?</span>
             <Button id="mon-delete-yes" size="sm" variant="danger" icon="x" onClick={deleteAll}>Yes, delete them</Button>
             <Button size="sm" onClick={() => setConfirmAll(false)}>Cancel</Button></div>
         ) : <div><Button id="mon-delete-all" size="sm" icon="x" disabled={!page.totals.calls} onClick={() => setConfirmAll(true)}>Delete all real calls</Button></div>}

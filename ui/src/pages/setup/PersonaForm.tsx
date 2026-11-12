@@ -34,7 +34,11 @@ export function PersonaForm({ detail, file, initial, onDone }: { detail: Profile
   const put = (path: string[], v: Json | undefined) => setDoc(setIn(doc, path, v));
   const voices = system?.models.piper_voices || [];
   const accents = system?.accents || [];
-  const accent = accents.find((a) => a.id === str(at("speech", "accent")));
+  const languages = system?.languages || [{ id: "en", name: "English", voices: [] }];
+  const lang = str(doc.language);
+  const langVoices = languages.find((l) => l.id === lang)?.voices || [];
+  const english = !lang || lang === "en";
+  const accent = english ? accents.find((a) => a.id === str(at("speech", "accent"))) : undefined;
 
   const save = async () => {
     const id = str(doc.id) || slug(str(doc.description).split(/[.,]/)[0] || "caller");
@@ -57,7 +61,17 @@ export function PersonaForm({ detail, file, initial, onDone }: { detail: Profile
       <Block title={file ? `Persona ${str(doc.id)}` : "New persona"} sub="Who calls. One scenario can be run with different personas.">
         <Grid>
           <Field label="Id" hint="Short name scenarios use, e.g. anxious-elderly."><Text id="persona-id" mono value={str(doc.id)} disabled={!!file} onChange={(v) => put(["id"], slug(v))} /></Field>
-          <Field label="Language"><Select value={str(doc.language) || "en"} options={[["en", "English"]]} onChange={(v) => put(["language"], v === "en" ? undefined : v)} /></Field>
+          <Field label="Language" hint="The language this caller speaks. Not set: the agent's own language (Set up › Connection).">
+            <Select id="persona-language" value={lang} placeholder="The agent's language" options={languages.map((l) => [l.id, l.name] as [string, string])} onChange={(v) => {
+              // An English accent or voice can't speak another language: drop them when switching away.
+              let next = setIn(doc, ["language"], v || undefined);
+              if (v && v !== "en") {
+                next = setIn(next, ["speech", "accent"], undefined);
+                if (!str(getIn(next, ["speech", "tts_voice"])).startsWith(`${v}_`)) next = setIn(next, ["speech", "tts_voice"], undefined);
+              }
+              setDoc(next);
+            }} />
+          </Field>
         </Grid>
         <Field label="Who they are" hint="One or two plain sentences; the simulated caller plays this person.">
           <Area id="persona-description" value={str(doc.description)} onChange={(v) => put(["description"], v)} rows={2}
@@ -72,13 +86,14 @@ export function PersonaForm({ detail, file, initial, onDone }: { detail: Profile
       </Block>
       <Block title="Voice" sub="Voice runs only. An accent picks a matching voice; a voice chosen here wins over it.">
         <Grid cols={3}>
-          <Field label="Accent" hint="Tests the agent's speech recognition. Downloaded on first use.">
-            <Select id="persona-accent" value={str(at("speech", "accent"))} placeholder="No accent set"
+          <Field label="Accent" hint={english ? "Tests the agent's speech recognition. Downloaded on first use." : "Accents are English voices, so a caller speaking another language doesn't use one."}>
+            <Select id="persona-accent" value={str(at("speech", "accent"))} placeholder="No accent set" disabled={!english}
               options={accents.map((a) => [a.id, a.label] as [string, string])} onChange={(v) => put(["speech", "accent"], v || undefined)} />
           </Field>
-          <Field label="Voice (Piper)" hint={accent ? `From the accent: ${accent.voice}` : "Downloaded on first use."}>
-            <Select value={str(at("speech", "tts_voice"))} placeholder={accent ? "From the accent" : "Default voice"} onChange={(v) => put(["speech", "tts_voice"], v || undefined)}
-              options={[...new Set([...voices, "en_US-amy-medium", "en_US-ryan-medium", "en_GB-alan-medium", "en_GB-jenny_dioco-medium"])]} />
+          <Field label="Voice (Piper)" hint={accent ? `From the accent: ${accent.voice}` : !english ? `A ${languages.find((l) => l.id === lang)?.name || lang} voice. Downloaded on first use.` : "Downloaded on first use."}>
+            <Select value={str(at("speech", "tts_voice"))} placeholder={accent ? "From the accent" : !english && langVoices[0] ? `${langVoices[0].label} (default)` : "Default voice"} onChange={(v) => put(["speech", "tts_voice"], v || undefined)}
+              options={english ? [...new Set([...voices.filter((v) => v.startsWith("en_")), "en_US-amy-medium", "en_US-ryan-medium", "en_GB-alan-medium", "en_GB-jenny_dioco-medium"])]
+                : langVoices.map((v) => [v.id, v.label] as [string, string])} />
           </Field>
           <Field label="Speaking speed" hint="1 = normal, 1.3 = fast."><Num value={at("speech", "speaking_rate") as number} step={0.1} min={0.5} max={2} placeholder={1}
             onChange={(v) => put(["speech", "speaking_rate"], v)} /></Field>

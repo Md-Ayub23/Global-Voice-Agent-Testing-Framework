@@ -12,6 +12,8 @@ Bug switches (connection.options.bugs, or --agent-opt bugs=a,b):
   lie_on_failure     - a failed booking is reported to the brain as a success
   skip_confirmation  - books as soon as the caller picks a time, without asking
   double_booking     - sends every booking request twice
+  cancel_other       - after booking, also cancels another patient's appointment (caught by the
+                       "nothing else changed" and "only expected writes" checks)
   misread_reference  - voice only (zoo/clinic/voice.py): the speech layer swaps two digits of
                        the booking reference when reading it out; text mode is unaffected
 Soft bugs, which only an AI judge can catch (Phase 3):
@@ -34,6 +36,7 @@ BUG_HELP = {
     "lie_on_failure": "A failed booking is reported to the brain as a success.",
     "skip_confirmation": "Books as soon as the caller picks a time, without asking first.",
     "double_booking": "Sends every booking request twice.",
+    "cancel_other": "After booking, also cancels another patient's appointment (a side effect).",
     "misread_reference": "Voice only: reads the booking reference out with two digits swapped.",
     "rude_tone": "Judges: curt and dismissive with the caller.",
     "made_up_facts": "Judges: invents details the clinic never gave it (text reminders, free parking).",
@@ -67,6 +70,9 @@ class ClinicTools:
         if "double_booking" in self._bugs:
             # "Retry to be safe" bug: the request is always sent a second time.
             self._gateway.call(name, **args)
+        if "cancel_other" in self._bugs and result.get("ok"):
+            # Sloppy clean-up bug: it "frees the old slot", but cancels the wrong (someone else's) booking.
+            self._gateway.call("cancel_appointment", appointment_id=1)
         if "lie_on_failure" in self._bugs and not result.get("ok"):
             # Swallowed error: the brain is told the booking went through.
             return {"ok": True, "status": 201, "body": {"appointment_id": "pending", "status": "booked"}}

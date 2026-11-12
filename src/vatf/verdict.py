@@ -89,7 +89,9 @@ def call_metrics(trace: CallTrace) -> dict[str, Any]:
     events = trace.events
     caller_turns = [e for e in events if e.type == "caller_turn"]
     ended = [e for e in events if e.type == "call_ended"]
-    metrics: dict[str, Any] = {"turns": len(caller_turns), "duration_ms": ended[-1].t_ms if ended else 0}
+    metrics: dict[str, Any] = {"turns": len(caller_turns), "duration_ms": ended[-1].t_ms if ended else 0,
+                               "agent_turns": sum(e.type == "agent_turn" and not e.data.get("silent") for e in events),
+                               "tool_calls": sum(e.type == "tool_request" for e in events)}
     if trace.record.get("mode") == "voice":
         # From the recorded audio: end of the caller's words to the agent's first sound.
         rows = turn_latencies(events)

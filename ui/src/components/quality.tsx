@@ -4,7 +4,7 @@
 import { Tip } from "./feedback";
 import { Icon } from "./Icon";
 import { Card, CardHead, Chip, Table } from "./ui";
-import { cx, fmtMs, pct } from "../lib/format";
+import { cx, fmtMs, pct, plural } from "../lib/format";
 import type { Band, CallConditions, ConditionRow, MetricDef, MetricUnit, QualityRow, QualityValue } from "../lib/types";
 
 const BAND: Record<"good" | "warn" | "bad" | "none", [string, string, string]> = {
@@ -17,7 +17,7 @@ const BAND: Record<"good" | "warn" | "bad" | "none", [string, string, string]> =
 export function BandBadge({ band, blocks }: { band: Band; blocks?: boolean }) {
   const [cls, dot, word] = BAND[band || "none"];
   return (
-    <span className={cx("inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[12px] font-medium whitespace-nowrap", cls)}>
+    <span className={cx("inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[13px] font-medium whitespace-nowrap", cls)}>
       <i className={cx("size-1.5 rounded-full flex-none", dot)} />
       {word}{blocks && band === "bad" ? " · blocks" : ""}
     </span>
@@ -51,7 +51,7 @@ function detailLine(r: QualityRow): string {
   const d = r.detail || {};
   const parts = Object.entries(d).filter(([k]) => k !== "note").map(([k, v]) => `${v} ${DETAIL_WORDS[k] || k}`);
   if (d.note) parts.unshift(String(d.note));
-  return [`${r.calls} call(s)`, ...parts].join(" · ");
+  return [`${plural(r.calls, "call")}`, ...parts].join(" · ");
 }
 
 const TILES_SUB = "Read off each call's recording · bands are this agent's (Set up › Pass rules) · only a metric set to block can stop a release";
@@ -61,16 +61,16 @@ export function QualityTiles({ rows, sub = TILES_SUB }: { rows: QualityRow[]; su
       <CardHead level={2} title="Call quality" sub={sub} />
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(210px,1fr))]" id="quality-tiles">
         {rows.map((r) => (
-          <div key={r.id} data-metric={r.id} className="rounded-[10px] border border-line p-3.5 grid gap-1 min-w-0">
-            <div className="flex items-center gap-1.5 text-ink-2 text-[12.5px] font-semibold min-w-0">
+          <div key={r.id} data-metric={r.id} className="rounded-[12px] border border-line p-3.5 grid gap-1 min-w-0">
+            <div className="flex items-center gap-1.5 text-ink-2 text-[13px] font-semibold min-w-0">
               <span className="truncate">{r.title}</span>
               <Tip content={r.about}><span className="text-muted flex-none"><Icon name="info" size={12} /></span></Tip>
             </div>
             <div className="text-[22px] font-semibold tracking-[-.02em] tabular-nums leading-[1.2]">{fmtMetric(r.value, r.unit)}</div>
             <div className="flex items-center gap-2 flex-wrap"><BandBadge band={r.band} blocks={r.blocks} />
               {r.blocks && <Chip icon="flag">blocks</Chip>}</div>
-            <div className="text-muted text-[11.5px]">{bandWords(r)}</div>
-            <div className="text-muted text-[11.5px]">{detailLine(r)}</div>
+            <div className="text-muted text-[13px]">{bandWords(r)}</div>
+            <div className="text-muted text-[13px]">{detailLine(r)}</div>
           </div>
         ))}
       </div>
@@ -108,10 +108,10 @@ export function ConditionsTable({ rows }: { rows: ConditionRow[] }) {
 export function CallQuality({ quality, conditions, defs }: { quality: Record<string, QualityValue>; conditions?: CallConditions; defs: MetricDef[] }) {
   const known = defs.filter((d) => d.id in quality);
   return (
-    <Card className="animate-view-in" id="call-quality">
+    <Card  id="call-quality">
       <CardHead title="Call quality" sub="this call's own numbers and bands" />
       {conditions && (
-        <div className="mb-3 text-[12.5px] grid gap-1">
+        <div className="mb-3 text-[13px] grid gap-1">
           <div><span className="text-muted">Line and voice:</span> <b>{conditions.label}</b></div>
           {!!conditions.behaviours?.length && <div className="flex flex-wrap gap-1 items-center"><span className="text-muted">Caller:</span>
             {conditions.behaviours.map((b) => <Chip key={b}>{BEHAVIOUR[b] || b}</Chip>)}</div>}
@@ -123,8 +123,8 @@ export function CallQuality({ quality, conditions, defs }: { quality: Record<str
           return (
             <div key={d.id} className="py-2 flex items-center gap-3 min-w-0">
               <div className="flex-1 min-w-0">
-                <div className="text-[12.5px] font-semibold truncate">{d.title}</div>
-                <div className="text-muted text-[11.5px]">{q.never ? "the agent never checked in" : q.note ? String(q.note) : bandWords(d)}</div>
+                <div className="text-[13px] font-semibold truncate">{d.title}</div>
+                <div className="text-muted text-[13px]">{q.never ? "the agent never checked in" : q.note ? String(q.note) : bandWords(d)}</div>
               </div>
               <div className="tabular-nums text-[13px] font-semibold">{q.never ? "never" : fmtMetric(q.value, d.unit)}</div>
               <BandBadge band={q.band} />

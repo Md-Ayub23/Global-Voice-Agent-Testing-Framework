@@ -1,13 +1,13 @@
 // Test modes (src/vatf/modes.py) and the plain words of the release readiness report (src/vatf/readiness.py).
 import type { IconName } from "../components/Icon";
-import type { AreaStatus, Decision, Finding, ReadinessLevel, TestModeId } from "./types";
+import type { AreaStatus, Decision, Finding, ModeBrief, ReadinessLevel, TestModeId, TypeStatus } from "./types";
 
 export const MODE_ICON: Record<string, IconName> = {
   full: "play-circle", functional: "check-circle", timing: "clock", speech: "mic", safety: "shield",
   resilience: "bolt", load: "activity", regression: "compare", monitor: "phone",
 };
 export const MODE_TITLE: Record<TestModeId, string> = {
-  full: "Full check", functional: "Functional", timing: "Timing & turns", speech: "Speech & accents", safety: "Safety & security",
+  full: "Release check", functional: "Functional", timing: "Conversation & timing", speech: "Speech & accents", safety: "Safety",
   resilience: "Resilience", load: "Load & capacity", regression: "Regression", monitor: "Real calls",
 };
 export const modeTitle = (m: string | null | undefined) => MODE_TITLE[(m || "full") as TestModeId] || "Test run";
@@ -61,3 +61,24 @@ export const TONE_SOFT: Record<LevelTone, string> = {
   good: "bg-good-soft text-good", warn: "bg-warn-soft text-warn", bad: "bg-bad-soft text-bad", neutral: "bg-surface-3 text-ink-2",
 };
 export const TONE_BAR: Record<LevelTone, string> = { good: "bg-good", warn: "bg-warn", bad: "bg-bad", neutral: "bg-line-strong" };
+
+// The test types in the order the sidebar, Home and the Overview list them (the Release check and Real calls
+// are not test types of their own: the first combines them, the second lives under Results).
+export const TEST_TYPES: TestModeId[] = ["functional", "timing", "speech", "safety", "resilience", "load", "regression"];
+// Shorter names for tight spots (the Home grid's column heads).
+export const SHORT_TITLE: Partial<Record<TestModeId, string>> = { timing: "Timing", speech: "Speech" };
+
+// A test type's state (mode_status in src/vatf/web/data.py) in words, with its colour.
+export const TYPE_STATUS: Record<TypeStatus, { label: string; tone: LevelTone }> = {
+  passed: { label: "Passed", tone: "good" },
+  watch: { label: "Passed, with notes", tone: "good" },
+  failed: { label: "Failed", tone: "bad" },
+  evidence: { label: "Not enough evidence", tone: "warn" },
+  not_run: { label: "Not run", tone: "neutral" },
+  unavailable: { label: "Can't run yet", tone: "neutral" },
+};
+/** Short words for a test type that can't run: "Voice only" for a text agent, else "Needs set-up". */
+export function unavailableWords(m: Pick<ModeBrief, "why">): string {
+  return /voice/i.test(m.why || "") ? "Voice only" : /baseline/i.test(m.why || "") ? "No baseline" : "Needs set-up";
+}
+export const TONE_DOT: Record<LevelTone, string> = { good: "bg-good", warn: "bg-warn", bad: "bg-bad", neutral: "bg-line-strong" };

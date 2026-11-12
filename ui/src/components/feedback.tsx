@@ -18,7 +18,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const life = kind === "bad" ? 6000 : 3200;
     setItems((xs) => [...xs, { id, message, kind, leaving: false }]);
     setTimeout(() => setItems((xs) => xs.map((x) => (x.id === id ? { ...x, leaving: true } : x))), life);
-    setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), life + 350);
+    setTimeout(() => setItems((xs) => xs.filter((x) => x.id !== id)), life + 220);
   }, []);
   return (
     <ToastCtx.Provider value={toast}>
@@ -29,9 +29,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <div
               key={t.id}
               className={cx(
-                "px-3.5 py-2.5 rounded-[11px] shadow-pop font-medium text-[13px] max-w-[380px] animate-rise transition-opacity duration-300",
+                "px-3.5 py-2.5 rounded-[12px] shadow-pop font-medium text-[13px] max-w-[380px] animate-rise transition-[opacity,transform] duration-200 ease-out-soft",
                 t.kind === "bad" ? "bg-bad text-white" : "bg-ink text-bg",
-                t.leaving && "opacity-0",
+                t.leaving && "opacity-0 translate-y-1",
               )}
             >
               {t.message}
@@ -81,7 +81,7 @@ export function TooltipProvider({ children }: { children: ReactNode }) {
           role="tooltip"
           style={pos}
           className={cx(
-            "fixed z-50 pointer-events-none bg-surface text-ink border border-line shadow-pop rounded-[10px] px-2.5 py-2 text-[12.5px] max-w-[300px]",
+            "fixed z-50 pointer-events-none bg-surface text-ink border border-line shadow-pop rounded-[12px] px-2.5 py-2 text-[13px] max-w-[300px]",
             "transition-[opacity,transform] duration-100",
             tip ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1",
           )}

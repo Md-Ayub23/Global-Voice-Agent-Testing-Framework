@@ -40,10 +40,19 @@ properties:
           - DUPLICATE_ACTION  # same write done more than once
           - UNEXPECTED_ACTION # a write happened when none should
           - NOT_VERIFIED      # evidence missing (e.g. no backend access, probe error)
-      expected: {enum: [success, honest_failure, no_action]}
+      expected: {enum: [success, honest_failure, no_action, recover_or_honest]}
       said: {description: "What the agent told the caller.", enum: [success, failure, unclear, nothing]}
       said_text: {description: "The words that decided `said` (voice: as heard).", type: string}
-      said_heard_by: {description: "Voice: whose hearing decided `said`.", enum: [caller, second listen]}
+      said_heard_by: {description: "Whose hearing decided `said`. ai = the patterns could not tell and two AI models agreed.", enum: [caller, second listen, ai]}
+      ai_reading:
+        description: "When AI models read the agent's words (unclear to the patterns), what each answered."
+        type: object
+        properties:
+          said: {enum: [success, failure, unclear, nothing]}
+          agreed: {type: boolean}
+          readers: {type: array}
+      tool: {description: "The write tool this outcome follows.", type: string}
+      check_id: {type: string}
       did:
         type: object
         additionalProperties: false
@@ -54,6 +63,11 @@ properties:
       stored: {enum: [match, missing, wrong_values, duplicate, unknown]}
       result: {$ref: "#/$defs/result"}
       evidence: {type: array, items: {$ref: "#/$defs/evidence_ref"}}
+
+  more_outcomes:
+    description: The further steps of a task with several steps (scenario more_outcomes), each like `outcome`.
+    type: array
+    items: {$ref: "#/properties/outcome"}
 
   checks:
     type: array
@@ -96,6 +110,8 @@ properties:
     properties:
       turns: {type: integer}
       duration_ms: {type: integer}
+      agent_turns: {description: "Answers the agent gave (for the cost per reply).", type: integer}
+      tool_calls: {description: "Requests the agent made to the tools (for the cost per tool call).", type: integer}
       latency_ms: {description: "One value per timed agent turn (voice: only the turns that count).", type: array, items: {type: integer}}
       latency_turns:
         description: Voice mode. Every agent answer with its time and whether it counts toward the gate.
@@ -117,7 +133,7 @@ properties:
       quality:
         description: Phase 5 call quality metrics (src/vatf/metrics.py), each with its band for this call.
         type: object
-        propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, turns_to_goal, escalated, duration_s]}
+        propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, turns_to_goal, escalated, duration_s]}
         additionalProperties:
           type: object
           required: [value, band]

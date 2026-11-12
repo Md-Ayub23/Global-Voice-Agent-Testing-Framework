@@ -31,7 +31,10 @@ properties:
     description: Free text such as healthcare, trading, support. Used to pick rubrics and scenario packs.
     type: string
   languages:
-    description: BCP-47 language tags. Only "en" is supported for now.
+    description: >
+      BCP-47 language tags of the languages the agent speaks, first one first. Vocto's caller speaks
+      English ("en") and Tamil ("ta"); a caller speaks the agent's first language unless its persona
+      gives its own language.
     type: array
     minItems: 1
     items: {type: string, pattern: "^[a-z]{2}(-[A-Z]{2})?$"}
@@ -161,6 +164,18 @@ properties:
         description: 'rest only. Headers for every probe, e.g. {Authorization: "Bearer ${ACME_API_TOKEN}"}.'
         type: object
         additionalProperties: {type: string}
+      watch:
+        description: >
+          The tables copied right before and after each call, to catch changes the test didn't ask for
+          (the "nothing else changed" check). Left out: the tables the probes read. false turns it off.
+          rest: "GET /path" reads that return a whole collection.
+        oneOf:
+          - {type: boolean, const: false}
+          - {type: array, items: {type: string}}
+      watch_ignore:
+        description: Tables, or table.column, that may always change (audit logs, sessions, updated_at).
+        type: array
+        items: {type: string}
       probes:
         type: array
         items:
@@ -201,6 +216,12 @@ properties:
       message_field: {description: "http JSON answers: the text of one line when lines are objects.", type: string, default: message}
       settle_ms: {description: "Wait this long after the call before reading, so the last lines are flushed.", type: integer, minimum: 0, default: 500}
       max_lines: {type: integer, minimum: 1, default: 300}
+      heard_pattern:
+        description: >
+          Voice: a regular expression for the log lines in which the agent's speech recognition says
+          what it heard the caller say, e.g. "User said: (?P<text>.+)". The named group "text" (or the
+          first group) is the heard text; it is compared with the caller's words (metric caller_wer).
+        type: string
     allOf:
       - if: {properties: {source: {const: file}}, required: [source]}
         then: {required: [path]}
@@ -416,7 +437,7 @@ properties:
       Phase 5 call quality metrics (src/vatf/metrics.py): this agent's good and warn values, and whether a
       run value in the bad band blocks the release. Unset fields keep the framework's defaults.
     type: object
-    propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, turns_to_goal, escalated, duration_s]}
+    propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, turns_to_goal, escalated, duration_s]}
     additionalProperties:
       type: object
       additionalProperties: false
@@ -478,6 +499,13 @@ properties:
           blocks: {type: boolean, default: false}
           failed_points: {type: number, minimum: 0, default: 2}
           pass_drop_points: {type: number, minimum: 0, default: 20}
+      cost:
+        description: "The agent's cost per completed task and per call (needs costs prices): a change counts when it moved by more than increase_pct."
+        type: object
+        additionalProperties: false
+        properties:
+          blocks: {type: boolean, default: false}
+          increase_pct: {type: number, minimum: 0, default: 10}
 
   alerts:
     description: >
@@ -514,6 +542,19 @@ properties:
       conditions: {enum: [as_written, phone, noisy, hard], default: as_written}
       judges: {description: "Run the AI judges too (costs money on every check).", type: boolean, default: false}
       start_agent: {description: "Scheduled checks start the agent first (agent_process). Leave off for an agent that is already running.", type: boolean, default: false}
+
+  costs:
+    description: >
+      What the agent costs you to run (src/vatf/costs.py), for the cost per call and per completed task in
+      reports and when comparing two versions. Vocto can't see the agent's bills: enter your own prices.
+    type: object
+    additionalProperties: false
+    properties:
+      currency: {description: "USD, INR, EUR, GBP or any other code.", type: string, default: USD}
+      per_call: {description: "A fixed amount for every call.", type: number, minimum: 0}
+      per_minute: {description: "Every minute of a call, all in (phone line, speech, AI).", type: number, minimum: 0}
+      per_reply: {description: "Every answer the agent gives (an AI request per answer).", type: number, minimum: 0}
+      per_tool_call: {description: "Every request the agent makes to your systems.", type: number, minimum: 0}
 
   load:
     description: >
@@ -570,6 +611,14 @@ properties:
             properties:
               blocks: {type: boolean, default: false}
               pct: {type: number, minimum: 0, default: 50}
+          recovery:
+            description: "Spike: after the spike, the answer time p95 must be back within pct (or ms, whichever is more) of before it, with no more failed calls."
+            type: object
+            additionalProperties: false
+            properties:
+              blocks: {type: boolean, default: false}
+              pct: {type: number, minimum: 0, default: 25}
+              ms: {type: number, minimum: 0, default: 200}
           max_lag_ms: {description: "Vocto's own computer: event-loop lag p95 above this makes a stage untrustworthy (not enough evidence, never NO-GO).", type: number, minimum: 1, default: 100}
           min_calls: {description: "A stage needs this many finished calls to decide anything.", type: integer, minimum: 1, default: 3}
 

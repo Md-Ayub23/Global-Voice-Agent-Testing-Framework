@@ -70,7 +70,7 @@ function CheckList({ checks, onChange, ctx, needId, prefix }: { checks: Obj[]; o
   return (
     <div className="grid gap-2.5">
       {checks.map((c, i) => (
-        <div key={i} data-check={str(c.id) || `${prefix}${i + 1}`} className="grid gap-2.5 p-3 border border-line rounded-[10px] bg-surface-2/40">
+        <div key={i} data-check={str(c.id) || `${prefix}${i + 1}`} className="grid gap-2.5 p-3 border border-line rounded-[12px] bg-surface-2/40">
           <div className="flex items-center gap-2 flex-wrap">
             <Select className="w-auto min-w-[200px]" value={str(c.type)} onChange={(v) => setAt(i, "type", v)}
               options={Object.entries(CHECKS).map(([k, s]) => [k, s.label] as [string, string])} />
@@ -98,13 +98,26 @@ function CheckList({ checks, onChange, ctx, needId, prefix }: { checks: Obj[]; o
 
 const NOISES: [string, string][] = [["none", "None"], ["office", "Office"], ["street", "Street"], ["cafe", "Cafe (voices)"], ["car", "Car"], ["tv", "TV or radio"]];
 
-export function ScenarioForm({ detail, file, initial, onDone }: { detail: ProfileDetail; file: string | null; initial: Obj | null; onDone: (file?: string) => void }) {
+// A new case starts with what its test type needs: Timing and Speech are voice calls (a Speech case on a noisy
+// line, a Timing case with the caller cutting in once).
+function blankFor(pid: string, persona: string, testType?: string): Obj {
+  const base: Obj = {
+    id: "", title: "", profile: pid, ...(testType ? { test_type: testType } : {}), criticality: "critical", style: "simulated",
+    caller: { persona, goal: "", facts: {} },
+  };
+  if (testType === "timing") return { ...base, modes: ["voice"], audio: { barge_in: [{ agent_turn: 2, offset_ms: 700, say: "Sorry, one thing first.", stop_within_ms: 1000 }] } };
+  if (testType === "speech") return { ...base, modes: ["voice"], audio: { noise: "office", snr_db: 15 } };
+  return base;
+}
+
+export const CASE_TYPE_OPTIONS: [string, string][] = [
+  ["functional", "Functional"], ["timing", "Conversation & timing"], ["speech", "Speech & accents"], ["resilience", "Resilience"],
+];
+
+export function ScenarioForm({ detail, file, initial, onDone, testType }: { detail: ProfileDetail; file: string | null; initial: Obj | null; onDone: (file?: string) => void; testType?: string }) {
   const toast = useToast();
   const pid = str(detail.merged.id);
-  const blank: Obj = {
-    id: "", title: "", profile: pid, criticality: "critical", style: "simulated",
-    caller: { persona: detail.personas[0] || "", goal: "", facts: {} },
-  };
+  const blank = blankFor(pid, detail.personas[0] || "", testType);
   const [doc, setDoc] = useState<Obj>(initial || blank);
   const [saved, setSaved] = useState(JSON.stringify(initial || blank));
   const [busy, setBusy] = useState(false);
@@ -128,7 +141,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
 
   const save = async () => {
     const title = str(doc.title);
-    if (!title.trim()) { toast("Give the scenario a title", "bad"); return; }
+    if (!title.trim()) { toast("Give the test case a title", "bad"); return; }
     const id = str(doc.id) || `${pid}.${slug(title)}`;
     const target = file || `scenarios/${slug(id.replace(`${pid}.`, "")) || "scenario"}.yaml`;
     const out = { ...doc, id, profile: pid };
@@ -152,7 +165,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
 
   return (
     <Card>
-      <Block title={file ? str(doc.title) || file : "New scenario"} sub="One situation to test. Each scenario runs several times (repeats); critical ones must pass every time.">
+      <Block title={file ? str(doc.title) || file : "New test case"} sub="One situation to test. Each test case runs several times (repeats); critical ones must pass every time.">
         <Grid>
           <Field label="Title"><Text id="scenario-title" value={str(doc.title)} onChange={(v) => put(["title"], v)} placeholder="Customer cancels an order that has already shipped" /></Field>
           <Field label="Id" hint={file ? "Fixed once saved." : `Made from the title: ${pid}.<title>`}>
@@ -183,6 +196,10 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
             </div>
           </Field>
           <Field label="Repeats" hint="Empty: the profile's."><Num value={doc.repeats as number} min={1} onChange={(v) => put(["repeats"], v)} /></Field>
+          <Field label="Test type" hint="Which test type page lists and runs it.">
+            <Select id="scenario-test-type" value={str(doc.test_type)} options={CASE_TYPE_OPTIONS} placeholder="Placed by what it does"
+              onChange={(v) => put(["test_type"], v || undefined)} />
+          </Field>
         </div>
         <Field label="Tags (optional)"><Csv value={asList<string>(doc.tags)} onChange={(v) => put(["tags"], v.length ? v : undefined)} placeholder="booking, happy-path" /></Field>
       </Block>
@@ -209,13 +226,17 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
         {scripted && (
           <div className="grid gap-3">
             {turns.map((t, i) => (
-              <div key={i} className="grid gap-2.5 p-3 border border-line rounded-[10px]">
+              <div key={i} className="grid gap-2.5 p-3 border border-line rounded-[12px]">
                 <div className="flex items-center gap-2">
                   <Chip tone="caller">Line {i + 1}</Chip>
                   <span className="flex-1" />
                   <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove line" onClick={() => put(["turns"], turns.filter((_, j) => j !== i))} />
                 </div>
-                <Field label="Caller says"><Text value={str(t.caller)} onChange={(v) => put(["turns"], turns.map((x, j) => (j === i ? { ...x, caller: v } : x)))} /></Field>
+                <Field label={t.audio ? "What is said in the recording" : "Caller says"}><Text value={str(t.caller)} onChange={(v) => put(["turns"], turns.map((x, j) => (j === i ? { ...x, caller: v } : x)))} /></Field>
+                {(!modes.length || modes.includes("voice")) && (
+                  <Recording project={detail.project} path={str(t.audio)} line={i + 1}
+                    onChange={(p) => put(["turns"], turns.map((x, j) => (j === i ? { ...x, audio: p || undefined } as Obj : x)))} />
+                )}
                 <Field label="Then check the agent's reply">
                   <CheckList checks={asList<Obj>(t.expect)} ctx={ctx} needId={false} prefix={`turn${i + 1}.`}
                     onChange={(c) => put(["turns"], turns.map((x, j) => (j === i ? { ...x, expect: c.length ? c : undefined } as Obj : x)))} />
@@ -223,7 +244,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
               </div>
             ))}
             <div><Button size="sm" icon="plus" onClick={() => put(["turns"], [...turns, { caller: "" }])}>Add line</Button></div>
-            <div className="grid gap-2.5 p-3 border border-dashed border-line-strong rounded-[10px]">
+            <div className="grid gap-2.5 p-3 border border-dashed border-line-strong rounded-[12px]">
               <Check checked={doc.follow_up !== false} onChange={(on) => put(["follow_up"], on ? undefined : false)}
                 label="Then Claude carries on the call"
                 hint="Live runs: after these lines, Claude listens to the agent and keeps going, the way a real caller would, for up to the turns set in Test settings. Dry runs always end with the lines." />
@@ -250,6 +271,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
                 <Select value={str(outcome.expected)} onChange={(v) => put(["outcome", "expected"], v)} options={[
                   ["success", "Success: the action happens and the agent says so"],
                   ["honest_failure", "Honest failure: it can't succeed, and the agent must say so"],
+                  ["recover_or_honest", "Recovers or is honest: a tool fails once; done on a retry or an honest no, never a false claim or a duplicate"],
                   ["no_action", "No action: nothing may be written"]]} />
               </Field>
               <Field label="The action (a write tool)"><Select value={str(getIn(outcome, ["action", "tool"]))} options={ctx.writeTools} placeholder="Pick a write tool" onChange={(v) => put(["outcome", "action", "tool"], v)} /></Field>
@@ -276,8 +298,45 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
                 <StrList mono value={asList<string>(getIn(outcome, ["claim", "failure_patterns"]))} onChange={(v) => put(["outcome", "claim", "failure_patterns"], v)} />
               </Field>
             </Grid>
+            <Field label="Further steps of the task" hint="A task with several actions (book a table and add a note): each step is checked like the first, with what the agent said after it.">
+              <div className="grid gap-2">
+                {asList<Obj>(doc.more_outcomes).map((o, i) => {
+                  const steps = asList<Obj>(doc.more_outcomes);
+                  const setStep = (patch: Obj | null) => {
+                    const next = steps.map((x, j) => (j === i ? patch : x)).filter(Boolean) as Obj[];
+                    put(["more_outcomes"], next.length ? next : undefined);
+                  };
+                  return (
+                    <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[12px]" data-step={i + 2}>
+                      <Field label={`Step ${i + 2}: tool`}><Select value={str(getIn(o, ["action", "tool"]))} options={ctx.writeTools} placeholder="Pick a write tool"
+                        onChange={(v) => setStep({ ...o, action: { ...asObj(o.action), tool: v } })} /></Field>
+                      <Field label="Expected"><Select value={str(o.expected)} onChange={(v) => setStep({ ...o, expected: v })}
+                        options={[["success", "Success"], ["honest_failure", "Honest failure"], ["no_action", "No action"], ["recover_or_honest", "Recovers or is honest"]]} /></Field>
+                      <Field label="Record (probe)"><Select value={str(getIn(o, ["record", "probe"]))} options={ctx.probes} placeholder="No backend check"
+                        onChange={(v) => { const { record: _r, ...rest } = o; setStep(v ? { ...rest, record: { ...asObj(o.record), probe: v } } : rest); }} /></Field>
+                      <Button size="sm" variant="ghost" iconOnly icon="x" aria-label={`Remove step ${i + 2}`} onClick={() => setStep(null)} />
+                    </div>
+                  );
+                })}
+                <div><Button size="sm" icon="plus" onClick={() => put(["more_outcomes"], [...asList<Obj>(doc.more_outcomes), {
+                  expected: "success", action: { tool: ctx.writeTools[0] || "" }, claim: asObj(outcome.claim) }])}>Add a step</Button></div>
+              </div>
+            </Field>
+            <Grid>
+              <Field label="Other write tools this test allows" hint="Using any other write tool is a finding (a tool this test doesn't expect).">
+                <StrList mono value={asList<string>(doc.allow_tools)} onChange={(v) => put(["allow_tools"], v.length ? v : undefined)} placeholder="add_note" />
+              </Field>
+              <Field label="Tables this test may change" hint="Vocto compares the watched tables before and after each call; changes here are never a finding.">
+                <StrList mono value={asList<string>(doc.allow_changes)} onChange={(v) => put(["allow_changes"], v.length ? v : undefined)} placeholder="audit_log" />
+              </Field>
+            </Grid>
           </>
         ) : <Help>No business action: only the checks below are used.</Help>}
+      </Block>
+
+      <Block title="The right answer (optional)" sub="For a question with one right answer: opening hours, a price, a policy. The AI judges check the agent's reply agrees with it, in any words.">
+        <Area id="scenario-expected-answer" rows={2} value={str(doc.expected_answer)} onChange={(v) => put(["expected_answer"], v.trim() ? v : undefined)}
+          placeholder="We're open 9am to 6pm Monday to Saturday, closed on Sundays." />
       </Block>
 
       <Block title="Checks" sub="Hard checks on the whole call. Each one cites the events it rests on.">
@@ -296,9 +355,9 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
         <Field label="Faults" hint="Honesty under failure: the tool breaks and the agent must not pretend it worked.">
           <div className="grid gap-2">
             {faults.map((f, i) => (
-              <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[10px]">
+              <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[12px]">
                 <Field label="Tool"><Select value={str(f.tool)} options={ctx.tools} placeholder="Pick" onChange={(v) => setFault(i, "tool", v)} /></Field>
-                <Field label="Fault"><Select value={str(f.type)} onChange={(v) => setFault(i, "type", v)} options={[["timeout", "Times out"], ["http_error", "HTTP error"], ["slow", "Slow"], ["malformed_response", "Garbled answer"]]} /></Field>
+                <Field label="Fault"><Select value={str(f.type)} onChange={(v) => setFault(i, "type", v)} options={[["timeout", "Times out"], ["http_error", "HTTP error"], ["slow", "Slow"], ["malformed_response", "Garbled answer"], ["rate_limited", "Too many requests (429)"], ["auth_expired", "Login expired (401)"]]} /></Field>
                 <Field label="On call no." className="w-[110px]"><Num value={f.on_call as number} min={1} placeholder="every" onChange={(v) => setFault(i, "on_call", v)} /></Field>
                 {f.type === "http_error" && <Field label="Status" className="w-[100px]"><Num value={f.status as number} placeholder={500} onChange={(v) => setFault(i, "status", v)} /></Field>}
                 {(f.type === "slow" || f.type === "timeout") && <Field label="Delay (ms)" className="w-[120px]"><Num value={f.delay_ms as number} placeholder={10000} onChange={(v) => setFault(i, "delay_ms", v)} /></Field>}
@@ -328,7 +387,7 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
           <Field label="Caller cuts in">
             <div className="grid gap-2">
               {barge.map((b, i) => (
-                <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[10px]">
+                <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[12px]">
                   <Field label="Agent's turn no." className="w-[120px]"><Num value={b.agent_turn as number} min={1} onChange={(v) => setBarge(i, "agent_turn", v)} /></Field>
                   <Field label="After (ms)" className="w-[110px]"><Num value={b.offset_ms as number} min={0} onChange={(v) => setBarge(i, "offset_ms", v)} /></Field>
                   <Field label="Caller says" className="flex-1 min-w-[180px]"><Text value={str(b.say)} onChange={(v) => setBarge(i, "say", v)} /></Field>
@@ -345,5 +404,37 @@ export function ScenarioForm({ detail, file, initial, onDone }: { detail: Profil
       <Problems items={problems} title="Not saved. Problems to fix:" />
       <SaveBar id="save-scenario" dirty={dirty || !file} busy={busy} onSave={() => void save()} onRevert={() => onDone()} revertLabel="Back to the list" />
     </Card>
+  );
+}
+
+// A scripted line played from a recording of a real caller (voice runs), instead of Vocto's voice.
+function Recording({ project, path, line, onChange }: { project: string; path: string; line: number; onChange: (path: string) => void }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const id = `recording-${line}`;
+  const upload = async (f: File | undefined) => {
+    if (!f) return;
+    setBusy(true);
+    try {
+      const r = await setupApi.uploadRecording(project, f);
+      onChange(r.path);
+      toast(`Recording added (${r.seconds} s). Save the test case to keep it.`);
+    } catch (e) { toast((e as Error).message, "bad"); } finally { setBusy(false); }
+  };
+  return (
+    <Field label="Recording (optional, voice runs)" hint="Play this line from a recording of a real caller instead of Vocto's voice: a WAV file (16-bit, up to 60 s) of someone saying the line above. Real voices, accents and noise test the agent's hearing. Use recordings only with the speaker's consent.">
+      {path ? (
+        <div className="flex flex-wrap items-center gap-2.5" data-recording={path}>
+          <audio controls preload="none" src={setupApi.recordingUrl(project, path)} className="h-8 max-w-full" />
+          <span className="font-mono text-[13px] text-muted">{path}</span>
+          <Button size="sm" variant="ghost" icon="x" onClick={() => onChange("")}>Use Vocto's voice</Button>
+        </div>
+      ) : (
+        <div>
+          <input id={id} type="file" accept=".wav,audio/wav,audio/x-wav" className="hidden" onChange={(e) => { void upload(e.target.files?.[0]); e.target.value = ""; }} />
+          <Button size="sm" icon="mic" disabled={busy} onClick={() => document.getElementById(id)?.click()}>{busy ? "Adding…" : "Add a recording"}</Button>
+        </div>
+      )}
+    </Field>
   );
 }

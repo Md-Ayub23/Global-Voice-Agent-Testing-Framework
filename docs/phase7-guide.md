@@ -55,6 +55,7 @@ load:
     slowdown:  {blocks: false, pct: 50, ms: 300}
     pass_drop: {blocks: false, points: 20}
     drift:     {blocks: false, pct: 50}
+    recovery:  {blocks: false, pct: 25, ms: 200}   # spike: back to normal speed after the rush
     max_lag_ms: 100     # Vocto's own lag: above it a stage is "not enough evidence"
     min_calls: 3
 ```
@@ -72,8 +73,13 @@ Every stage runs at or below the target, so every stage must meet the limits:
 - **Not enough evidence** when a stage had fewer than `min_calls` finished calls, when Vocto's own
   computer fell behind (lag p95 over `max_lag_ms`) or when more than 10% of calls failed because of
   Vocto itself. It never blames the agent for Vocto's limits.
-- Slowdown (top level against the lowest), pass drop and soak drift are warnings; switch Blocks on
-  to make them NO-GO too.
+- **Recovery after a spike**: Vocto compares the agent's answer times after the rush with the ones
+  before it. "Normal" is the p95 before the spike plus `pct` percent of it or `ms`, whichever is more.
+  The agent has recovered once 3 answers in a row are back at normal speed and they stay there (p95 of
+  the answers from then on), with no more failed calls than before. The report shows how many seconds
+  that took (*Recovery after the spike*); if it never got back, it says so and why.
+- Slowdown (top level against the lowest), pass drop, soak drift and recovery are warnings; switch
+  Blocks on to make them NO-GO too.
 - **Capacity** is the highest level (calls at once) where every stage at that level and below met
   the limits; the report also names where it broke and why.
 

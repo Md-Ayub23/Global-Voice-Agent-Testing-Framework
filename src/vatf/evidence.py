@@ -19,7 +19,8 @@ from .util import mask_token, read_json, sha256_file, write_json
 
 # Free-text fields that may hold spoken personal data, per event type.
 TEXT_FIELDS = {"caller_turn": ("text",), "agent_turn": ("heard_text", "platform_transcript"),
-               "stt_text": ("text",), "platform_event": ("text",)}
+               "stt_text": ("text",), "platform_event": ("text",),
+               "agent_heard": ("text",)}
 
 
 def utc_now() -> str:
@@ -191,7 +192,7 @@ def _mask_event(e: TraceEvent, profile: Mapping[str, Any], salt: str,
         for p in profile.get("pii", {}).get("mask_patterns", []):
             text = re.sub(p["regex"], f"[{p['name']}]", text)
         data[field] = text
-    if e.type in ("tool_request", "tool_response", "probe_result"):
+    if e.type in ("tool_request", "tool_response", "probe_result", "state_diff"):
         data = _mask_keys(data, pii_keys(profile), salt)
     return TraceEvent(e.seq, e.t_ms, e.source, e.type, data, e.turn)
 

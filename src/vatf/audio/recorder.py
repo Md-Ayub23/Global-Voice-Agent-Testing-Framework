@@ -121,9 +121,13 @@ class Line:
     """
 
     def __init__(self, recorder: Recorder, send: Callable[[np.ndarray], Awaitable[None]],
-                 noise: np.ndarray | None = None, effects=None):
+                 noise: np.ndarray | None = None, effects=None, network=None):
         self.rec = recorder
         self._fx = effects if effects is not None and effects.active else None   # audio/line.py LineEffects
+        self._net = network if network is not None and network.active else None  # audio/line.py NetworkJitter
+        self._wire: asyncio.Queue | None = None
+        self._sender: asyncio.Task | None = None
+        self._held: np.ndarray | None = None       # a frame waiting to go out after the next (reordered)
         self._send = send
         self._noise = noise
         self.frame = recorder.sr * FRAME_MS // 1000
@@ -138,6 +142,9 @@ class Line:
         self.next_sample = self.rec.now_sample() // self.frame * self.frame + self.frame
         self.speech_end = self.next_sample
         self._task = asyncio.create_task(self._run())
+        if self._net is not None:
+            self._wire = asyncio.Queue()
+            self._sender = asyncio.create_task(self._send_late())
 
     def speak(self, clip: np.ndarray) -> tuple[int, int]:
         """Queue an utterance right after anything already queued. Returns its (start, end) samples."""
@@ -168,6 +175,35 @@ class Line:
                     x = self._fx.process(x)        # the phone line: what the agent really receives
                 self.rec.caller.write(start, x)
                 self.next_sample = start + self.frame
+                if self._net is not None:
+                    self._post(x, due)
+                else:
+                    await self._send(x)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as e:  # the connection dropped: the call loop sees it via .error
+            self.error = e
+
+    def _post(self, x: np.ndarray, due: float) -> None:
+        """An unsteady network: the frame goes on the wire to arrive later (and maybe after the next)."""
+        if self._held is not None:
+            frames, self._held = [x, self._held], None      # the held frame goes out after this one
+        elif self._net.swap():
+            self._held = x
+            return
+        else:
+            frames = [x]
+        at = self._net.arrival(due)
+        for f in frames:
+            self._wire.put_nowait((at, f))
+
+    async def _send_late(self) -> None:
+        try:
+            while True:
+                at, x = await self._wire.get()
+                delay = at - self.rec.clock()
+                if delay > 0:
+                    await asyncio.sleep(delay)
                 await self._send(x)
         except asyncio.CancelledError:
             raise
@@ -191,13 +227,15 @@ class Line:
         return x
 
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except (asyncio.CancelledError, Exception):
-                pass
-            self._task = None
+        for name in ("_task", "_sender"):
+            task = getattr(self, name)
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):
+                    pass
+                setattr(self, name, None)
 
 
 _timer_set = False

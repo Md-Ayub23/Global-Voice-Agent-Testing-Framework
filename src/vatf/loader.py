@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -40,9 +41,26 @@ def schema_validator(name: str) -> Draft202012Validator:
     return validator
 
 
+_schema_results: dict[tuple[str, int, str], list[str]] = {}
+
+
 def schema_errors(name: str, doc: Any) -> list[str]:
-    errors = sorted(schema_validator(name).iter_errors(doc), key=lambda e: list(e.path))
-    return [f"{'/'.join(map(str, e.path)) or '(top)'}: {e.message}" for e in errors]
+    """The document's schema problems. The same documents are checked on every page load (dozens of
+    generated safety scenarios per agent), so a result is remembered for that exact content and schema."""
+    validator = schema_validator(name)
+    try:
+        key = (name, id(validator), json.dumps(doc, sort_keys=True, default=repr))
+    except (TypeError, ValueError):
+        key = None
+    if key is not None and key in _schema_results:
+        return list(_schema_results[key])
+    errors = sorted(validator.iter_errors(doc), key=lambda e: list(e.path))
+    out = [f"{'/'.join(map(str, e.path)) or '(top)'}: {e.message}" for e in errors]
+    if key is not None:
+        if len(_schema_results) > 5000:
+            _schema_results.clear()
+        _schema_results[key] = out
+    return list(out)
 
 
 @dataclass
@@ -66,8 +84,30 @@ class Project:
         return clone
 
 
+# libyaml's parser when PyYAML has it (it does in the usual wheels): the same documents, several times faster.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+_yaml_cache: dict[str, tuple[int, int, Any]] = {}
+
+
+def read_yaml(path: Path) -> Any:
+    """A YAML file's contents, parsed once and again only when the file changes. The pages read the same
+    project files on every request, so this keeps them quick. Callers get their own copy to change freely."""
+    st = path.stat()
+    key = str(path.absolute())
+    hit = _yaml_cache.get(key)
+    if hit and hit[0] == st.st_mtime_ns and hit[1] == st.st_size:
+        return copy.deepcopy(hit[2])
+    text = path.read_text(encoding="utf-8")
+    try:
+        doc = yaml.load(text, Loader=_YAML_LOADER)
+    except yaml.YAMLError:
+        doc = yaml.safe_load(text)  # the same error, worded the usual way
+    _yaml_cache[key] = (st.st_mtime_ns, st.st_size, doc)
+    return copy.deepcopy(doc)
+
+
 def _load_yaml(path: Path) -> Any:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    return read_yaml(path)
 
 
 def merge(base: Any, over: Any) -> Any:
@@ -169,11 +209,16 @@ def _reference_problems(sc, profile, personas, tools, probes) -> list[str]:
                 out.append(f"entity {name!r} is not a caller fact")
         if c.get("type") == "judge" and c.get("rubric") and not c.get("intent") and c["rubric"] not in known_items:
             out.append(f"judge check uses unknown rubric item {c['rubric']!r} (give intent: for a one-off question)")
-    out_block = sc.get("outcome")
-    if out_block:
+    blocks = ([sc["outcome"]] if sc.get("outcome") else []) + list(sc.get("more_outcomes") or [])
+    if sc.get("more_outcomes") and not sc.get("outcome"):
+        out.append("more_outcomes needs an outcome first")
+    for out_block in blocks:
         action = out_block["action"]["tool"]
         if tools.get(action, {}).get("effect") != "write":
             out.append(f"outcome action {action!r} is not a write tool")
         if "record" in out_block and out_block["record"]["probe"] not in probes:
             out.append(f"outcome uses unknown probe {out_block['record']['probe']!r}")
+    for name in sc.get("allow_tools") or []:
+        if name not in tools:
+            out.append(f"allow_tools names unknown tool {name!r}")
     return out

@@ -22,6 +22,11 @@ properties:
     enum: [critical, normal, exploratory]
   repeats: {description: "Overrides the profile's repeats.", type: integer, minimum: 1}
   style: {enum: [simulated, scripted]}
+  test_type:
+    description: >
+      The test type this case belongs to (its page in the dashboard). Left out, it is placed by what the case
+      does: a broken tool is resilience, cutting in or silence is timing, a hard line is speech, else functional.
+    enum: [functional, timing, speech, resilience]
   modes:
     description: Which runs include this scenario. Default both; barge-in and noise tests need voice.
     type: array
@@ -92,7 +97,14 @@ properties:
       additionalProperties: false
       required: [caller]
       properties:
-        caller: {type: string}
+        caller: {description: "The caller's line. With a recording, what is said in it.", type: string}
+        audio:
+          description: >
+            Voice runs: play this line from a recording of a real caller instead of Vocto's synthetic voice
+            (a 16-bit WAV file inside the agent's folder, e.g. recordings/booking-1.wav, at most 60 s).
+            Text runs send the caller text. Use recordings only with the speaker's consent.
+          type: string
+          pattern: "^[^/\\\\].*\\.(wav|WAV)$"
         expect:
           type: array
           items: {$ref: "#/$defs/check"}
@@ -115,6 +127,8 @@ properties:
         properties:
           codec: {description: "phone = band-limited 300-3400 Hz and G.711 mu-law, like a phone call.", enum: [none, phone], default: none}
           packet_loss_pct: {description: "Share of 20 ms frames lost on the way, in short bursts.", type: number, minimum: 0, maximum: 50, default: 0}
+          jitter_ms: {description: "An unsteady network: the spread of the audio's delay, so it arrives in bursts with gaps.", type: number, minimum: 0, maximum: 500, default: 0}
+          reorder_pct: {description: "An unsteady network: share of 20 ms frames that arrive after the next one.", type: number, minimum: 0, maximum: 20, default: 0}
       barge_in:
         type: array
         items:
@@ -132,6 +146,44 @@ properties:
     description: >
       The outcome check (said vs did vs stored). Optional for scenarios with no business action.
       `expected` says which outcome counts as a pass.
+    $ref: "#/$defs/outcome"
+  more_outcomes:
+    description: >
+      Tasks with several steps (book a table AND add a note; cancel one booking and make another):
+      each further action, with its own record and expected result, is checked like `outcome`.
+      What the agent says is read from its replies after that action's write call.
+    type: array
+    items: {$ref: "#/$defs/outcome"}
+  expected_answer:
+    description: >
+      For a question with one right answer (opening hours, a price, a policy): the answer the agent should
+      give, in your words. The AI judges compare the agent's reply with it (same facts, any wording).
+    type: string
+  allow_changes:
+    description: Tables this test may change in any way (the "nothing else changed" check skips them).
+    type: array
+    items: {type: string}
+  allow_tools:
+    description: Write tools the agent may also use on this call without it counting as a wrong tool.
+    type: array
+    items: {type: string}
+
+  checks:
+    description: Hard checks and judge items for the whole call.
+    type: array
+    items:
+      allOf:
+        - {$ref: "#/$defs/check"}
+        - {required: [id]}
+
+allOf:
+  - if: {properties: {style: {const: simulated}}}
+    then: {required: [caller], properties: {caller: {required: [persona, goal, facts]}}}
+  - if: {properties: {style: {const: scripted}}}
+    then: {required: [turns]}
+
+$defs:
+  outcome:
     type: object
     additionalProperties: false
     required: [expected, action]
@@ -141,7 +193,9 @@ properties:
           success - the action should happen and the agent should say so.
           honest_failure - the action cannot succeed (e.g. injected fault) and the agent must say so.
           no_action - nothing should be written.
-        enum: [success, honest_failure, no_action]
+          recover_or_honest - a tool fails once on purpose: the agent may succeed on a retry or say honestly
+          that it couldn't; a false claim or a duplicate fails (Resilience failure drills).
+        enum: [success, honest_failure, no_action, recover_or_honest]
       action:
         type: object
         additionalProperties: false
@@ -163,30 +217,15 @@ properties:
         description: >
           How to tell what the agent told the caller about the result. With patterns,
           a final agent reply that matches neither list, or both, counts as "unclear",
-          and the outcome becomes NOT_VERIFIED (never PASS). The judge method (Phase 3)
-          is only asked about unclear replies.
+          is read by two AI models; when they agree, that is what the agent said (marked "read by AI"),
+          otherwise the outcome stays NOT_VERIFIED (never PASS). judge: no patterns, the AI models read
+          every reply.
         type: object
         additionalProperties: false
         properties:
           method: {enum: [patterns, judge], default: patterns}
           success_patterns: {type: array, items: {type: string}}
           failure_patterns: {type: array, items: {type: string}}
-
-  checks:
-    description: Hard checks and judge items for the whole call.
-    type: array
-    items:
-      allOf:
-        - {$ref: "#/$defs/check"}
-        - {required: [id]}
-
-allOf:
-  - if: {properties: {style: {const: simulated}}}
-    then: {required: [caller], properties: {caller: {required: [persona, goal, facts]}}}
-  - if: {properties: {style: {const: scripted}}}
-    then: {required: [turns]}
-
-$defs:
   fault:
     type: object
     additionalProperties: false
@@ -194,15 +233,21 @@ $defs:
     properties:
       tool: {type: string}
       on_call: {description: "Which call to this tool to break (1 = first). Omit for every call.", type: integer, minimum: 1}
-      type: {enum: [timeout, http_error, slow, malformed_response]}
+      type:
+        description: >
+          timeout (no answer), http_error (status, default 500), slow (answers after delay_ms),
+          malformed_response (rubbish), rate_limited (429 "too many requests", retry_after_s),
+          auth_expired (401 "token expired").
+        enum: [timeout, http_error, slow, malformed_response, rate_limited, auth_expired]
       status: {description: "For http_error.", type: integer}
+      retry_after_s: {description: "For rate_limited: when the tool says to try again (default 2).", type: integer, minimum: 0}
       delay_ms: {description: "For slow and timeout.", type: integer}
       forward:
         description: >
           If true the request still reaches the backend before the fault is returned
-          (e.g. the booking was saved but the agent sees a timeout).
+          (e.g. the booking was saved but the agent sees a timeout). Default false, except for
+          malformed_response, which reaches the backend unless this is false. slow always does.
         type: boolean
-        default: false
 
   check:
     type: object

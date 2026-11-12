@@ -4,6 +4,7 @@ evaluate, decide and write the report."""
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -11,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import modes
+from . import claimread, modes, recordings, statewatch
 from .attacks import is_safety
 from .calibration import calibration
 from .caller import LLMCaller, LLMValidator, RuleCaller, ScriptedCaller, ScriptThenLLM, follow_up_scenario
@@ -25,9 +26,9 @@ from .llm import DEFAULT_MODEL
 from .gateway import GatewayError, ToolGateway, gateway_address, uses_gateway
 from .judges import JudgePanel, judge_settings, skipped
 from .loader import Project, ProjectError
-from .logs import LogCollector
+from .logs import LogCollector, heard_in_log
 from .metrics import call_quality, with_bands
-from .outcome import evaluate_outcome
+from .outcome import claim_question, evaluate_more, evaluate_outcome
 from .probe import BackendProbe, ProbeSetupError, load_fixtures
 from .proxy import InProcessToolProxy
 from .report import write_report
@@ -69,11 +70,15 @@ class RunConfig:
     judges: bool = True                           # False (--no-judges): skip the AI judges for this run
     safety: bool = False                          # True (--safety): add the built-in safety tests (attacks.py)
     conditions: str = "as_written"                # voice: caller conditions preset over every test (conditions.py)
+    sweep: tuple[str, ...] = ()                   # voice, Speech mode: run every test once under each of these conditions
+    drills: tuple[str, ...] = ()                  # Resilience: run every test again with its write tool failing (drills.py)
+    ab: dict[str, Any] | None = None              # A/B test: {group, side A|B, label}, recorded in run.json
     baseline: str = "auto"                        # Phase 6: auto (the agent's saved baseline), none, or a snapshot file
     trigger: str = "manual"                       # manual | ci | health: how the run was started (shown and alerted)
     caller: str = "claude"                        # Phase 7 load tests: free = scripted lines / rule-based caller, no Claude
     fixtures_once: bool = False                   # Phase 7: test data loaded once before the calls, not before each call
     test_mode: str | None = None                  # modes.py: functional, timing, speech, safety, resilience, regression, full
+    language: str | None = None                   # every caller speaks this language (languages.py); None = each caller's own
 
 
 class Orchestrator:
@@ -105,6 +110,8 @@ class Orchestrator:
                   # Adaptive attackers need the Claude caller: not in a free dry run.
                   and not (self.config.offline and "adaptive" in s.get("tags", []))]
         chosen = [s for s in chosen if not is_safety(s)]
+        if self.config.test_mode == "resilience" and self.config.drills:
+            return self._drill_scenarios(chosen)
         if self.config.test_mode:
             # A test mode picks its own tests (modes.select); picked ids narrow them further.
             pool = modes.select(self.config.test_mode, chosen, safety, self.config.safety)
@@ -124,6 +131,30 @@ class Orchestrator:
             return picked + [s for s in safety if self.config.safety and s not in picked]
         return chosen + (safety if self.config.safety else [])
 
+    def _drill_scenarios(self, own: list[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+        """Resilience with failure drills: the picked test cases (all, if none picked) that break a tool
+        themselves, then each drillable one again per failure. The drills join the project's scenarios
+        so they are found by id like any test."""
+        from . import drills
+
+        bad = [d for d in self.config.drills if d not in drills.FAILURES]
+        if bad:
+            raise RunSetupError(f"unknown failure(s) {', '.join(bad)} (use {', '.join(drills.FAILURES)})")
+        own = [s for s in own if drills.DRILL_TAG not in (s.get("tags") or [])]   # drills made by an earlier call
+        picked = set(self.config.scenario_ids)
+        unknown = picked - {s["id"] for s in own}
+        if unknown:
+            raise KeyError(f"unknown test case(s): {', '.join(sorted(unknown))}")
+        # Resilience drills its own cases and the Functional ones (Timing and Speech cases test other things).
+        base = [s for s in own if (not picked or s["id"] in picked) and modes.type_of(s) in ("resilience", "functional")]
+        made = drills.expand(base, self.config.drills)
+        have = {s["id"] for s in self.project.scenarios}
+        self.project.scenarios = list(self.project.scenarios) + [d for d in made if d["id"] not in have]
+        for d in made:
+            sha = self.project.scenario_sha256.get(drills.split(d["id"])[0], "")
+            self.project.scenario_sha256.setdefault(d["id"], sha)
+        return [s for s in base if modes.type_of(s) == "resilience"] + made
+
     def repeats_for(self, scenario: Mapping[str, Any]) -> int:
         return self.config.repeats or scenario.get("repeats") or self.profile.get("thresholds", {}).get("repeats", 3)
 
@@ -131,8 +162,10 @@ class Orchestrator:
         calls = []
         for sc in self.scenarios():
             persona = sc["caller"]["persona"] if sc["style"] == "simulated" else None
-            for r in range(1, self.repeats_for(sc) + 1):
-                calls.append(PlannedCall(sc["id"], persona, r))
+            # A Speech mode sweep runs each test under every chosen condition (repeats per condition).
+            for cond in (self.config.sweep if self.mode == "voice" and self.config.sweep else (None,)):
+                for r in range(1, self.repeats_for(sc) + 1):
+                    calls.append(PlannedCall(sc["id"], persona, r, cond))
         return calls
 
     # ---- running --------------------------------------------------------
@@ -215,10 +248,31 @@ class Orchestrator:
     def preflight(self) -> None:
         """Problems that would make every call fail, found before the first call: secrets named as
         ${NAME} in the profile must be set (in the .env file or the shell)."""
-        from .conditions import PRESETS
+        from .conditions import PRESETS, known
 
-        if self.config.conditions not in PRESETS:
-            raise RunSetupError(f"unknown caller conditions {self.config.conditions!r} (use one of {', '.join(PRESETS)})")
+        for c in (self.config.conditions, *self.config.sweep):
+            if not known(c):
+                raise RunSetupError(f"unknown caller conditions {c!r} (use one of {', '.join(PRESETS)}, or accent:<id>)")
+        if self.config.drills:
+            from .drills import FAILURES
+
+            bad = [d for d in self.config.drills if d not in FAILURES]
+            if bad:
+                raise RunSetupError(f"unknown failure(s) {', '.join(bad)} (use {', '.join(FAILURES)})")
+            if self.config.test_mode != "resilience":
+                raise RunSetupError("failure drills are part of the Resilience test mode (--test-mode resilience)")
+        from .languages import LANGUAGES
+
+        langs = {self._language(sc) for sc in self.project.scenarios}
+        unknown = sorted(langs - set(LANGUAGES))
+        if unknown:
+            raise RunSetupError(f"Vocto's caller can't speak {', '.join(unknown)} yet "
+                                f"(it speaks {', '.join(v['name'] for v in LANGUAGES.values())})")
+        if self.mode == "voice":
+            bad = recordings.problems(Path(self.project.folder), self.scenarios())
+            if bad:
+                raise RunSetupError("A recorded caller line can't be played: " + "; ".join(bad[:5])
+                                    + (f" (and {len(bad) - 5} more)" if len(bad) > 5 else ""))
         p = self.profile
         named = [p["connection"].get("options", {}).get("headers"), p.get("backend", {}).get("connection"),
                  p.get("backend", {}).get("headers"), (p.get("logs") or {}).get("url"), (p.get("logs") or {}).get("headers"),
@@ -240,16 +294,31 @@ class Orchestrator:
             "profile_id": self.profile["id"], "profile_name": self.profile.get("name", self.profile["id"]),
             "mode": self.mode, "offline": cfg.offline, "repeats": cfg.repeats,
             "scenario_ids": list(cfg.scenario_ids), "safety": cfg.safety, "conditions": cfg.conditions,
+            **({"sweep": list(cfg.sweep)} if cfg.sweep and self.mode == "voice" else {}),
+            **({"drills": list(cfg.drills)} if cfg.drills and cfg.test_mode == "resilience" else {}),
+            **({"caller_language": cfg.language} if cfg.language else {}),
+            **({"ab": dict(cfg.ab)} if cfg.ab else {}),
             "test_mode": cfg.test_mode or ("full" if cfg.safety else "functional"),
             "trigger": cfg.trigger, "baseline": cfg.baseline, "agent_options": dict(self.profile["connection"].get("options", {})),
             "caller_model": None if cfg.offline else cfg.caller_model, "pii_masked": cfg.mask_pii,
             "judges": ({"enabled": False, "why": self._judges_off()} if self._judges_off() else
                        {k: v for k, v in judge_settings(self.profile).items() if k != "policy"}),
-            "plan": [{"scenario_id": pc.scenario_id, "persona_id": pc.persona_id, "repeat": pc.repeat} for pc in plan],
+            "plan": [{"scenario_id": pc.scenario_id, "persona_id": pc.persona_id, "repeat": pc.repeat,
+                      **({"conditions": pc.conditions} if pc.conditions else {})} for pc in plan],
         }
         if self.mode == "voice":
             info["speech"] = {"engine": cfg.speech.engine, "ears_model": cfg.speech.ears_model,
                               "check_model": cfg.speech.check_model}
+        from .languages import hearing_model
+
+        langs = sorted({self._language(self.project.scenario(pc.scenario_id)) for pc in plan})
+        if langs != ["en"]:
+            info["languages"] = langs
+            if self.mode == "voice" and cfg.speech.engine == "local":
+                # A call in another language hears with the multilingual model: say which one was used.
+                info["speech"]["by_language"] = {
+                    lang: {"ears_model": hearing_model(cfg.speech.ears_model, lang),
+                           "check_model": hearing_model(cfg.speech.check_model, lang, True)} for lang in langs}
         return info
 
     async def _run_plan(self, run_id: str, plan: list[PlannedCall], run_dir: Path) -> dict[str, Any]:
@@ -310,13 +379,16 @@ class Orchestrator:
         so recordings don't open with the loading time. A failure here is reported by the call itself."""
         from .speech import make_stt, make_tts
 
-        voices = set()
+        voices, languages = set(), set()
         for pc in plan:
             scenario = self.project.scenario(pc.scenario_id)
-            voices.add(self._conditions(scenario, "").voice)
+            cond = self._conditions(scenario, "", pc.conditions)
+            voices.add(cond.voice)
+            languages.add(cond.language)
         try:
-            tts, stt = make_tts(self.config.speech, self.config.root), make_stt(self.config.speech, self.config.root)
-            await asyncio.to_thread(lambda: ([tts.warm_up(v) for v in sorted(voices)], stt.warm_up()))
+            tts = make_tts(self.config.speech, self.config.root)
+            ears = [make_stt(self.config.speech, self.config.root, language=lang) for lang in sorted(languages)]
+            await asyncio.to_thread(lambda: ([tts.warm_up(v) for v in sorted(voices)], [s.warm_up() for s in ears]))
         except Exception:  # noqa: BLE001 - each call retries and records the error as a harness error
             pass
 
@@ -340,6 +412,13 @@ class Orchestrator:
                     load_fixtures(self.profile, scenario, self.config.root)
                 except ProbeSetupError as e:
                     raise HarnessError("fixtures_failed", str(e)) from e
+            watch = self._watched_tables()
+            before, watch_error = None, None
+            if watch:
+                try:
+                    before = statewatch.snapshot(self.profile, self.config.root, watch)
+                except statewatch.WatchError as e:
+                    watch_error = str(e)
             proxy = InProcessToolProxy(self.profile, scenario.get("setup", {}).get("faults", []),
                                        real_delays=self.mode == "voice")
             await proxy.attach(ctx, writer)
@@ -347,7 +426,7 @@ class Orchestrator:
                 self._gateway.attach(proxy, ctx.test_id)
             logs = LogCollector(self.profile, self.config.root)
             logs.begin()
-            cond = self._conditions(scenario, ctx.test_id) if self.mode == "voice" else None
+            cond = self._conditions(scenario, ctx.test_id, pc.conditions) if self.mode == "voice" else None
             writer.emit("connector", "call_started", {"test_id": ctx.test_id, "mode": self.mode,
                                                       **({"conditions": cond.summary()} if cond else {})})
             caller = self._caller(scenario, meta)
@@ -383,6 +462,16 @@ class Orchestrator:
                 if result.error:
                     data["error"] = result.error
                 writer.emit("probe", "probe_result", data)
+            if watch:
+                if before is not None:
+                    try:
+                        diff = statewatch.diff(before, statewatch.snapshot(self.profile, self.config.root, watch),
+                                               statewatch.ignored_columns(self.profile))
+                    except statewatch.WatchError as e:
+                        diff = {"error": str(e)}
+                else:
+                    diff = {"error": watch_error or "the tables could not be read before the call"}
+                writer.emit("probe", "state_diff", {"watched": watch, **diff})
         except Exception as e:
             code = e.code if isinstance(e, HarnessError) else _error_code(e)
             writer.emit("harness", "harness_event", {"level": "error", "code": code,
@@ -403,7 +492,8 @@ class Orchestrator:
         trace = self.store.read_call(run_id, ctx.test_id)
         judge_before = self._spent()
         judged, notes = await self._judge(trace, scenario, status, meta)
-        verdict = self.evaluate(trace, scenario, validator_off_script, judged)
+        readings = await self._read_claims(trace, scenario, status, meta)
+        verdict = self.evaluate(trace, scenario, validator_off_script, judged, readings)
         if notes:
             verdict["judge_notes"] = notes
         if not shared:
@@ -424,6 +514,23 @@ class Orchestrator:
         if self.llm is None:
             return "Judges need an AI model (set ANTHROPIC_API_KEY)."
         return None
+
+    async def _read_claims(self, trace: CallTrace, scenario: Mapping[str, Any], status: str,
+                           meta: Mapping[str, str]) -> dict[str, dict[str, Any]]:
+        """Two AI models read the agent's words when the claim patterns couldn't (claimread.py)."""
+        if status == "harness_error" or self.config.offline or self.llm is None:
+            return {}
+        questions = claim_question(scenario, list(trace.events))
+        if not questions:
+            return {}
+        s = judge_settings(self.profile)
+        try:
+            return await claimread.read_claims(self.llm, questions, [s["primary_model"], s["secondary_model"]], meta)
+        except Exception as e:  # noqa: BLE001 - the claim stays unclear (NOT_VERIFIED), never a pass
+            if type(e).__name__ == "BudgetExceeded":
+                raise
+            self.log(f"    claim reader failed: {e}")
+            return {}
 
     def calibration(self) -> dict[str, dict[str, Any]]:
         """Each judge item's calibration, read once per run from the project's labels."""
@@ -502,16 +609,27 @@ class Orchestrator:
         live.pop("session", None)
         return ended_by, reason, turn
 
-    def _conditions(self, scenario: Mapping[str, Any], seed: str):
-        """The caller conditions of one voice call: persona, the test's audio and the run's preset."""
+    def _conditions(self, scenario: Mapping[str, Any], seed: str, preset: str | None = None):
+        """The caller conditions of one voice call: persona, the test's audio and the run's preset
+        (or, in a Speech mode sweep, this call's condition)."""
         from .conditions import resolve
 
         persona = self.project.personas.get((scenario.get("caller") or {}).get("persona", ""), {})
-        return resolve(persona, scenario, preset=self.config.conditions,
-                       default_voice=self.config.speech.caller_voice, seed=seed)
+        return resolve(persona, scenario, preset=preset or self.config.conditions,
+                       default_voice=self.config.speech.caller_voice, seed=seed,
+                       language=self._language(scenario))
+
+    def _language(self, scenario: Mapping[str, Any]) -> str:
+        """The language the caller speaks on this call: the run's choice, else its persona's, else the agent's first."""
+        from .languages import call_language
+
+        if self.config.language:
+            return self.config.language
+        persona = self.project.personas.get((scenario.get("caller") or {}).get("persona", ""), {})
+        return call_language(self.profile, persona)
 
     async def _converse_voice(self, ctx, scenario, caller, proxy, writer, live, cond=None) -> tuple[str, str, int]:
-        from .audio.line import LineEffects
+        from .audio.line import LineEffects, NetworkJitter
         from .audio.noise import load_noise
         from .audio.recorder import Line, Recorder
         from .conditions import noise_settings
@@ -527,7 +645,8 @@ class Orchestrator:
         persona = self.project.personas.get(scenario.get("caller", {}).get("persona", ""), {})
         cond = cond or self._conditions(scenario, ctx.test_id)
         try:
-            tts, stt = make_tts(self.config.speech, self.config.root), make_stt(self.config.speech, self.config.root)
+            tts = make_tts(self.config.speech, self.config.root)
+            stt = make_stt(self.config.speech, self.config.root, language=cond.language)
             # Models load (and download, the first time) here, before the agent is dialled.
             await asyncio.to_thread(lambda: (tts.warm_up(cond.voice), stt.warm_up()))
             noise = load_noise(noise_settings(cond), limits.get("max_call_seconds", 300) + 60, sr, ctx.test_id,
@@ -540,7 +659,8 @@ class Orchestrator:
             raise HarnessError("connect_failed", str(e)) from e
         answered = rec.now_sample()   # the agent can only be heard from here on
         line = Line(rec, session.send_frame, noise,
-                    LineEffects(sr, phone=cond.phone, packet_loss_pct=cond.packet_loss_pct, seed=ctx.test_id))
+                    LineEffects(sr, phone=cond.phone, packet_loss_pct=cond.packet_loss_pct, seed=ctx.test_id),
+                    NetworkJitter(sr, jitter_ms=cond.jitter_ms, reorder_pct=cond.reorder_pct, seed=ctx.test_id))
         live.update(session=session, line=line, recorder=rec)
         line.start()
         live["tap"] = LiveTap.from_env(rec, f"{ctx.test_id} {scenario['id']}")   # dashboard's "Listen live"
@@ -552,7 +672,8 @@ class Orchestrator:
             barge_in=list(audio.get("barge_in", [])), conditions=cond)
         conv = VoiceConversation(
             session=session, recorder=rec, line=line, tts=tts, stt=stt,
-            voice=cond.voice, speaking_rate=cond.speaking_rate, settings=settings, writer=writer, proxy=proxy)
+            voice=cond.voice, speaking_rate=cond.speaking_rate, settings=settings, writer=writer, proxy=proxy,
+            language=cond.language)
         await conv.prepare_sounds()
 
         heard = await conv.listen(since=answered, caller_end=None, turn=1)
@@ -576,7 +697,7 @@ class Orchestrator:
                 ended_by, reason = "caller", "the agent stopped answering"
                 break
             action = await caller.next_turn(heard.text)
-            clip = await conv.prepare(action.say) if action.say else None
+            clip = await self._clip(conv, action)
             if action.say and cond.quiet_turn == caller_turns + 1 and not conv._done():
                 await self._go_quiet(conv, cond, heard, turn, writer)
             # The agent may go on talking while the caller thinks of an answer (a second sentence, or
@@ -589,7 +710,7 @@ class Orchestrator:
                 redo = getattr(caller, "redo", None)       # a scripted caller keeps its next line
                 if redo is not None:
                     action = await redo(heard.text)
-                    clip = await conv.prepare(action.say) if action.say else None
+                    clip = await self._clip(conv, action)
             if not action.say:
                 ended_by = "caller"
                 reason = ("the script ended" if scenario["style"] == "scripted" and not getattr(caller, "following_up", False)
@@ -609,6 +730,17 @@ class Orchestrator:
             silent = silent + 1 if heard.start is None else 0
         await self._hang_up(live, writer)
         return ended_by, reason, turn
+
+    async def _clip(self, conv, action):
+        """The caller's next line, ready to say: from its recording when it has one, else synthesized."""
+        if not action.say:
+            return None
+        if action.audio:
+            try:
+                return await conv.recording(recordings.resolve(self.project.folder, action.audio), action.audio)
+            except (OSError, ValueError) as e:
+                raise HarnessError("recording_failed", f"recording {action.audio}: {e}") from e
+        return await conv.prepare(action.say)
 
     async def _after_cut_in(self, conv, caller, heard, turn: int, caller_turns: int):
         """The caller cut in on the agent: write down what it said, then hear the agent's answer to it."""
@@ -670,6 +802,10 @@ class Orchestrator:
                                                "agent_audio_cleared": len(rec.clears)}}
             if getattr(session, "call_meta", None):        # a real phone call: its id, numbers, length, price
                 live["recording"]["phone"] = dict(session.call_meta)
+            for sample, text in getattr(session, "heard", None) or []:
+                # What the agent reported understanding (protocol "heard"): compared with the caller's
+                # words for the "caller words misheard" metric (metrics.caller_wer).
+                writer.emit("connector", "agent_heard", {"text": text, "source": "agent"}, t_ms=rec.ms(sample))
             if getattr(session, "protocol_errors", None):
                 writer.emit("harness", "harness_event", {
                     "level": "warning", "code": "protocol_error",
@@ -701,14 +837,17 @@ class Orchestrator:
             return
         agent, sr = live.pop("agent_track")
         try:
-            stt = make_stt(self.config.speech, self.config.root, careful=True)
+            from .languages import hearing_model
+
+            language = self._language(scenario)
+            stt = make_stt(self.config.speech, self.config.root, careful=True, language=language)
             for e in turns:
                 a = max(0, e.data["audio"]["start_ms"] * sr // 1000 - sr // 20)
                 b = e.data["audio"]["end_ms"] * sr // 1000 + sr // 20
                 clip = AudioClip(to_pcm16(agent[a:b]), sr)
-                text = (await asyncio.to_thread(stt.transcribe, clip)).text.strip()
+                text = (await asyncio.to_thread(stt.transcribe, clip, language)).text.strip()
                 writer.emit("recorder", "stt_text", {"agent_turn": e.seq, "text": text,
-                                                     "model": self.config.speech.check_model
+                                                     "model": hearing_model(self.config.speech.check_model, language, True)
                                                      if self.config.speech.engine == "local" else self.config.speech.engine},
                                      turn=e.turn)
         except Exception as ex:
@@ -723,21 +862,34 @@ class Orchestrator:
         if result.error:
             summary["error"] = result.error
         writer.emit("platform", "platform_event", summary)
+        pattern = (self.profile.get("logs") or {}).get("heard_pattern")
+        rx = None
+        if pattern:
+            try:
+                rx = re.compile(pattern)
+            except re.error as e:
+                writer.emit("harness", "harness_event", {"level": "warning", "code": "bad_heard_pattern",
+                                                         "message": f"logs.heard_pattern is not a valid pattern: {e}"})
         for line in result.lines:
             writer.emit("platform", "platform_event", {"kind": "log", "text": line})
+            text = heard_in_log(rx, line) if rx else None
+            if text is not None:   # a log line saying what the agent's speech recognition heard from the caller
+                writer.emit("platform", "agent_heard", {"text": text, "source": "log"})
 
     def _caller(self, scenario: Mapping[str, Any], meta: Mapping[str, str]):
         if scenario["style"] == "scripted":
             lines = [t["caller"] for t in scenario["turns"]]
+            # Voice: a line with a recording is played from it (recordings.py); text sends the words.
+            audio = [t.get("audio") if self.mode == "voice" else None for t in scenario["turns"]]
             turns = self._follow_up_turns(scenario)
             if not turns:
-                return ScriptedCaller(lines)
+                return ScriptedCaller(lines, audio)
             brief = follow_up_scenario(scenario)
             persona_id = brief["caller"].get("persona") or next(iter(self.project.personas), None)
             claude = LLMCaller(brief, self.project.personas.get(persona_id, {}), self.llm,
                                model=self.config.caller_model, agent_name=self.profile.get("name", "the agent"),
-                               metadata=meta, voice=self.mode == "voice")
-            return ScriptThenLLM(lines, claude, turns)
+                               metadata=meta, voice=self.mode == "voice", language=self._language(scenario))
+            return ScriptThenLLM(lines, claude, turns, audio)
         if self.config.offline or self.config.caller == "free":
             return RuleCaller(scenario, spoken=self.mode == "voice")
         if self.llm is None:
@@ -745,7 +897,7 @@ class Orchestrator:
         persona = self.project.personas[scenario["caller"]["persona"]]
         return LLMCaller(scenario, persona, self.llm, model=self.config.caller_model,
                          agent_name=self.profile.get("name", "the agent"), metadata=meta,
-                         voice=self.mode == "voice")
+                         voice=self.mode == "voice", language=self._language(scenario))
 
     def _follow_up_turns(self, scenario: Mapping[str, Any]) -> int:
         """Caller turns Claude may add after a scripted call's fixed lines (0: the call ends with them).
@@ -756,12 +908,20 @@ class Orchestrator:
         f = scenario.get("follow_up") if isinstance(scenario.get("follow_up"), dict) else {}
         return int(f.get("turns", self.profile.get("limits", {}).get("follow_up_turns", FOLLOW_UP_TURNS)))
 
+    def _watched_tables(self) -> list[str]:
+        """The backend tables copied before and after each call (statewatch.py). None for load tests,
+        where many calls change the tables at once, and for runs that load test data only once."""
+        if self.config.fixtures_once or self.concurrent:
+            return []
+        return statewatch.tables_of(self.profile)
+
     def _probes_needed(self, scenario: Mapping[str, Any]) -> list[str]:
         if self.profile.get("backend", {}).get("access") not in ("sql", "rest"):
             return []
         ids = []
-        if scenario.get("outcome", {}).get("record"):
-            ids.append(scenario["outcome"]["record"]["probe"])
+        for o in ([scenario["outcome"]] if scenario.get("outcome") else []) + list(scenario.get("more_outcomes") or []):
+            if o.get("record"):
+                ids.append(o["record"]["probe"])
         checks = list(scenario.get("checks", [])) + [c for t in scenario.get("turns", []) for c in t.get("expect", [])]
         ids += [c["probe"] for c in checks if c.get("type") == "probe"]
         if any(c.get("type") == "entity_fidelity" for c in checks):
@@ -774,16 +934,24 @@ class Orchestrator:
 
     # ---- evaluation -----------------------------------------------------
     def evaluate(self, trace: CallTrace, scenario: Mapping[str, Any],
-                 validator_off_script: bool | None, judged: Sequence[CheckResult] = ()) -> dict[str, Any]:
+                 validator_off_script: bool | None, judged: Sequence[CheckResult] = (),
+                 readings: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, Any]:
         facts = scenario.get("caller", {}).get("facts", {})
         salt = trace.record["test_id"]
         events = list(trace.events)
         results: list[CheckResult] = scenario_checks(scenario, events, facts, salt, self.mode)
-        outcome = evaluate_outcome(scenario, self.profile, events, facts, salt)
+        outcome = evaluate_outcome(scenario, self.profile, events, facts, salt, readings)
         block = None
         if outcome:
             block, outcome_check = outcome
             results.insert(0, outcome_check)
+        more = evaluate_more(scenario, self.profile, events, facts, salt, readings)
+        for n, (_, step_check) in enumerate(more, start=1):
+            results.insert(n, step_check)
+        for extra in (statewatch.side_effects_check(scenario, self.profile, events),
+                      statewatch.wrong_tool_check(scenario, self.profile, events)):
+            if extra is not None:
+                results.append(extra)
         validator_events = [e for e in events if e.type == "validator_result"]
         if validator_events:
             e = validator_events[-1]
@@ -795,6 +963,8 @@ class Orchestrator:
                          if off else "The simulated caller kept to its goal and facts."),
                 evidence=(EvidenceRef(e.seq),), evidence_level=EvidenceLevel.AI_OPINION))
         verdict = LocalVerdictBuilder().build(trace, merge_results(results, judged), block)
+        if more:
+            verdict["more_outcomes"] = [b for b, _ in more]
         # Call quality (metrics.py): read off the timeline, banded with this agent's own values.
         verdict["metrics"]["quality"] = with_bands(call_quality(events, self.mode, scenario), self.profile)
         started = next((e for e in events if e.type == "call_started"), None)

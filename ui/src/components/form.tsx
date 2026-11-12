@@ -14,7 +14,7 @@ export function Text({ value, onChange, placeholder, mono, id, type = "text", cl
   type?: string; className?: string; disabled?: boolean;
 }) {
   return (
-    <input id={id} type={type} className={cx(inputCls, mono && "font-mono text-[12.5px]", "font-normal", className)} value={value ?? ""}
+    <input id={id} type={type} className={cx(inputCls, mono && "font-mono text-[13px]", "font-normal", className)} value={value ?? ""}
       placeholder={placeholder} disabled={disabled} autoComplete="off" spellCheck={false} onChange={(e) => onChange(e.target.value)} />
   );
 }
@@ -30,14 +30,14 @@ export function Num({ value, onChange, placeholder, step, min, max, id }: {
   );
 }
 
-export function Select({ value, options, onChange, id, className, placeholder }: {
+export function Select({ value, options, onChange, id, className, placeholder, disabled }: {
   value: string | undefined | null; options: (string | [string, string])[]; onChange: (v: string) => void; id?: string;
-  className?: string; placeholder?: string;
+  className?: string; placeholder?: string; disabled?: boolean;
 }) {
   const opts = options.map((o) => (typeof o === "string" ? [o, o] : o));
   const known = opts.some(([v]) => v === (value ?? ""));
   return (
-    <select id={id} className={cx(inputCls, "font-normal", className)} value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
+    <select id={id} className={cx(inputCls, "font-normal", className)} value={value ?? ""} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
       {placeholder != null && <option value="">{placeholder}</option>}
       {!known && value ? <option value={value}>{value}</option> : null}
       {opts.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
@@ -50,7 +50,7 @@ export function Area({ value, onChange, rows = 3, mono, placeholder, id }: {
 }) {
   return (
     <textarea id={id} rows={rows} spellCheck={!mono} placeholder={placeholder} value={value ?? ""} onChange={(e) => onChange(e.target.value)}
-      className={cx(inputCls, "h-auto py-2 leading-5 font-normal resize-y", mono && "font-mono text-[12.5px]")} />
+      className={cx(inputCls, "h-auto py-2 leading-5 font-normal resize-y", mono && "font-mono text-[13px]")} />
   );
 }
 
@@ -58,7 +58,7 @@ export function Check({ checked, onChange, label, hint }: { checked: boolean; on
   return (
     <label className="flex items-start gap-2 cursor-pointer select-none text-[13px]">
       <input type="checkbox" className="mt-[3px] accent-[var(--accent)]" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span><span className="font-semibold">{label}</span>{hint && <span className="block text-muted text-xs">{hint}</span>}</span>
+      <span><span className="font-semibold">{label}</span>{hint && <span className="block text-muted text-[13px]">{hint}</span>}</span>
     </label>
   );
 }
@@ -98,7 +98,7 @@ export function KeyValue({ value, onChange, keyPh = "name", valPh = "value", typ
       {listId && <datalist id={listId}>{keyOptions!.map((k) => <option key={k} value={k} />)}</datalist>}
       {rows.map(([k, v], i) => (
         <div key={i} className="flex gap-1.5 items-center">
-          <input className={cx(inputCls, "font-mono text-[12.5px] font-normal w-[38%]")} placeholder={keyPh} value={k} list={listId}
+          <input className={cx(inputCls, "font-mono text-[13px] font-normal w-[38%]")} placeholder={keyPh} value={k} list={listId}
             onChange={(e) => push(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
           <input className={cx(inputCls, "font-normal flex-1")} placeholder={valPh} value={v}
             onChange={(e) => push(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} />
@@ -118,7 +118,7 @@ export function StrList({ value, onChange, placeholder, mono, id, addLabel = "Ad
     <div id={id} className="grid gap-1.5">
       {rows.map((v, i) => (
         <div key={i} className="flex gap-1.5 items-center">
-          <input className={cx(inputCls, "font-normal flex-1", mono && "font-mono text-[12.5px]")} placeholder={placeholder} value={v}
+          <input className={cx(inputCls, "font-normal flex-1", mono && "font-mono text-[13px]")} placeholder={placeholder} value={v}
             onChange={(e) => onChange(rows.map((r, j) => (j === i ? e.target.value : r)))} />
           <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove" onClick={() => onChange(rows.filter((_, j) => j !== i))} />
         </div>
@@ -129,7 +129,7 @@ export function StrList({ value, onChange, placeholder, mono, id, addLabel = "Ad
 }
 
 export function Help({ children, className }: { children: ReactNode; className?: string }) {
-  return <p className={cx("text-muted text-[12.5px] leading-5", className)}>{children}</p>;
+  return <p className={cx("text-muted text-[13px] leading-5", className)}>{children}</p>;
 }
 
 export function Grid({ children, cols = 2, className }: { children: ReactNode; cols?: 2 | 3 | 4; className?: string }) {
@@ -142,7 +142,7 @@ export function Problems({ items, title = "Problems to fix:" }: { items: string[
   return (
     <Notice tone="warn">
       <b>{title}</b>
-      <ul className="mt-1.5 pl-[18px] list-disc">{items.map((p, i) => <li key={i} className="font-mono text-[12px] break-words">{p}</li>)}</ul>
+      <ul className="mt-1.5 pl-[18px] list-disc">{items.map((p, i) => <li key={i} className="font-mono text-[13px] break-words">{p}</li>)}</ul>
     </Notice>
   );
 }
@@ -151,9 +151,11 @@ export function SaveBar({ dirty, busy, onSave, onRevert, note, id = "save-sectio
   dirty: boolean; busy?: boolean; onSave: () => void; onRevert?: () => void; note?: ReactNode; id?: string; revertLabel?: string;
 }) {
   return (
-    <div className="sticky bottom-3 z-3 mt-4 flex items-center gap-2.5 flex-wrap px-3.5 py-2.5 rounded-[10px] border border-line bg-[color-mix(in_srgb,var(--surface)_92%,transparent)] backdrop-blur shadow-soft">
+    <div className={cx("mt-4 flex items-center gap-2.5 flex-wrap px-3.5 py-2.5 rounded-[12px] border border-line",
+      // Only an unsaved draft follows you down the page; a saved one stays put, so it never covers the form.
+      dirty ? "sticky bottom-3 z-3 bg-surface shadow-card" : "bg-surface-2/60")}>
       {dirty ? <Chip tone="warn">unsaved changes</Chip> : <Chip tone="good">saved</Chip>}
-      <span className="text-muted text-xs flex-1 min-w-0">{note}</span>
+      <span className="text-muted text-[13px] flex-1 min-w-0">{note}</span>
       {onRevert && <Button size="sm" disabled={(!dirty && !revertLabel) || busy} onClick={onRevert}>{revertLabel || "Undo changes"}</Button>}
       <Button id={id} size="sm" variant="primary" icon="save" busy={busy} disabled={!dirty || busy} onClick={onSave}>Save</Button>
     </div>
@@ -175,17 +177,17 @@ export function TestResult({ result }: { result: TestOutcome | null }) {
   return (
     <Notice tone={result.ok ? "good" : "bad"} className="mt-3" icon={result.ok ? "check" : "alert"}>
       <div data-test-result={result.ok ? "ok" : "bad"} className="font-semibold">{result.message}</div>
-      {result.details?.map((d, i) => <div key={i} className="text-[12.5px] mt-0.5 break-words">{d}</div>)}
+      {result.details?.map((d, i) => <div key={i} className="text-[13px] mt-0.5 break-words">{d}</div>)}
       {cols.length > 0 && (
         <div className="overflow-x-auto mt-2">
-          <table className="text-[12px] font-mono border-collapse">
+          <table className="text-[13px] font-mono border-collapse">
             <thead><tr>{cols.map((c) => <th key={c} className="text-left pr-3 pb-1 text-muted font-semibold">{c}</th>)}</tr></thead>
             <tbody>{result.rows!.map((r, i) => <tr key={i}>{cols.map((c) => <td key={c} className="pr-3 py-0.5 whitespace-nowrap">{scalar(r[c] ?? null)}</td>)}</tr>)}</tbody>
           </table>
         </div>
       )}
       {result.lines && result.lines.length > 0 && (
-        <pre className="mt-2 max-h-[260px] overflow-auto text-[11.5px] font-mono whitespace-pre-wrap break-words bg-surface/60 rounded-lg p-2">{result.lines.join("\n")}</pre>
+        <pre className="mt-2 max-h-[260px] overflow-auto text-[13px] font-mono whitespace-pre-wrap break-words bg-surface/60 rounded-lg p-2">{result.lines.join("\n")}</pre>
       )}
     </Notice>
   );
@@ -194,12 +196,12 @@ export function TestResult({ result }: { result: TestOutcome | null }) {
 // A titled block inside a card.
 export function Block({ title, sub, children, icon, aside }: { title: ReactNode; sub?: ReactNode; children: ReactNode; icon?: Parameters<typeof Icon>[0]["name"]; aside?: ReactNode }) {
   return (
-    <section className="grid gap-3 py-4 first:pt-0 border-b border-line last:border-b-0">
+    <section className="grid grid-cols-[minmax(0,1fr)] gap-3 py-4 first:pt-0 border-b border-line last:border-b-0">
       <div className="flex items-start gap-2 flex-wrap">
         {icon && <Icon name={icon} className="mt-0.5 text-muted" />}
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold">{title}</h3>
-          {sub && <div className="text-muted text-[12.5px] mt-0.5">{sub}</div>}
+          {sub && <div className="text-muted text-[13px] mt-0.5">{sub}</div>}
         </div>
         {aside}
       </div>

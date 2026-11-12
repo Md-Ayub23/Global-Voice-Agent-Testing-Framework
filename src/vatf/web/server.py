@@ -114,6 +114,15 @@ def make_handler(app: App):
         b = h.body()
         return setup.delete_doc(app.root, b["project"], b["file"])
 
+    @route("POST", r"/api/setup/recording")
+    def post_recording(h, q):
+        return setup.save_recording(app.root, q["project"], q.get("name", ""), h.raw_body)
+
+    @route("GET", r"/api/setup/recording")
+    def get_recording(h, q):
+        path = setup.recording_file(app.root, q["project"], q["path"])
+        h.send_file(path.parent, path.name)
+
     @route("POST", r"/api/setup/test-connection")
     def post_test_connection(h, q):
         b = h.body()
@@ -139,6 +148,10 @@ def make_handler(app: App):
         out = data.project_overview(app.root, app.runs, key, app.active_runs())
         return {**out, "judges": judging.judges_page(app.root, app.runs, key, app.active_runs())["summary"]}
 
+    @route("GET", r"/api/project/([\w.\-]+)/modes")
+    def get_project_modes(h, q, key):
+        return data.project_modes(app.root, app.runs, key, app.active_runs())
+
     @route("GET", r"/api/project/([\w.\-]+)/judges")
     def get_judges(h, q, key):
         return judging.judges_page(app.root, app.runs, key, app.active_runs())
@@ -153,7 +166,7 @@ def make_handler(app: App):
 
     @route("GET", r"/api/project/([\w.\-]+)/plan")
     def get_plan(h, q, key):
-        return plans.plan_page(app.root, key, q.get("file", "profile.yaml"))
+        return plans.plan_page(app.root, key, q.get("file", "profile.yaml"), q.get("test_type"))
 
     @route("POST", r"/api/project/([\w.\-]+)/plan/write")
     def post_plan_write(h, q, key):
@@ -162,6 +175,18 @@ def make_handler(app: App):
     @route("POST", r"/api/project/([\w.\-]+)/plan/add")
     def post_plan_add(h, q, key):
         return plans.add_tests(app.root, key, h.body())
+
+    @route("GET", r"/api/project/([\w.\-]+)/coverage")
+    def get_coverage(h, q, key):
+        return plans.coverage_page(app.root, key, q.get("file", "profile.yaml"))
+
+    @route("POST", r"/api/project/([\w.\-]+)/variations")
+    def post_variations(h, q, key):
+        return plans.draft_variations(app.root, key, h.body())
+
+    @route("POST", r"/api/project/([\w.\-]+)/variations/add")
+    def post_variations_add(h, q, key):
+        return plans.add_variations(app.root, key, h.body())
 
     @route("POST", r"/api/project/([\w.\-]+)/personas/library")
     def post_library_personas(h, q, key):
@@ -198,6 +223,12 @@ def make_handler(app: App):
         text = to_csv(data.readiness_of(app.root, app.runs, run_id))
         h.send_bytes(("\ufeff" + text).encode("utf-8"), "text/csv; charset=utf-8", f"vocto-{run_id}.csv")
         return None
+
+    @route("POST", r"/api/runs/(r-[\w-]+)/analysis")
+    def post_analysis(h, q, run_id):
+        if run_id in app.active_runs():
+            raise ValueError("this run is still going; explain it when it has finished")
+        return data.run_analysis(app.root, app.runs, run_id, h.body().get("model"))
 
     @route("GET", r"/api/runs/(r-[\w-]+)/calls/(t-[\w-]+)")
     def get_call(h, q, run_id, test_id):

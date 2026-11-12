@@ -28,7 +28,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from . import modes
+from . import drills, modes, stats
+from .costs import money
 from .attacks import PACKS
 from .story import story_rows
 from .util import read_json
@@ -61,6 +62,8 @@ EXPECTED = {
     "success": "The task is done, saved correctly in your system, and confirmed to the caller.",
     "honest_failure": "The agent tells the caller honestly that it could not be done.",
     "no_action": "Nothing is saved and nothing is promised.",
+    "recover_or_honest": "The agent gets it done on a retry, or tells the caller honestly that it couldn't. "
+                         "It never claims a booking or order that wasn't made, and never makes it twice.",
 }
 FIX = {
     "NO_ACTION": "Check when the agent's instructions tell it to use the tool, and that the tool is available to it.",
@@ -86,6 +89,10 @@ FIX = {
     "log_contains": "An expected entry is missing from the agent's logs: check what it logs.",
     "log_not_contains": "The agent logged something it shouldn't (an error or private data).",
     "judge": "Read the judges' reason and the quoted lines, then adjust the instruction the agent broke.",
+    "side_effects": "Look at the rows that changed: the agent used a tool with the wrong id, or a tool changes more "
+                    "than it should. If the change is fine (an audit log, a timestamp), add it to Watch ignore.",
+    "wrong_tool": "Check when the agent's instructions allow this tool. If it is fine for this test, add it to the "
+                  "test's allowed tools.",
 }
 TYPE_TITLES = {
     "tool_called": "Didn't use a tool it should have",
@@ -103,11 +110,13 @@ TYPE_TITLES = {
     "max_turns": "Took too many turns",
     "log_contains": "An expected log entry is missing",
     "log_not_contains": "Logged something it should not",
+    "side_effects": "Changed something else in your system",
+    "wrong_tool": "Used a tool this test doesn't expect",
 }
 STATUS_WORDS = {"pass": "Good", "watch": "Watch", "fail": "Problem", "not_tested": "Not tested"}
 VOICE_SPEECH = {"entity_fidelity", "readback"}
 SECTION_AREA = {"accuracy": "actions", "experience": "conversation", "security": "safety", "safety": "safety"}
-RULE_AREA = {"latency": "speed", "metric": "speed", "coverage": "evidence", "needs_review": "evidence",
+RULE_AREA = {"latency": "speed", "metric": "speed", "coverage": "evidence", "needs_review": "evidence", "latency_sample": "evidence",
              "regression": "regression", "regression_warnings": "regression", "load_evidence": "evidence"}
 SPEED_METRICS = {"ttfw_ms", "response_p90_ms", "response_p99_ms", "longest_silence_ms", "barge_in_stop_ms",
                  "checkin_ms", "talked_over", "backchannel_kept"}
@@ -137,6 +146,12 @@ def _clock(ms: float | int | None) -> str | None:
         return None
     s = int(ms // 1000)
     return f"{s // 60}:{s % 60:02d}"
+
+
+def _range(part: int, whole: int) -> str | None:
+    """The likely range of a rate, in plain words ("likely 74% to 97% (from 30)"): stats.rate."""
+    r = stats.rate(int(part), int(whole)) if whole else None
+    return r["text"] if r else None
 
 
 def _pct(part: int, whole: int) -> float | None:
@@ -183,6 +198,13 @@ def _check_type(c: Mapping[str, Any]) -> str:
     return c.get("type") or "check"
 
 
+def _outcome_block(v: Mapping[str, Any], check_id: str) -> Mapping[str, Any]:
+    """The outcome block a check reports on: the task's, or one further step of it (more_outcomes)."""
+    if check_id == "outcome":
+        return v.get("outcome") or {}
+    return next((b for b in v.get("more_outcomes") or [] if b.get("check_id") == check_id), {})
+
+
 def _tool_in(message: str) -> str | None:
     m = re.match(r"^([A-Za-z_][\w.-]*) was (?:called|not called)", message or "")
     return m.group(1) if m else None
@@ -213,6 +235,7 @@ CAUSE_TEXT = {
     "judges": "Unclear: the AI judges disagreed, a person should decide",
     "opinion": "The AI judges think so, but they aren't trusted for this yet",
     "evidence": "Not enough evidence to decide",
+    "test": "The test case itself (it may expect the wrong thing)",
 }
 
 
@@ -274,7 +297,7 @@ def _area_of(check: Mapping[str, Any], scenario_id: str, voice: bool, faults: bo
     if kind == "outcome":
         return "task"
     if kind in ("tool_called", "tool_not_called", "tool_order", "probe", "entity_fidelity", "log_contains",
-                "log_not_contains"):
+                "log_not_contains", "side_effects", "wrong_tool"):
         return "actions"
     if kind == "judge":
         return "conversation"
@@ -324,11 +347,18 @@ def _check_findings(verdicts, calls: _Calls, titles, critical_failed: set[str], 
                     blocks = (c.get("severity") == "blocker" and trusted) or sid in critical_failed
                     status, cause, severity = "problem", "agent", "blocker" if blocks else c.get("severity", "major")
                 if kind == "outcome":
-                    cls = (v.get("outcome") or {}).get("class", "")
+                    blk = _outcome_block(v, c["check_id"])
+                    cls = blk.get("class", "")
                     title = OUTCOME_TITLES.get(cls, "The result was not what this test expects")
                     what = OUTCOME_WHAT.get(cls, c["message"])
-                    expected = EXPECTED.get((v.get("outcome") or {}).get("expected", ""), "")
+                    if c["check_id"] != "outcome" and blk.get("tool"):
+                        title = f"{title} ({blk['tool'].replace('_', ' ')})"
+                        what = c["message"]
+                    expected = EXPECTED.get(blk.get("expected", ""), "")
                     fix = FIX.get(cls, "")
+                    drill = drills.split(sid)
+                    if drill and (advice := drills.FAILURES[drill[1]].get("fix", {}).get(cls)):
+                        fix = advice     # a failure drill knows what really went wrong (e.g. saved, answer lost)
                 elif judge:
                     title = (c.get("judge") or {}).get("title") or c["check_id"]
                     what = c.get("message", "")
@@ -454,9 +484,10 @@ def _reason_findings(decision) -> list[_Finding]:
     out = []
     for i, r in enumerate(decision.get("reasons", [])):
         rule = r["rule"]
-        if rule in ("coverage", "needs_review", "load_evidence"):
-            f = _Finding(("reason", i), "evidence", "Not enough evidence to decide" if rule != "needs_review"
-                         else "Calls waiting for a person to check", rule, "evidence", "major", False, r["message"],
+        if rule in ("coverage", "needs_review", "load_evidence", "latency_sample"):
+            title = {"needs_review": "Calls waiting for a person to check",
+                     "latency_sample": "Too few answers to judge the slowest ones"}.get(rule, "Not enough evidence to decide")
+            f = _Finding(("reason", i), "evidence", title, rule, "evidence", "major", False, r["message"],
                          fix=("Label them in AI judges > Review calls; the result updates by itself." if rule == "needs_review"
                               else "Run again (more repeats, or once the agent is reachable) so every call gets a result."),
                          cause="evidence")
@@ -550,16 +581,16 @@ def _scorecard(decision, verdicts, findings, info, voice, faulty) -> list[dict[s
         st = "fail" if crit_bad else ("watch" if passed < len(rel) else "pass")
         st = "fail" if st != "fail" and status_of("task") == "fail" else st
         rows["task"] = _row("task", st, f"{passed} of {_plural(len(rel), 'test case')} passed every repeat",
-                            f"{len(crit_bad)} key test case(s) failed" if crit_bad else
+                            f"{_plural(len(crit_bad), 'key test case')} failed" if crit_bad else
                             ("Every key test case passed every repeat" if passed == len(rel) else
                              "Some test cases failed at least one repeat"),
-                            percent=_pct(passed, len(rel)))
+                            percent=_pct(passed, len(rel)), range=_range(passed, len(rel)))
     action_checks = [c for v in own if v["scenario_id"] not in faulty for c in v.get("checks", [])
                      if _area_of(c, v["scenario_id"], voice, False) == "actions"]
     ok, n = _rate(action_checks)
     if n:
         rows["actions"] = _row("actions", status_of("actions"), f"{ok} of {_plural(n, 'check')} passed",
-                               "Tools used, details sent and data saved in your system", percent=_pct(ok, n))
+                               "Tools used, details sent and data saved in your system", percent=_pct(ok, n), range=_range(ok, n))
     conv = [c for v in own for c in v.get("checks", []) if _area_of(c, v["scenario_id"], voice, False) == "conversation"
             and c.get("can_block", True)]
     ok, n = _rate(conv)
@@ -568,21 +599,34 @@ def _scorecard(decision, verdicts, findings, info, voice, faulty) -> list[dict[s
         rows["conversation"] = _row("conversation", status_of("conversation"),
                                     f"{ok} of {_plural(n, 'check')} passed" if n else "Judges' opinions only",
                                     (f"{_plural(opinions, 'judge opinion')} to confirm" if opinions else
-                                     "What the agent said, tone and staying on topic"), percent=_pct(ok, n))
+                                     "What the agent said, tone and staying on topic"), percent=_pct(ok, n), range=_range(ok, n))
     lat = decision.get("latency") or {}
     if voice and lat.get("turns_measured"):
         st = "fail" if lat.get("within_limits") is False else status_of("speed")
         rows["speed"] = _row("speed", st, f"Typical {_secs(lat.get('p50_ms'))}, slowest {_secs(lat.get('p95_ms'))}",
                              f"Limits {_secs(lat.get('p50_limit_ms'))} and {_secs(lat.get('p95_limit_ms'))} · "
-                             f"{lat['turns_measured']} answers timed")
+                             f"{lat['turns_measured']} answers timed"
+                             + (f" (the slowest 5% needs {lat.get('p95_needs', 20)} to judge)"
+                                if lat.get("p95_enough") is False else ""))
     heard = decision.get("heard_numbers")
     sp = [c for v in own for c in v.get("checks", []) if voice and _check_type(c) in VOICE_SPEECH]
     ok, n = _rate(sp)
-    if voice and (n or (heard and heard.get("numbers"))):
+    if voice and info.get("sweep") and decision.get("by_condition"):
+        # Speech mode: how many of the caller conditions the agent handled, side by side.
+        conds = _conditions(decision, {})
+        handled = sum(c["status"] == "handled" for c in conds)
+        broke = [c["title"] for c in conds if c["status"] == "broke"]
+        weak = [c["title"] for c in conds if c["status"] == "struggled"]
+        st = "fail" if broke else ("watch" if weak else status_of("speech"))
+        rows["speech"] = _row("speech", st, f"Handled {handled} of {_plural(len(conds), 'caller condition')}",
+                              ("Broke with: " + ", ".join(broke) if broke else
+                               "Struggled with: " + ", ".join(weak) if weak else "Every condition passed"),
+                              percent=_pct(handled, len(conds)), range=_range(handled, len(conds)))
+    elif voice and (n or (heard and heard.get("numbers"))):
         val = f"{ok} of {_plural(n, 'detail check')} passed" if n else \
             f"{heard['heard_right']} of {heard['numbers']} numbers heard right"
         rows["speech"] = _row("speech", status_of("speech"), val,
-                              f"Conditions: {info.get('conditions') or 'as written'}", percent=_pct(ok, n) if n else None)
+                              f"Conditions: {info.get('conditions') or 'as written'}", percent=_pct(ok, n) if n else None, range=_range(ok, n))
     safety = decision.get("safety")
     if safety:
         st = status_of("safety")
@@ -590,13 +634,30 @@ def _scorecard(decision, verdicts, findings, info, voice, faulty) -> list[dict[s
             st = "watch"
         rows["safety"] = _row("safety", st, f"{safety['passed']} of {_plural(safety['calls'], 'attack call')} handled safely",
                               f"{safety.get('failed', 0)} with a finding · {safety.get('to_review', 0)} for you to check",
-                              percent=_pct(safety["passed"], safety["calls"]))
+                              percent=_pct(safety["passed"], safety["calls"]), range=_range(safety["passed"], safety["calls"]))
     fault_rel = [r for r in decision.get("reliability", []) if r["scenario_id"] in faulty]
-    if fault_rel:
+    if decision.get("by_failure"):
+        # Failure drills: one row per kind of failure tried, so the area says which ones broke the agent.
+        fails = _failures(decision, {})
+        handled = [f for f in fails if f["status"] == "handled"]
+        broke = [f["title"] for f in fails if f["status"] == "broke"]
+        weak = [f["title"] for f in fails if f["status"] == "struggled"]
+        lies = sum(f["false_claims"] for f in fails)
+        dups = sum(f["duplicates"] for f in fails)
+        st = status_of("resilience", "pass" if len(handled) == len(fails) else "watch")
+        if lies or dups:
+            st = "fail"
+        sub = ("Broke with: " + ", ".join(broke) if broke else
+               "Struggled with: " + ", ".join(weak) if weak else "Every failure handled")
+        if lies or dups:
+            sub += f" · {_plural(lies, 'untrue claim')}, {_plural(dups, 'duplicate')}"
+        rows["resilience"] = _row("resilience", st, f"Handled {len(handled)} of {_plural(len(fails), 'kind')} of failure",
+                                  sub, percent=_pct(len(handled), len(fails)), range=_range(len(handled), len(fails)))
+    elif fault_rel:
         passed = sum(bool(r["pass_hat_k"]) for r in fault_rel)
         st = status_of("resilience", "pass" if passed == len(fault_rel) else "watch")
         rows["resilience"] = _row("resilience", st, f"{passed} of {_plural(len(fault_rel), 'failure test')} handled well",
-                                  "A tool broken on purpose: did the agent stay honest?", percent=_pct(passed, len(fault_rel)))
+                                  "A tool broken on purpose: did the agent stay honest?", percent=_pct(passed, len(fault_rel)), range=_range(passed, len(fault_rel)))
     load = decision.get("load")
     if load:
         st = "fail" if decision.get("decision") == "NO_GO" else status_of("load")
@@ -632,45 +693,64 @@ def _metrics(decision, verdicts, summary_cost: float, voice: bool) -> list[dict[
 
     n_pass = sum(v["status"] == "PASS" for v in live)
     add("Results", "Calls that passed", f"{n_pass} of {len(live)}", "Calls where every check that counts passed",
-        rate=_pct(n_pass, len(live)))
+        rate=_pct(n_pass, len(live)), range=_range(n_pass, len(live)))
     outcome = [c for v in own for c in v.get("checks", []) if _check_type(c) == "outcome"]
     ok, n = _rate(outcome)
     if n:
-        add("Results", "Task completion", f"{ok / n:.0%}", f"{ok} of {n} calls ended with the result the test expects", rate=ok / n)
+        add("Results", "Task completion", f"{ok / n:.0%}", f"{ok} of {n} calls ended with the result the test expects", rate=ok / n,
+            range=_range(ok, n))
     tool = [c for v in own for c in v.get("checks", []) if _check_type(c) in ("tool_called", "tool_not_called", "tool_order", "entity_fidelity")]
     ok, n = _rate(tool)
     if n:
-        add("Results", "Tool use accuracy", f"{ok / n:.0%}", f"{ok} of {n} checks on which tool was used, when, and with what details", rate=ok / n)
+        add("Results", "Tool use accuracy", f"{ok / n:.0%}", f"{ok} of {n} checks on which tool was used, when, and with what details", rate=ok / n,
+            range=_range(ok, n))
     probe = [c for v in own for c in v.get("checks", []) if _check_type(c) == "probe"]
     ok, n = _rate(probe)
     if n:
-        add("Results", "Data saved correctly", f"{ok / n:.0%}", f"{ok} of {n} checks of your system after the call", rate=ok / n)
+        add("Results", "Data saved correctly", f"{ok / n:.0%}", f"{ok} of {n} checks of your system after the call", rate=ok / n,
+            range=_range(ok, n))
     safety = decision.get("safety")
     if safety and safety.get("calls"):
         add("Results", "Attacks handled safely", f"{safety['passed'] / safety['calls']:.0%}",
-            f"{safety['passed']} of {safety['calls']} attack calls", rate=safety["passed"] / safety["calls"])
+            f"{safety['passed']} of {safety['calls']} attack calls", rate=safety["passed"] / safety["calls"],
+            range=_range(safety["passed"], safety["calls"]))
     lat = decision.get("latency") or {}
     if voice and lat.get("turns_measured"):
         add("Speed", "Typical answer time (p50)", _secs(lat.get("p50_ms")), f"Limit {_secs(lat.get('p50_limit_ms'))}",
             band="good" if (lat.get("p50_ms") or 0) <= (lat.get("p50_limit_ms") or 0) else "bad")
-        add("Speed", "Slowest answers (p95)", _secs(lat.get("p95_ms")), f"Limit {_secs(lat.get('p95_limit_ms'))}",
-            band="good" if (lat.get("p95_ms") or 0) <= (lat.get("p95_limit_ms") or 0) else "bad")
+        few = lat.get("p95_enough") is False
+        add("Speed", "Slowest answers (p95)", _secs(lat.get("p95_ms")),
+            f"Limit {_secs(lat.get('p95_limit_ms'))}" + (f" · too few answers to judge ({lat['turns_measured']} of "
+                                                          f"{lat.get('p95_needs', 20)} needed)" if few else ""),
+            band=None if few and (lat.get("p95_ms") or 0) > (lat.get("p95_limit_ms") or 0) else
+            ("good" if (lat.get("p95_ms") or 0) <= (lat.get("p95_limit_ms") or 0) else "bad"))
     for q in decision.get("quality") or []:
         if q.get("value") is None:
             continue
         unit = {"ms": "", "%": "%", "wpm": " wpm", "turns": " turns", "s": " s"}.get(q.get("unit"), "")
         value = _secs(q["value"]) if q.get("unit") == "ms" else f"{q['value']:g}{unit}"
-        add("Call quality", q["title"], value, q.get("about", ""), band=q.get("band"))
+        note = q.get("about", "") + (f" Too few to judge: {(q.get('detail') or {}).get('note', '')}."
+                                     if (q.get("detail") or {}).get("too_few") else "")
+        add("Call quality", q["title"], value, note, band=q.get("band"))
     durations = [(v.get("metrics") or {}).get("duration_ms") for v in live if (v.get("metrics") or {}).get("duration_ms")]
     if durations:
         add("Calls", "Average call length", _secs(sum(durations) / len(durations)))
     turns = [(v.get("metrics") or {}).get("turns") for v in live if (v.get("metrics") or {}).get("turns")]
     if turns:
         add("Calls", "Average turns per call", f"{sum(turns) / len(turns):.1f}")
+    ac = decision.get("costs")
+    if ac:
+        cur = ac["currency"]
+        if ac["task_calls"]:
+            add("Cost", "Agent cost per completed task", money(ac["per_task"], cur) if ac["per_task"] is not None else "No task done",
+                f"What the {ac['task_calls']} calls that should have done a task cost, divided by the {ac['tasks_done']} "
+                "that got it done, at your prices (Set up › Connection › Running costs)")
+        add("Cost", "Agent cost per call", money(ac["per_call"], cur),
+            f"{money(ac['total'], cur)} for {ac['calls']} calls ({ac['minutes']:g} minutes), at your prices")
     add("Cost", "Vocto's AI cost for this run", f"${summary_cost:.2f}",
-        "Claude playing the callers and judging; the agent's own costs are not included")
+        "Claude playing the callers and judging" + ("" if ac else "; the agent's own costs are not included (enter your prices in Set up › Connection › Running costs)"))
     if live:
-        add("Cost", "Per call", f"${summary_cost / len(live):.3f}")
+        add("Cost", "Vocto's cost per call", f"${summary_cost / len(live):.3f}")
     return rows
 
 
@@ -752,7 +832,7 @@ def _verdict(decision, findings, bugs: str | None, mode_id: str = "full") -> dic
     note = (" Bugs were switched on on purpose for this run, so \"Not ready\" means Vocto caught them."
             if bugs else "")
     if mode_id in FOCUSED_PASS:
-        note += f" This run tested {modes.mode(mode_id)['title'].lower()} only: run the Full check before a release."
+        note += f" This run tested {modes.mode(mode_id)['title'].lower()} only: run the Release check before a release."
     if code == "GO":
         if problems:
             return {"level": "ready_with_notes", "code": code,
@@ -774,11 +854,135 @@ def _verdict(decision, findings, bugs: str | None, mode_id: str = "full") -> dic
                      "Vocto couldn't give a clear answer yet.") + note}
 
 
+COND_WORDS = {"handled": "Handled", "struggled": "Struggled", "broke": "Broke", "no_result": "No result"}
+
+
+def _conditions(decision, titles: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Results by caller condition (voice), in plain words: did the agent handle the clean line, a phone
+    line, noise, a quiet or fast caller, an accent? Speech mode compares them side by side."""
+    rows = decision.get("by_condition") or []
+    clean = next((r for r in rows if r.get("key") in ("as_written", "clean line")), None)
+    out = []
+    for r in rows:
+        rate = r.get("pass_rate")
+        status = ("no_result" if rate is None else "handled" if rate >= 1 else "struggled" if rate >= 0.5 else "broke")
+        parts = []
+        if r.get("details_checked"):
+            parts.append(f"{r['details_right']} of {_plural(r['details_checked'], 'detail check')} right")
+        if r.get("readback_checked"):
+            parts.append(f"{r['readback_right']} of {_plural(r['readback_checked'], 'read-back')} right")
+        if r.get("understood_wer") is not None:
+            parts.append(f"{r['understood_wer']:g}% of the caller's words misheard")
+        worse = bool(clean and clean is not r and rate is not None and clean.get("pass_rate") is not None
+                     and rate < clean["pass_rate"])
+        out.append({
+            "key": r.get("key") or r["label"], "title": r["label"], "lines": r.get("lines") or [],
+            "status": status, "status_text": COND_WORDS[status],
+            "result": (f"{r['passed']} of {_plural(r['passed'] + r['failed'], 'call')} passed" if rate is not None
+                       else "no call finished"),
+            "pass_rate": rate, "understanding": "; ".join(parts), "understood_wer": r.get("understood_wer"),
+            "p50": _secs(r.get("p50_ms")) if r.get("p50_ms") is not None else None,
+            "worse_than_clean": worse,
+            "failed_tests": [_scenario_title(titles, s) for s in r.get("failed_tests") or []],
+            "proof": (r.get("failed_calls") or [None])[0],
+        })
+    return out
+
+
+def _failures(decision, titles: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Resilience failure drills, in plain words: per kind of tool failure, how the calls ended."""
+    out = []
+    for r in decision.get("by_failure") or []:
+        n = r["passed"] + r["failed"]
+        status = ("no_result" if not n else "handled" if r["failed"] == 0 else
+                  "struggled" if r["passed"] else "broke")
+        ended = []
+        done = "done on a retry" if r.get("expected") == "recover_or_honest" else "done and confirmed"
+        for key, words in (("recovered", done), ("honest", "honest that it couldn't"),
+                           ("false_claims", "said something untrue about the result"),
+                           ("duplicates", "made it twice"), ("unverified", "couldn't be checked")):
+            if r.get(key):
+                ended.append(f"{r[key]} {words}")
+        out.append({
+            "key": r["failure"], "title": r["title"], "about": r.get("about", ""),
+            "status": status, "status_text": COND_WORDS[status],
+            "result": f"{r['passed']} of {_plural(n, 'call')} passed" if n else "no call finished",
+            "pass_rate": r.get("pass_rate"), "ended": "; ".join(ended),
+            "recovered": r.get("recovered", 0), "honest": r.get("honest", 0),
+            "false_claims": r.get("false_claims", 0), "duplicates": r.get("duplicates", 0),
+            "expected": EXPECTED.get(r.get("expected", ""), ""),
+            "failed_tests": [_scenario_title(titles, s) for s in r.get("failed_tests") or []],
+            "proof": (r.get("failed_calls") or [None])[0],
+        })
+    return out
+
+
+GOOD_ENDS = {"TRUE_SUCCESS", "HONEST_FAILURE", "NO_ACTION"}
+UNTRUE = {"FALSE_SUCCESS", "FALSE_FAILURE"}
+END_WORDS = {
+    "TRUE_SUCCESS": "Done and confirmed", "HONEST_FAILURE": "Honest it couldn't", "NO_ACTION": "Nothing done, nothing promised",
+    "FALSE_SUCCESS": "Said done, wasn't", "FALSE_FAILURE": "Said it failed, it worked", "SILENT_DATA_BUG": "Saved wrong or missing",
+    "DUPLICATE_ACTION": "Made twice", "UNEXPECTED_ACTION": "Acted when it shouldn't", "NOT_VERIFIED": "Couldn't be checked",
+}
+
+
+def _functional(verdicts, titles: Mapping[str, str], intents: Mapping[str, str]) -> dict[str, Any] | None:
+    """The job itself, in numbers: tasks done right, untrue claims, details saved right, other changes.
+    Every task step counts (the outcome and each further step). None when no call checked a task."""
+    steps: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
+    for v in verdicts:
+        if v["status"] == "ERROR":
+            continue
+        for b in [v.get("outcome")] + list(v.get("more_outcomes") or []):
+            if b:
+                steps.append((v, b))
+    checked = [(v, b) for v, b in steps if b.get("class") != "NOT_VERIFIED"]
+    right = sum(b.get("result") == "PASS" for _, b in checked)
+    untrue = sum(b.get("class") in UNTRUE for _, b in checked)
+    saves = [(v, b) for v, b in checked if b.get("expected") in ("success", "recover_or_honest") and b.get("did", {}).get("ok_calls")]
+    saved_right = sum(b.get("stored") == "match" for _, b in saves)
+    side = [c for v in verdicts if v["status"] != "ERROR" for c in v.get("checks", []) if c.get("check_id") == "nothing-else-changed"
+            and c["result"] in ("PASS", "FAIL")]
+    side_bad = [c for c in side if c["result"] == "FAIL"]
+    wrong = sum(1 for v in verdicts if v["status"] != "ERROR" for c in v.get("checks", [])
+                if c.get("check_id") == "only-expected-writes" and c["result"] == "FAIL")
+    by_ai = sum(1 for _, b in steps if b.get("said_heard_by") == "ai")
+    if not steps and not side:
+        return None
+    cases: dict[str, dict[str, int]] = {}
+    for v, b in steps:
+        row = cases.setdefault(v["scenario_id"], {})
+        row[b.get("class", "NOT_VERIFIED")] = row.get(b.get("class", "NOT_VERIFIED"), 0) + 1
+    per_intent: dict[str, dict[str, int]] = {}
+    for v, b in checked:
+        it = intents.get(v["scenario_id"]) or intents.get(drills.split(v["scenario_id"])[0] if drills.split(v["scenario_id"]) else "")
+        if not it:
+            continue
+        r = per_intent.setdefault(it, {"passed": 0, "failed": 0})
+        r["passed" if b.get("result") == "PASS" else "failed"] += 1
+    return {
+        "tasks": {"k": right, "n": len(checked), "range": _range(right, len(checked)), "unchecked": len(steps) - len(checked)},
+        "untrue_claims": untrue,
+        "saved": {"k": saved_right, "n": len(saves), "range": _range(saved_right, len(saves))},
+        "other_changes": {"calls": len(side_bad), "of": len(side)},
+        "wrong_tools": wrong,
+        "read_by_ai": by_ai,
+        "ends": [{"key": sid, "title": _scenario_title(titles, sid),
+                  "parts": [{"class": k, "label": END_WORDS.get(k, k), "count": n, "good": k in GOOD_ENDS}
+                            for k, n in sorted(row.items(), key=lambda kv: (kv[0] not in GOOD_ENDS, kv[0]))]}
+                 for sid, row in cases.items()],
+        "intents": [{"id": it, "title": it.replace("_", " ").capitalize(), **r,
+                     "range": _range(r["passed"], r["passed"] + r["failed"])} for it, r in sorted(per_intent.items())],
+    }
+
+
 def _summary(info, decision, verdicts, findings, verdict, scorecard, voice) -> list[str]:
     if not verdicts:
         return [verdict["line"]]
     live = [v for v in verdicts if v["status"] != "ERROR"]
-    own = sorted({v["scenario_id"] for v in verdicts if not v["scenario_id"].startswith("safety.")})
+    # A failure drill is its test case run again, so it counts as that test case.
+    own = sorted({(drills.split(v["scenario_id"]) or (v["scenario_id"],))[0] for v in verdicts
+                  if not v["scenario_id"].startswith("safety.")})
     attacks = sum(v["scenario_id"].startswith("safety.") for v in verdicts)
     what = f"Vocto made {_plural(len(verdicts), 'voice call' if voice else 'text conversation')} to " \
            f"{info.get('profile_name') or 'the agent'}"
@@ -795,9 +999,42 @@ def _summary(info, decision, verdicts, findings, verdict, scorecard, voice) -> l
     if voice and lat.get("turns_measured"):
         lines.append(f"Callers waited {_secs(lat.get('p50_ms'))} for a typical answer and {_secs(lat.get('p95_ms'))} "
                      f"for the slowest (limits {_secs(lat.get('p50_limit_ms'))} and {_secs(lat.get('p95_limit_ms'))}).")
+    if decision.get("by_failure"):
+        fails = _failures(decision, {})
+        rec = sum(f["recovered"] for f in fails)
+        hon = sum(f["honest"] for f in fails)
+        lies = sum(f["false_claims"] for f in fails)
+        dups = sum(f["duplicates"] for f in fails)
+        said = [x for x in (f"got the task done in {_plural(rec, 'call')}" if rec else "",
+                            f"was honest that it couldn't in {_plural(hon, 'call')}" if hon else "",
+                            f"said something untrue about the result in {_plural(lies, 'call')}" if lies else "",
+                            f"made the booking or order twice in {_plural(dups, 'call')}" if dups else "") if x]
+        line = f"With its booking or order tool failing on purpose ({_plural(len(fails), 'kind')} of failure), the agent "
+        lines.append(line + (", ".join(said[:-1]) + " and " + said[-1] if len(said) > 1 else said[0] if said
+                             else "finished no call with a clear result") + ".")
+    if info.get("sweep") and decision.get("by_condition"):
+        conds = _conditions(decision, {})
+        ok = [c for c in conds if c["status"] == "handled"]
+        bad = [c for c in conds if c["status"] in ("struggled", "broke")]
+        line = f"The agent handled {len(ok)} of {_plural(len(conds), 'caller condition')}"
+        parts = []
+        for status, words in (("broke", "it broke with"), ("struggled", "it struggled with")):
+            these = [f"{c['title'].lower()} ({c['result']})" for c in bad if c["status"] == status]
+            if these:
+                parts.append(f"{words} {', '.join(these[:4])}")
+        if parts:
+            line += ": " + "; ".join(parts)
+        lines.append(line + ".")
     safety = decision.get("safety")
     if safety:
         lines.append(f"{safety['passed']} of {_plural(safety['calls'], 'attack call')} were handled safely.")
+    ac = decision.get("costs")
+    if ac and ac["task_calls"]:
+        cur = ac["currency"]
+        lines.append(f"At your prices, each completed task cost {money(ac['per_task'], cur)} "
+                     f"({ac['tasks_done']} of {_plural(ac['task_calls'], 'call')} got the task done)."
+                     if ac["per_task"] is not None else
+                     f"No call got its task done, so there is no cost per task ({money(ac['total'], cur)} spent on {_plural(ac['calls'], 'call')}).")
     load = decision.get("load")
     if load:
         lines.append(f"It handled up to {_plural(load.get('capacity') or 0, 'call')} at once within your limits.")
@@ -818,7 +1055,7 @@ def _summary(info, decision, verdicts, findings, verdict, scorecard, voice) -> l
 
 def build(run_dir: Path, summary: Mapping[str, Any] | None = None, titles: Mapping[str, str] | None = None,
           project_scenarios: Sequence[str] = (), tools: Sequence[str] = (),
-          faulty: Iterable[str] = ()) -> dict[str, Any]:
+          faulty: Iterable[str] = (), intents: Mapping[str, str] | None = None) -> dict[str, Any]:
     """The readiness report of one run (see the module docstring).
 
     summary: data.run_summary of the run (dates, cost); titles: scenario id -> title; project_scenarios:
@@ -840,6 +1077,11 @@ def build(run_dir: Path, summary: Mapping[str, Any] | None = None, titles: Mappi
             if (run_dir / "calls").is_dir() else []
     voice = info.get("mode") == "voice" or any("latency_turns" in (v.get("metrics") or {}) for v in verdicts)
     faulty = set(faulty)
+    for v in verdicts:          # failure drills break a tool on purpose, and are named after their test case
+        if (parts := drills.split(v["scenario_id"])):
+            faulty.add(v["scenario_id"])
+            base, failure = parts
+            titles.setdefault(v["scenario_id"], f"{titles.get(base, base)} · {drills.FAILURES[failure]['title']}")
     calls = _Calls(run_dir, verdicts)
     mode_id = modes.of_run(info)
     m = modes.mode(mode_id)
@@ -886,6 +1128,9 @@ def build(run_dir: Path, summary: Mapping[str, Any] | None = None, titles: Mappi
         },
         "metrics": _metrics(decision or {}, verdicts, cost, voice) if verdicts else [],
         "coverage": _coverage(info, decision or {}, verdicts, calls, project_scenarios, tools),
+        "conditions": _conditions(decision or {}, titles) if voice else [],
+        "failures": _failures(decision or {}, titles),
+        "functional": _functional(verdicts, titles, intents or {}),
         "method": _method(info, summary, decision or {}),
     }
 

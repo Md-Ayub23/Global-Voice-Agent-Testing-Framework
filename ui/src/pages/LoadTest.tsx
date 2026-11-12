@@ -55,7 +55,7 @@ function effective(own: Obj, defaults: LoadPage["defaults"]): LoadSettings {
 
 // `embedded`: shown as the Run tab of Test modes › Load & capacity, under that page's own header.
 export function LoadTestPage({ project, query, embedded }: { project: Project; query: URLSearchParams; embedded?: boolean }) {
-  useCrumbs(embedded ? null : [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Load test" }]);
+  useCrumbs(embedded ? null : [{ label: project.name, href: projectHref(project.key) }, { label: "Load test" }]);
   const here = embedded ? "/test/load" : "/load";
   const profiles = project.profiles;
   const wanted = query.get("file");
@@ -66,7 +66,7 @@ export function LoadTestPage({ project, query, embedded }: { project: Project; q
     <div className="flex items-center gap-2.5 min-w-0 max-w-full">
       <span className="text-muted text-[13px] flex-none">Channel</span>
       <Seg id="profile-file" value={file} onChange={(f) => navigate(`${projectHref(project.key, here)}?${qs({ file: f })}`)}
-        options={profiles.map((p) => ({ value: p.file, label: channelLabel(p, profiles), icon: p.mode === "voice" ? "mic" : "text" }))} />
+        options={profiles.map((p) => ({ value: p.file, label: channelLabel(p, profiles, project.example), icon: p.mode === "voice" ? "mic" : "text" }))} />
     </div>
   );
   return (
@@ -154,8 +154,11 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
   };
 
   return (
+    <div className="flex flex-col gap-4">
+    {/* The settings and the pinned Start panel share their own grid, so the pinned panel stops where the
+        settings end and never slides over the past load tests below. */}
     <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px]">
-      <div className="flex flex-col gap-4 stagger">
+      <div className="flex flex-col gap-4 min-w-0">
         {page.agent.launched_per_call && (
           <Notice tone="warn" icon="info">
             Vocto starts its own copy of this agent for every call ({profile?.connection.type || "launch"}), so a load test measures many separate copies, not one shared server.
@@ -176,7 +179,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
             {SHAPES.map((x) => (
               <Choice key={x.value} radio on={s.shape === x.value} data-shape={x.value} onClick={() => set("shape", x.value === page.defaults.shape ? undefined : x.value)}>
                 <b className="block font-semibold">{x.label}</b>
-                <div className="text-ink-2 text-[12.5px]">{x.about}</div>
+                <div className="text-ink-2 text-[13px]">{x.about}</div>
               </Choice>
             ))}
           </div>
@@ -205,11 +208,11 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
             <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="load-caller">
               <Choice radio on={s.caller === "free"} data-caller="free" onClick={() => set("caller", undefined)}>
                 <b className="block font-semibold">Scripted (free)</b>
-                <div className="text-ink-2 text-[12.5px]">Each test's own lines and the rule-based caller. No Claude spend, however many calls.</div>
+                <div className="text-ink-2 text-[13px]">Each test's own lines and the rule-based caller. No Claude spend, however many calls.</div>
               </Choice>
               <Choice radio on={s.caller === "claude"} data-caller="claude" onClick={() => set("caller", "claude")}>
                 <b className="block font-semibold">Claude</b>
-                <div className="text-ink-2 text-[12.5px]">Real conversations, as in a normal run. Costs money per call: keep the test small.</div>
+                <div className="text-ink-2 text-[13px]">Real conversations, as in a normal run. Costs money per call: keep the test small.</div>
               </Choice>
             </div>
             <div className="flex flex-wrap gap-x-8 gap-y-3 mt-1">
@@ -219,7 +222,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                   onChange={(v) => page.agent.agent_process && set("start_agent", v || undefined)} />
               </label>
             </div>
-            <div className="text-muted text-[12px]">
+            <div className="text-muted text-[13px]">
               {s.judges ? "The judges read every load call (money). Only trusted items count. " : "Judges are off: load calls are checked by the hard checks (tools, database, words said). "}
               {page.agent.agent_process ? "Vocto can start the agent before the first call and stop it after the last." : "Starting the agent needs Set up › Connection › “How to start the agent”."}
             </div>
@@ -230,7 +233,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                 {(system?.conditions || [{ id: "as_written", title: "As written", about: "Each test's own audio." }]).map((c) => (
                   <Choice key={c.id} radio on={s.conditions === c.id} data-conditions={c.id} onClick={() => set("conditions", c.id === "as_written" ? undefined : c.id)}>
                     <b className="block font-semibold">{c.title}</b>
-                    <div className="text-ink-2 text-[12.5px]">{c.about}</div>
+                    <div className="text-ink-2 text-[13px]">{c.about}</div>
                   </Choice>
                 ))}
               </div>
@@ -244,15 +247,15 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                   <Choice key={t.id} on={using.includes(t.id)} data-test={t.id} onClick={() => toggleTest(t.id)}>
                     <b className="block font-semibold text-[13px]">{t.title}</b>
                     <div className="flex flex-wrap gap-1 mt-0.5">
-                      <span className="text-muted text-[11.5px] font-mono">{t.id}</span>
-                      {t.criticality === "critical" && <Chip tone="bad" className="text-[11px]">critical</Chip>}
-                      {t.faults && <Chip tone="warn" className="text-[11px]">planted tool fault</Chip>}
+                      <span className="text-muted text-[13px] font-mono">{t.id}</span>
+                      {t.criticality === "critical" && <Chip tone="bad" className="text-[13px]">critical</Chip>}
+                      {t.faults && <Chip tone="warn" className="text-[13px]">planted tool fault</Chip>}
                     </div>
                   </Choice>
                 ))}
               </div>
             ) : <Notice tone="warn">This channel has no tests yet. Add some in Set up › Test cases.</Notice>}
-            <div className="text-muted text-[12px]">
+            <div className="text-muted text-[13px]">
               The test data (database rows) is loaded once, before the first call: many calls share one copy of it, as callers share a real system.
               A booking test may then find its slot already taken; that lowers the pass rate but never counts as a broken rule.
             </div>
@@ -282,17 +285,18 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                 ["slowdown", "Slower at the top", "p95 at the top level against the lowest level (both limits).", [["pct", "%"], ["ms", "ms"]]],
                 ["pass_drop", "Fewer tests passed", "Pass rate at the top level against the lowest level.", [["points", "points"]]],
                 ["drift", "Drift over a soak", "The last window against the first (p95 and failed calls).", [["pct", "%"]]],
+                ["recovery", "Recovery after a spike", "After the spike, answers must be back within this of before it (p95 and failed calls).", [["pct", "%"], ["ms", "ms"]]],
               ] as [keyof LoadLimits, string, string, [string, string][]][]).map(([k, title, about, fields]) => {
                 const cur = s.limits[k] as unknown as Record<string, number | boolean>;
                 const def = page.defaults.limits[k] as unknown as Record<string, number | boolean>;
                 return (
                   <tr key={k} data-trend={k}>
-                    <td className="min-w-[220px]"><b>{title}</b><div className="text-muted text-[11.5px]">{about}</div></td>
-                    <td className="min-w-[190px]">
-                      <div className="flex gap-2">
+                    <td className="min-w-[160px]"><b>{title}</b><div className="text-muted text-[13px]">{about}</div></td>
+                    <td>
+                      <div className="flex flex-wrap gap-2">
                         {fields.map(([f, unit]) => (
-                          <label key={f} className="flex items-center gap-1.5 text-[12.5px] text-muted">
-                            <span className="w-[84px]"><Num id={`load-${k}-${f}`} min={0} value={asObj(ownLimits[k])[f] as number} placeholder={String(def[f])}
+                          <label key={f} className="flex items-center gap-1.5 text-[13px] text-muted">
+                            <span className="w-[76px]"><Num id={`load-${k}-${f}`} min={0} value={asObj(ownLimits[k])[f] as number} placeholder={String(def[f])}
                               onChange={(v) => setLimit(k, v, f)} /></span>{unit}
                           </label>
                         ))}
@@ -303,7 +307,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                 );
               })}
             </Table>
-            <div className="text-muted text-[12px] mt-2">Off: a warning on the report. On: also “Not ready”. They compare two parts of one test, so a small agent with few calls gives noisy numbers.</div>
+            <div className="text-muted text-[13px] mt-2">Off: a warning on the report. On: also “Not ready”. They compare two parts of one test, so a small agent with few calls gives noisy numbers.</div>
           </div>
         </Card>
         <Problems items={problems} />
@@ -318,17 +322,17 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
             <>
               <div ref={chartBox}><LoadChart stages={plan.stages} width={chartW} height={170} /></div>
               <dl className="grid grid-cols-2 gap-x-4 gap-y-2 mt-3 text-[13px]">
-                <div><dt className="text-muted text-[12px]">Takes</dt><dd className="font-semibold" id="plan-length">{fmtSeconds(total)}</dd></div>
-                <div><dt className="text-muted text-[12px]">Most at once</dt><dd className="font-semibold" id="plan-peak">{peak}</dd></div>
-                <div><dt className="text-muted text-[12px]">Calls, roughly</dt><dd className="font-semibold">~{roughCalls(plan.stages, callSecs, s.pause_seconds, s.max_calls)}{" "}
-                  <span className="text-muted font-normal text-[12px]">(cap {s.max_calls})</span></dd></div>
-                <div><dt className="text-muted text-[12px]">Tests used</dt><dd className="font-semibold">{using.length}</dd></div>
-                {voice && <div className="col-span-2"><dt className="text-muted text-[12px]">p95 limit per stage</dt>
+                <div><dt className="text-muted text-[13px]">Takes</dt><dd className="font-semibold" id="plan-length">{fmtSeconds(total)}</dd></div>
+                <div><dt className="text-muted text-[13px]">Most at once</dt><dd className="font-semibold" id="plan-peak">{peak}</dd></div>
+                <div><dt className="text-muted text-[13px]">Calls, roughly</dt><dd className="font-semibold">~{roughCalls(plan.stages, callSecs, s.pause_seconds, s.max_calls)}{" "}
+                  <span className="text-muted font-normal text-[13px]">(cap {s.max_calls})</span></dd></div>
+                <div><dt className="text-muted text-[13px]">Tests used</dt><dd className="font-semibold">{using.length}</dd></div>
+                {voice && <div className="col-span-2"><dt className="text-muted text-[13px]">p95 limit per stage</dt>
                   <dd className="font-semibold">{fmtMs((ownLimits.p95_ms as number) ?? page.voice_p95_ms)}</dd></div>}
               </dl>
               <div className="mt-3 grid gap-1">
                 {plan.stages.map((x) => (
-                  <div key={x.index} className="flex items-center gap-2 text-[12.5px]">
+                  <div key={x.index} className="flex items-center gap-2 text-[13px]">
                     <span className="flex-1 text-ink-2">{x.name}</span>
                     <span className="tabular-nums font-semibold">{x.level}×</span>
                     <span className="tabular-nums text-muted w-[64px] text-right">{fmtSeconds(x.seconds)}</span>
@@ -347,8 +351,8 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                 options={[{ value: "local", label: "Real speech" }, { value: "codec", label: "Test tones" }]} />
             </Field>
           )}
-          {voice && speech === "local" && <div className="text-muted text-[12px] -mt-1.5 mb-3">Every call speaks and listens on this computer. Many at once need a strong machine: Vocto watches its own lag and says if it fell behind.</div>}
-          {voice && speech === "codec" && <div className="text-muted text-[12px] -mt-1.5 mb-3">Tones only: for testing Vocto itself or an agent that doesn't need words.</div>}
+          {voice && speech === "local" && <div className="text-muted text-[13px] -mt-1.5 mb-3">Every call speaks and listens on this computer. Many at once need a strong machine: Vocto watches its own lag and says if it fell behind.</div>}
+          {voice && speech === "codec" && <div className="text-muted text-[13px] -mt-1.5 mb-3">Tones only: for testing Vocto itself or an agent that doesn't need words.</div>}
           {Object.keys(profile?.offline_options || {}).length > 0 && (
             <label className="block mb-3"><Switch id="load-offline" checked={offline} onChange={setOffline} label="Free dry run (the agent's offline options)" /></label>
           )}
@@ -364,16 +368,17 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
           <Button id="start-load" variant="primary" icon="play" className="w-full justify-center" busy={starting}
             disabled={starting || running || dirty || !!plan.error || !!page.error || !using.length || !!noKey}
             onClick={() => void start()}>Start load test</Button>
-          <div className="text-muted text-[12px] mt-2">
+          <div className="text-muted text-[13px] mt-2">
             {dirty ? "Save your changes first." : page.error ? page.error : `About ${fmtSeconds(total)}. Calls already finished stay saved if you stop it.`}
           </div>
-          <div className="text-muted text-[12px] mt-2">From a terminal: <code className="font-mono">uv run python -m vatf load {project.path}{page.file !== "profile.yaml" ? ` --profile ${page.file}` : ""}{s.start_agent ? " --start-agent" : ""}</code></div>
+          <div className="text-muted text-[13px] mt-3">From a terminal:<code className="block mt-1 px-2.5 py-1.5 rounded-[10px] bg-surface-2 border border-line font-mono text-[12px] text-ink-2 break-all leading-relaxed">uv run python -m vatf load {project.path}{page.file !== "profile.yaml" ? ` --profile ${page.file}` : ""}{s.start_agent ? " --start-agent" : ""}</code></div>
         </Card>
 
         <BaselineCard page={page} projectKey={project.key} />
       </div>
+    </div>
 
-      <div className="xl:col-span-2"><PastRuns page={page} projectKey={project.key} /></div>
+      <PastRuns page={page} projectKey={project.key} />
     </div>
   );
 }
@@ -386,11 +391,11 @@ function BaselineCard({ page, projectKey }: { page: LoadPage; projectKey: string
       {page.baseline_problem && <Notice tone="warn" className="mb-2">{page.baseline_problem}</Notice>}
       {b ? (
         <div className="grid gap-1 text-[13px]">
-          <div><a href={projectHref(projectKey, `/runs/${b.run_id}`)} className="font-mono text-[12.5px]">{b.run_id}</a> · <Badge status={b.decision} label={decisionTitle(b.decision)} /></div>
+          <div><a href={projectHref(projectKey, `/runs/${b.run_id}`)} className="font-mono text-[13px]">{b.run_id}</a> · <Badge status={b.decision} label={decisionTitle(b.decision)} /></div>
           <div className="text-ink-2">Capacity {b.load?.capacity ?? "—"} at once · set {fmtDate(b.set_at)}</div>
-          {b.note && <div className="text-muted text-[12px]">{b.note}</div>}
+          {b.note && <div className="text-muted text-[13px]">{b.note}</div>}
         </div>
-      ) : <div className="text-muted text-[12.5px]">None yet. Open a load test you trust in Results and choose Set as baseline.</div>}
+      ) : <div className="text-muted text-[13px]">None yet. Open a load test you trust in Results and choose Set as baseline.</div>}
     </Card>
   );
 }

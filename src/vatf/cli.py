@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .agent_process import AgentProcess, AgentProcessError
 from .conditions import PRESETS
+from .languages import LANGUAGES
 from .connectors import is_voice
 from .llm import DEFAULT_MODEL, Budget, ClaudeClient
 from .loader import ProjectError, load_project
@@ -30,7 +31,7 @@ from .alerts import send_alerts
 from .attacks import is_safety
 from .baseline import BaselineError, baseline_path, clear_baseline, load_baseline, run_snapshot, set_baseline
 from .cireport import write_ci_reports
-from .compare import compare
+from .compare import as_ab, compare
 from .health import scenario_ids as health_scenarios, settings as health_settings
 from .modes import CHOICES as MODE_CHOICES
 from .util import read_json, write_json
@@ -103,10 +104,36 @@ def _config(args) -> RunConfig:
                                          check_model=args.stt_check_model),
                      judges=not args.no_judges, safety=args.safety,
                      conditions=getattr(args, "conditions", None) or "as_written",
+                     sweep=tuple(_sweep(getattr(args, "sweep", None))),
+                     drills=tuple(_drills(getattr(args, "drills", None))),
                      # The exit check proves Vocto catches each bug on its own, so it never compares.
                      baseline=getattr(args, "baseline", None) or "none",
                      trigger="ci" if getattr(args, "ci", False) else "manual",
-                     test_mode=getattr(args, "test_mode", None))
+                     test_mode=getattr(args, "test_mode", None),
+                     language=getattr(args, "language", None) or None)
+
+
+def _sweep(text: str | None) -> list[str]:
+    """--sweep phone,noisy,accent:indian -> the Speech mode conditions, checked."""
+    from .conditions import known
+
+    out = [c.strip() for c in (text or "").split(",") if c.strip()]
+    bad = [c for c in out if not known(c)]
+    if bad:
+        raise SystemExit(f"error: unknown caller condition(s) {', '.join(bad)} "
+                         f"(use {', '.join(PRESETS)}, or accent:<id>)")
+    return list(dict.fromkeys(out))
+
+
+def _drills(text: str | None) -> list[str]:
+    """--drills timeout,error,saved_lost -> the Resilience failures to try, checked."""
+    from .drills import FAILURES
+
+    out = [c.strip() for c in (text or "").split(",") if c.strip()]
+    bad = [c for c in out if c not in FAILURES]
+    if bad:
+        raise SystemExit(f"error: unknown failure(s) {', '.join(bad)} (use {', '.join(FAILURES)})")
+    return list(dict.fromkeys(out))
 
 
 def _llm(args, project):
@@ -165,12 +192,88 @@ def cmd_run(args) -> int:
             print(f"error: nothing to run in the {config.test_mode} tests: {modes.why_empty(config.test_mode)}",
                   file=sys.stderr)
             return 3
+    if getattr(args, "ab_with", None):
+        return _ab(args, project, llm, config)
     try:
         decision = _run(project, config, llm, args.planted_bug, args.start_agent)
     except AgentProcessError as e:
         print(f"error: {e}", file=sys.stderr)
         return 3
     return _finish(args, project, decision, llm)
+
+
+def _ab_label(file: str, options: dict) -> str:
+    stem = file[:-5] if file.endswith(".yaml") else file
+    return stem + (" (" + ", ".join(f"{k}={v}" for k, v in options.items()) + ")" if options else "")
+
+
+def _ab(args, project_a, llm, config) -> int:
+    """A/B test: version A (--profile) and version B (--ab-with, and/or --ab-agent-opt) run the same tests
+    with the same settings, one after the other, then B is compared with A (ab.json in B's run folder).
+    Nothing in the comparison blocks: it shows which version does better, the owner decides."""
+    if args.planted_bug:
+        print("error: an A/B test compares two versions as they are; it can't plant a bug", file=sys.stderr)
+        return 3
+    b_opts = _agent_options(args.ab_agent_opt or [])
+    if args.ab_with == args.profile and not b_opts:
+        print("error: version B is the same as version A: pick another channel (--ab-with) or set an agent "
+              "option for B (--ab-agent-opt)", file=sys.stderr)
+        return 3
+    try:
+        project_b = load_project(args.project, args.ab_with)
+    except ProjectError as e:
+        print(f"error: version B ({args.ab_with}): {e}", file=sys.stderr)
+        return 3
+    if args.offline:
+        project_b = project_b.with_agent_options(project_b.profile["connection"].get("offline_options", {}))
+    a_opts = _agent_options(args.agent_opt or [])
+    project_b = project_b.with_agent_options({**a_opts, **b_opts})
+    if is_voice(project_a.profile) != is_voice(project_b.profile):
+        print("error: both versions must be called the same way (both by voice or both by text)", file=sys.stderr)
+        return 3
+    group = f"ab-{time.strftime('%Y%m%d-%H%M%S')}"
+    labels = {"A": _ab_label(args.profile, a_opts), "B": _ab_label(args.ab_with, {**(a_opts if args.ab_with == args.profile else {}), **b_opts})}
+    runs = Path(args.root) / args.runs_dir
+    ids = {}
+    for side, proj in (("A", project_a), ("B", project_b)):
+        print(f"\n=== Version {side}: {labels[side]} ===", flush=True)
+        cfg = replace(config, baseline="none", ab={"group": group, "side": side, "label": labels[side]})
+        start = args.start_agent and bool(proj.profile.get("agent_process"))
+        try:
+            decision = _run(proj, cfg, llm, None, start)
+        except AgentProcessError as e:
+            print(f"error: version {side}: {e}", file=sys.stderr)
+            return 3
+        _finish(args, proj, decision, llm)
+        ids[side] = decision["run_id"]
+    for side, other in (("A", "B"), ("B", "A")):
+        path = runs / ids[side] / "run.json"
+        info = read_json(path)
+        info["ab"] = {**info["ab"], "other": ids[other], "other_label": labels[other]}
+        write_json(path, info)
+    titles = {sc["id"]: sc.get("title", sc["id"]) for sc in [*project_a.scenarios, *project_b.scenarios]}
+    cmp = as_ab(compare(run_snapshot(runs / ids["A"], titles), run_snapshot(runs / ids["B"], titles),
+                        {"regression": {"enabled": False}}, "ab"))
+    cmp["labels"] = labels
+    write_json(runs / ids["B"] / "ab.json", cmp)
+    print()
+    print(ab_text(cmp, labels))
+    return 0
+
+
+def ab_text(cmp, labels) -> str:
+    """Version B against version A, in plain lines: what B does worse, then better."""
+    n = cmp["counts"]
+    lines = [f"A/B: version B ({labels['B']}) against version A ({labels['A']}): "
+             f"{n['regression']} test(s) fail only in B, {n['worse']} thing(s) worse, {n['better']} better."]
+    if not cmp["like_for_like"]:
+        lines.append("  note: the two runs were not made the same way (" +
+                     ", ".join(d["title"] for d in cmp["differences"]) + ")")
+    for c in cmp["changes"]:
+        if c["direction"] in ("regression", "worse", "better"):
+            mark = {"regression": "B FAILS", "worse": "B WORSE", "better": "B BETTER"}[c["direction"]]
+            lines.append(f"  {mark}: {c['message']}")
+    return "\n".join(lines)
 
 
 def cmd_load(args) -> int:
@@ -585,7 +688,7 @@ def cmd_plan(args) -> int:
     llm = ClaudeClient(budget, effort="medium")
     try:
         plan = asyncio.run(planner.write_plan(project, llm, count=args.count, focus=args.focus or "", model=args.model,
-                                              log_dir=project.folder / "plans" / "llm"))
+                                              log_dir=project.folder / "plans" / "llm", test_type=args.test_type))
     except planner.PlanError as e:
         print(f"error: {e}", file=sys.stderr)
         return 3
@@ -739,6 +842,22 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--conditions", choices=list(PRESETS), default="as_written",
                        help="voice: caller conditions laid over every test: phone (phone line, lost packets), "
                             "noisy (cafe noise) or hard (street noise, phone line, and callers who cut in)")
+        if name == "run":
+            p.add_argument("--sweep", metavar="LIST",
+                           help="voice, Speech mode: run every test once under each of these caller conditions, "
+                                "comma separated, e.g. as_written,phone,noisy,quiet,accent:indian (repeats are per condition)")
+            p.add_argument("--language", choices=list(LANGUAGES),
+                           help="every caller speaks this language on this run (en English, ta Tamil); "
+                                "default: each caller's own language, else the agent's first")
+            p.add_argument("--ab-with", metavar="PROFILE",
+                           help="A/B test: run the same tests on version B too (another channel's profile file, "
+                                "e.g. profile-v2.yaml), then compare B with A")
+            p.add_argument("--ab-agent-opt", action="append", metavar="KEY=VALUE",
+                           help="A/B test: an agent option for version B only (e.g. model=...), repeatable")
+            p.add_argument("--drills", metavar="LIST",
+                           help="Resilience mode: run each test case again with its booking/order tool failing once, "
+                                "one failure at a time, comma separated: timeout, error, rate_limited, auth_expired, "
+                                "garbage, slow, saved_lost")
         p.add_argument("--show-pii", action="store_true",
                        help="keep names, dates of birth and ids readable in the saved run (for checking; don't share)")
         if name in ("run", "health"):
@@ -818,6 +937,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--count", type=int, default=20, help="how many tests to write (default 20, at most 60)")
     p.add_argument("--focus", help="what to concentrate on, in plain words")
     p.add_argument("--model", default="claude-opus-5-5", help="model that writes the plan (default claude-opus-5-5)")
+    p.add_argument("--test-type", choices=["functional", "timing", "speech", "resilience"],
+                   help="write test cases for one test type only (default: a mixed plan of every kind)")
     p.add_argument("--add", action="store_true", help="save the drafts that passed the checks as scenario files")
     p.set_defaults(func=cmd_plan)
 

@@ -67,6 +67,9 @@ export function LogsTab({ detail, reload }: TabProps) {
               </Field>
               <Field label="Keep at most (lines per call)"><Num value={logs.max_lines as number} placeholder={300} min={1} onChange={(v) => set({ max_lines: v })} /></Field>
             </Grid>
+            <Field label="What the agent heard (optional, voice)" hint={'The log line where the agent\'s speech recognition writes what the caller said, as a pattern. Put the heard words in a group named text, e.g. User said: (?P<text>.+). Vocto compares them with what its caller really said, so Speech & accents can show how many words the agent misheard.'}>
+              <Text mono value={str(logs.heard_pattern)} placeholder="User said: (?P<text>.+)" onChange={(v) => set({ heard_pattern: v || undefined })} />
+            </Field>
             <div className="flex items-center gap-2 flex-wrap">
               <Button id="test-logs" icon="file" busy={busy} disabled={busy} onClick={() => void test()}>Read recent lines</Button>
               <Help>Saves, then reads the last lines (or searches the last 10 minutes).</Help>

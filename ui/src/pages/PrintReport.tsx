@@ -2,7 +2,7 @@
 // opens the browser's print window, where the person picks "Save as PDF" (or a printer).
 import { useEffect } from "react";
 import { Button, Notice, Skeleton } from "../components/ui";
-import { CoverageCard, ExecutiveSummary, FindingsList, MethodCard, MetricsCard, Scorecard, VerdictBanner, isReadiness } from "../components/readiness";
+import { ConditionsCard, CoverageCard, FailuresCard, ExecutiveSummary, FindingsList, MethodCard, MetricsCard, Scorecard, VerdictBanner, isReadiness } from "../components/readiness";
 import { api } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
 import { fmtDate } from "../lib/format";
@@ -11,7 +11,7 @@ import { modeTitle } from "../lib/modes";
 import type { Project, RunDetail } from "../lib/types";
 
 export function PrintReport({ project, runId }: { project: Project; runId: string }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
+  useCrumbs([{ label: project.name, href: projectHref(project.key) },
     { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run", href: projectHref(project.key, `/runs/${runId}`) },
     { label: "Report" }]);
   const { data: run, error } = useLoad(() => api.get<RunDetail>(`/api/runs/${runId}`), [runId]);
@@ -41,7 +41,7 @@ export function PrintReport({ project, runId }: { project: Project; runId: strin
       <div className="flex flex-wrap items-center gap-2.5 print:hidden">
         <Button variant="ghost" icon="back" href={back}>Back to the run</Button>
         <span className="flex-1" />
-        <span className="text-[12.5px] text-muted">Pick "Save as PDF" as the printer in the next window.</span>
+        <span className="text-[13px] text-muted">Pick "Save as PDF" as the printer in the next window.</span>
         <Button variant="primary" icon="printer" id="save-pdf" onClick={() => window.print()}>Save as PDF</Button>
       </div>
 
@@ -49,11 +49,11 @@ export function PrintReport({ project, runId }: { project: Project; runId: strin
         <div className="flex items-center gap-3 flex-1 min-w-[260px]">
           <img src="/static/logo.svg" alt="" className="size-9 rounded-[9px]" />
           <div>
-            <div className="font-mono text-[11px] uppercase tracking-[.08em] text-muted">Vocto · Release readiness report</div>
+            <div className="text-[13px] font-medium text-muted">Vocto · Release readiness report</div>
             <h1 className="text-[22px] font-bold tracking-[-.02em] leading-tight">{project.name} · {modeTitle(rd.mode.id)} test</h1>
           </div>
         </div>
-        <dl className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-[12.5px]">
+        <dl className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-[13px]">
           <dt className="text-muted">Run</dt><dd className="font-mono">{runId}</dd>
           <dt className="text-muted">Tested</dt><dd>{fmtDate(sm.started_at)} · {rd.channel === "voice" ? "Voice" : "Text"}</dd>
         </dl>
@@ -64,11 +64,13 @@ export function PrintReport({ project, runId }: { project: Project; runId: strin
       ) : undefined} />
       <ExecutiveSummary r={rd} skipVerdict />
       <section className="break-inside-avoid"><Scorecard r={rd} /></section>
+      <ConditionsCard r={rd} />
+      <FailuresCard r={rd} />
       <FindingsList r={rd} print />
       <MetricsCard r={rd} />
       <CoverageCard r={rd} />
       <MethodCard r={rd} />
-      <footer className="text-[11.5px] text-muted pt-2 border-t border-line">
+      <footer className="text-[13px] text-muted pt-2 border-t border-line">
         Made by Vocto from run {runId}. Every finding links back to the calls it came from in the Vocto dashboard.
       </footer>
     </div>

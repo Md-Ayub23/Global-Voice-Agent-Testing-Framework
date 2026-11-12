@@ -23,7 +23,7 @@ function CheckNotice({ check }: { check: CheckResult | null }) {
     <Notice tone={check.syntax ? "warn" : "bad"}>
       <b>{check.syntax ? (check.saved ? "Saved, but the project has problems:" : "Problems found:") : "Not saved: the YAML can't be read."}</b>
       <ul className="mt-1.5 pl-[18px] list-disc">
-        {check.problems.map((p, i) => <li key={i} className="font-mono text-[12.5px] break-words">{p}</li>)}
+        {check.problems.map((p, i) => <li key={i} className="font-mono text-[13px] break-words">{p}</li>)}
       </ul>
     </Notice>
   );
@@ -154,13 +154,13 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
             <div className="flex flex-col gap-0.5">
               {KIND.map(([k, label, ic]) => groups.get(k)?.length ? (
                 <div key={k}>
-                  <div className="text-[11px] uppercase tracking-[.08em] text-muted px-2.5 pt-2.5 pb-1">{label}</div>
+                  <div className="text-[13px] font-medium text-muted px-2.5 pt-2.5 pb-1">{label}</div>
                   {groups.get(k)!.map((f) => fileBtn(f, ic, f.file.split("/").pop() || f.file))}
                 </div>
               ) : null)}
               {groups.get("unreadable")?.length ? (
                 <div>
-                  <div className="text-[11px] uppercase tracking-[.08em] text-muted px-2.5 pt-2.5 pb-1">Can't read</div>
+                  <div className="text-[13px] font-medium text-muted px-2.5 pt-2.5 pb-1">Can't read</div>
                   {groups.get("unreadable")!.map((f) => fileBtn(f, "alert", f.file))}
                 </div>
               ) : null}
@@ -171,7 +171,7 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
             <Button size="sm" icon="plus" id="new-scenario" onClick={() => void create("scenarios", "scenario")}>New scenario</Button>
             <Button size="sm" icon="plus" id="new-persona" onClick={() => void create("personas", "persona")}>New persona</Button>
           </div>
-          <div className="text-muted text-[11.5px] px-1 pt-2.5 pb-0.5">New items start as a copy of the selected one of that kind.</div>
+          <div className="text-muted text-[13px] px-1 pt-2.5 pb-0.5">New items start as a copy of the selected one of that kind.</div>
         </Card>
 
         <div className="flex flex-col gap-4 min-w-0">
@@ -185,20 +185,20 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
               </div>
             </CardHead>
             {files && !files.length ? <EmptyState icon="folder" title="No files in this project" /> : (
-              <div className="flex border border-line rounded-[11px] overflow-hidden bg-surface-2 focus-within:border-accent transition-colors">
+              <div className="flex border border-line rounded-[12px] overflow-hidden bg-surface-2 focus-within:border-accent transition-colors">
                 <div id="gutter" ref={gutter} aria-hidden="true"
-                  className="flex-none py-3 px-2.5 text-right font-mono text-[12.5px] leading-5 text-muted select-none whitespace-pre border-r border-line overflow-hidden"
+                  className="flex-none py-3 px-2.5 text-right font-mono text-[13px] leading-5 text-muted select-none whitespace-pre border-r border-line overflow-hidden"
                   style={{ height }}>
                   {Array.from({ length: lines }, (_, i) => i + 1).join("\n")}
                 </div>
                 <textarea id="text" ref={ta} spellCheck={false} autoComplete="off" autoCapitalize="off" value={text}
                   onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown}
                   onScroll={(e) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop; }}
-                  className="flex-1 min-w-0 py-3 px-3 font-mono text-[12.5px] leading-5 bg-surface text-ink outline-none resize-none whitespace-pre overflow-x-auto"
+                  className="flex-1 min-w-0 py-3 px-3 font-mono text-[13px] leading-5 bg-surface text-ink outline-none resize-none whitespace-pre overflow-x-auto"
                   style={{ height, tabSize: 2 }} />
               </div>
             )}
-            <div className="text-muted text-[11.5px] mt-2 flex flex-wrap items-center gap-1">
+            <div className="text-muted text-[13px] mt-2 flex flex-wrap items-center gap-1">
               <Kbd>Ctrl</Kbd>+<Kbd>S</Kbd> saves · <Kbd>Tab</Kbd> indents two spaces · the whole project is checked against the change
             </div>
           </Card>
@@ -210,6 +210,6 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
 }
 
 export function Files({ project, query }: { project: Project; query: URLSearchParams }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Raw editor" }]);
+  useCrumbs([{ label: project.name, href: projectHref(project.key) }, { label: "Raw editor" }]);
   return <Editor project={project.path} initialFile={query.get("file")} />;
 }

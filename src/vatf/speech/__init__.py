@@ -52,8 +52,12 @@ def make_tts(cfg: SpeechConfig, root: Path):
     return _cache[key]
 
 
-def make_stt(cfg: SpeechConfig, root: Path, careful: bool = False):
-    model = cfg.check_model if careful else cfg.ears_model
+def make_stt(cfg: SpeechConfig, root: Path, careful: bool = False, language: str = "en"):
+    """What the caller hears with. A call in another language than English uses the multilingual
+    model of the chosen size (languages.hearing_model): the ".en" models hear English only."""
+    from ..languages import hearing_model
+
+    model = hearing_model(cfg.check_model if careful else cfg.ears_model, language, careful)
     key = ("stt", cfg.engine, model, careful, str(cfg.resolved_models_dir(root)))
     if key not in _cache:
         if cfg.engine == "codec":

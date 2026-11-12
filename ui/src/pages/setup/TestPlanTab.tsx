@@ -77,11 +77,11 @@ export function TestPlanTab({ part, detail, reload, edit, projectKey }: TabProps
             {scenarios.map(({ file, doc }) => {
               const outcome = (doc.outcome || null) as Obj | null;
               return (
-                <div key={file} data-scenario={str(doc.id)} className="flex items-center gap-3 flex-wrap p-3 border border-line rounded-[10px] hover:bg-surface-2/60 transition-colors">
+                <div key={file} data-scenario={str(doc.id)} className="flex items-center gap-3 flex-wrap p-3 border border-line rounded-[12px] hover:bg-surface-2/60 transition-colors">
                   <Icon name="target" className="text-muted" />
                   <div className="flex-1 min-w-[200px]">
                     <a className="font-semibold" href={`${page(file)}?${qs({ edit: file })}`}>{str(doc.title) || str(doc.id)}</a>
-                    <div className="text-muted text-xs font-mono">{str(doc.id)}</div>
+                    <div className="text-muted text-[13px] font-mono">{str(doc.id)}</div>
                   </div>
                   <Chip tone={doc.criticality === "critical" ? "accent" : "default"}>{str(doc.criticality)}</Chip>
                   <Chip>{doc.style === "scripted" ? "scripted" : `persona: ${str((doc.caller as Obj | undefined)?.persona)}`}</Chip>
@@ -107,11 +107,11 @@ export function TestPlanTab({ part, detail, reload, edit, projectKey }: TabProps
         {library && <div className="mb-4"><PersonaLibrary projectKey={projectKey} detail={detail} onAdded={() => { setLibrary(false); reload(); }} /></div>}
         <div className="grid gap-2 sm:grid-cols-2">
           {personas.map(({ file, doc }) => (
-            <div key={file} data-persona={str(doc.id)} className="flex items-start gap-3 p-3 border border-line rounded-[10px]">
+            <div key={file} data-persona={str(doc.id)} className="flex items-start gap-3 p-3 border border-line rounded-[12px]">
               <Icon name="user" className="text-muted mt-0.5" />
               <div className="flex-1 min-w-0">
                 <a className="font-semibold" href={`${page(file)}?${qs({ edit: file })}`}>{str(doc.id)}</a>
-                <div className="text-ink-2 text-[12.5px] mt-0.5">{str(doc.description)}</div>
+                <div className="text-ink-2 text-[13px] mt-0.5">{str(doc.description)}</div>
               </div>
               <Button size="sm" variant="ghost" iconOnly icon="x" aria-label={`Delete ${str(doc.title) || str(doc.id)}`} onClick={() => void remove(file)} />
             </div>

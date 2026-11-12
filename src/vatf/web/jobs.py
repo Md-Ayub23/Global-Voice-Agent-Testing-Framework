@@ -234,6 +234,61 @@ class JobManager:
             if profile["mode"] != "voice":
                 raise JobError("caller conditions apply to voice runs only")
             args += ["--conditions", cond]
+        sweep = req.get("sweep") or []
+        if sweep:
+            from ..conditions import known
+
+            if kind != "run" or profile["mode"] != "voice":
+                raise JobError("a sweep of caller conditions applies to voice runs only")
+            if not isinstance(sweep, list) or not all(isinstance(c, str) and known(c) for c in sweep):
+                raise JobError("unknown caller condition in the sweep")
+            if len(sweep) > 12:
+                raise JobError("pick at most 12 caller conditions")
+            args += ["--sweep", ",".join(dict.fromkeys(sweep))]
+        language = req.get("language")
+        if language:
+            from ..languages import LANGUAGES
+
+            if kind != "run" or language not in LANGUAGES:
+                raise JobError(f"caller language must be one of {', '.join(LANGUAGES)}")
+            args += ["--language", language]
+        failures = req.get("drills") or []
+        if failures:
+            from ..drills import FAILURES
+
+            if kind != "run" or test_mode != "resilience":
+                raise JobError("failure drills are part of the Resilience test mode")
+            if not isinstance(failures, list) or not all(isinstance(c, str) and c in FAILURES for c in failures):
+                raise JobError("unknown failure in the drills")
+            args += ["--drills", ",".join(dict.fromkeys(failures))]
+        ab_with = req.get("ab_with")
+        if ab_with:
+            # A/B test: version B is another channel of this agent and/or other agent options.
+            if kind != "run":
+                raise JobError("an A/B test is a normal run of two versions")
+            other = next((p for p in project["profiles"] if p["file"] == ab_with), None)
+            if other is None:
+                raise JobError(f"{project['path']} has no profile {ab_with!r} for version B")
+            if not other["ok"]:
+                raise JobError(f"{ab_with} has problems; fix them first")
+            if other["mode"] != profile["mode"]:
+                raise JobError("both versions must be called the same way (both by voice or both by text)")
+            b_known = {s["id"] for s in other["scenarios"] if s["in_mode"]}
+            for sid in req.get("scenarios") or []:
+                if sid not in b_known:
+                    raise JobError(f"test case {sid!r} doesn't run with version B ({ab_with})")
+            b_opts = req.get("ab_agent_options") or {}
+            for key, value in b_opts.items():
+                value = "" if value is None else str(value)
+                if not NAME.fullmatch(str(key)) or "\n" in value or "\r" in value:
+                    raise JobError(f"agent option {key!r} for version B is not valid")
+            if ab_with == profile_file and not b_opts:
+                raise JobError("version B is the same as version A: pick another channel or set an agent option for B")
+            if req.get("planted_bug"):
+                raise JobError("an A/B test compares two versions as they are; it can't plant a bug")
+            args += ["--ab-with", ab_with]
+            for key, value in b_opts.items():
+                args += ["--ab-agent-opt", f"{key}={'' if value is None else value}"]
         if req.get("show_pii"):
             args.append("--show-pii")
         if kind == "run":

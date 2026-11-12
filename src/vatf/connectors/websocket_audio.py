@@ -10,6 +10,7 @@ The wire protocol (docs/voice-protocol.md):
   agent -> vatf   binary PCM16 audio, any chunk size, may be sent faster than real time
                   text   {"type": "clear"}       drop audio not yet played (barge-in)
                   text   {"type": "transcript", "text": ...}   optional: the agent's own words
+                  text   {"type": "heard", "text": ...}        optional: what the agent understood the caller said
                   text   {"type": "end"}         the agent hung up (or it closes the socket)
 
 connection.target is the ws:// URL. For an agent written in Python that should
@@ -49,6 +50,7 @@ class WebSocketAudioSession:
         self.closed_by_agent = False
         self.close_reason = ""
         self.transcripts: list[tuple[int, str]] = []    # (sample, text) the agent reported
+        self.heard: list[tuple[int, str]] = []          # (sample, text) the agent reported understanding
         self.protocol_errors: list[str] = []
         self._reader = asyncio.create_task(self._read())
 
@@ -73,6 +75,8 @@ class WebSocketAudioSession:
                     self.rec.clear()
                 elif kind == "transcript":
                     self.transcripts.append((self.rec.now_sample(), str(data.get("text", ""))))
+                elif kind == "heard":
+                    self.heard.append((self.rec.now_sample(), str(data.get("text", ""))))
                 elif kind == "end":
                     self.closed_by_agent, self.close_reason = True, "the agent hung up"
                     break

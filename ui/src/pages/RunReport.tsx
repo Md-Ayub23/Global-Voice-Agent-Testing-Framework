@@ -9,17 +9,19 @@ import { LoadReport } from "../components/load";
 import { SHAPE_LABEL, fmtSeconds } from "../lib/load";
 import { EvRef, Hero, OptionChips, heroToneOf } from "../components/runbits";
 import { Help } from "../components/form";
+import { TypeAnalysis } from "../components/typereport";
 import { Badge, Button, Card, CardHead, Chip, EmptyState, Legend, Notice, Skeleton, Table, Tabs, rowLink } from "../components/ui";
 import { api } from "../lib/api";
-import { useCrumbs, useLoad } from "../lib/app";
+import { useCrumbs, useLoad, useApp } from "../lib/app";
 import { modeLabel, projectHref, runHref } from "../lib/links";
-import { cx, fmtDate, fmtDuration, fmtMs, money, pct, shortScenario } from "../lib/format";
+import { cx, fmtDate, fmtDuration, fmtMs, money, pct, shortScenario, plural } from "../lib/format";
 import { navigate } from "../lib/router";
 import { decisionTitle } from "../lib/status";
 import { LAYER_WORDS, modelName } from "../lib/judges";
 import { PACK_TITLES } from "../lib/safety";
 import type { BaselinePage, CallBrief, DecisionDoc, LoadPage, Project, Readiness, RunDetail, SafetyResult } from "../lib/types";
-import { CoverageCard, ExecutiveSummary, FindingsList, MethodCard, MetricsCard, Scorecard, VerdictBanner, isReadiness } from "../components/readiness";
+import { AnalysisCard } from "../components/analysis";
+import { ConditionsCard, CoverageCard, FailuresCard, ExecutiveSummary, FindingsList, MethodCard, MetricsCard, Scorecard, VerdictBanner, isReadiness } from "../components/readiness";
 import { modeTitle } from "../lib/modes";
 
 // The width of an element, kept up to date as the window resizes (for SVG charts drawn to fit).
@@ -42,7 +44,7 @@ function ScoreCard({ ring, label, children }: { ring: ReactNode; label: string; 
     <Card className="flex items-center gap-3.5">
       {ring}
       <div className="min-w-0">
-        <div className="text-ink-2 font-semibold text-[12.5px]">{label}</div>
+        <div className="text-ink-2 font-semibold text-[13px]">{label}</div>
         {children}
       </div>
     </Card>
@@ -58,18 +60,18 @@ function CallsTable({ calls, runId, voice, running }: { calls: CallBrief[]; runI
           <td className="min-w-[220px]">
             <b>{shortScenario(c.scenario_id)}</b>{" "}
             <span className="text-muted">· repeat {c.repeat}{c.attempt > 1 ? ` · attempt ${c.attempt}` : ""}</span>
-            {c.headline && <div className="text-[12.5px] text-ink-2">{c.headline}</div>}
+            {c.headline && <div className="text-[13px] text-ink-2">{c.headline}</div>}
             {c.failed_checks?.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1">{c.failed_checks.map((x) => <Chip key={x} tone="bad">{x}</Chip>)}</div>
             )}
             {(c.needs_you?.length ?? 0) > 0 && (
-              <div className="flex flex-wrap items-center gap-1 mt-1 text-[11.5px] text-muted">
-                Needs you (the judges split):{c.needs_you!.map((x) => <Chip key={x} tone="warn" icon="help" className="text-[11px]">{x}</Chip>)}
+              <div className="flex flex-wrap items-center gap-1 mt-1 text-[13px] text-muted">
+                Needs you (the judges split):{c.needs_you!.map((x) => <Chip key={x} tone="warn" icon="help" className="text-[13px]">{x}</Chip>)}
               </div>
             )}
             {(c.judge_flags?.length ?? 0) > 0 && (
-              <div className="flex flex-wrap items-center gap-1 mt-1 text-[11.5px] text-muted">
-                Judges' opinion, not trusted yet:{c.judge_flags!.map((x) => <Chip key={x} icon="info" className="text-[11px]">{x}</Chip>)}
+              <div className="flex flex-wrap items-center gap-1 mt-1 text-[13px] text-muted">
+                Judges' opinion, not trusted yet:{c.judge_flags!.map((x) => <Chip key={x} icon="info" className="text-[13px]">{x}</Chip>)}
               </div>
             )}
           </td>
@@ -77,7 +79,7 @@ function CallsTable({ calls, runId, voice, running }: { calls: CallBrief[]; runI
           <td className="tabular-nums whitespace-nowrap">{fmtDuration(c.metrics?.duration_ms)}</td>
           {voice && <td className="tabular-nums whitespace-nowrap">{fmtMs(c.metrics?.latency_p50_ms)}</td>}
           <td className="tabular-nums">{money(c.cost_usd)}</td>
-          <td className="font-mono text-[11.5px] text-muted">{c.test_id}</td>
+          <td className="font-mono text-[13px] text-muted">{c.test_id}</td>
         </tr>
       ))}
     </Table>
@@ -85,8 +87,9 @@ function CallsTable({ calls, runId, voice, running }: { calls: CallBrief[]; runI
 }
 
 export function RunReport({ project, runId }: { project: Project; runId: string }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) },
-    { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run" }]);
+  useCrumbs([{ label: project.name, href: projectHref(project.key) },
+    { label: "All runs", href: projectHref(project.key, "/runs") }, { label: runId }]);
+  const { system } = useApp();
   const { data: run, error } = useLoad(() => api.get<RunDetail>(`/api/runs/${runId}`), [runId]);
   const profileFile = run?.summary.profile_file || "profile.yaml";
   const { data: basePage, reload: reloadBase } = useLoad(
@@ -123,7 +126,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           const [test, check] = ref.split("/");
           return <EvRef key={ref} href={callLink(test)}>{test.slice(-9)}{check ? ` · ${check}` : ""}</EvRef>;
         })}
-        {(r.refs || []).length > 8 && <span className="text-muted text-[12.5px]">+{r.refs!.length - 8} more</span>}
+        {(r.refs || []).length > 8 && <span className="text-muted text-[13px]">+{r.refs!.length - 8} more</span>}
       </span>
     </span>
   ));
@@ -150,10 +153,14 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
   ];
   const rd: Readiness | null = isReadiness(run.readiness) ? run.readiness : null;
   if (rd) {
+    if (!isLoad) tabs.unshift({ value: "analysis", label: "Analysis" });
     tabs.unshift({ value: "findings", label: <>Findings {rd.findings.length ? <Count n={rd.findings.length} bad={rd.counts.blocking > 0} /> : null}</> });
     tabs.splice(tabs.findIndex((t) => t.value === "setup"), 0, { value: "numbers", label: "Numbers & coverage" });
   }
+  // A run opens on its findings; Analysis has the numbers and charts of its own test type.
   const shown = tabs.some((t) => t.value === tab) ? tab : isLoad && run.load ? "load" : rd ? "findings" : "calls";
+  const caseTitles = new Map(project.profiles.flatMap((p) => p.scenarios).map((x) => [x.id, x.title]));
+  const titleOf = (id: string) => caseTitles.get(id) || shortScenario(id);
 
   return (
     <>
@@ -165,9 +172,9 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
             <OptionChips run={sm} />
           </div>
           <div className="mt-1 text-ink-2 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[12.5px]">{runId}</span><span className="text-muted">·</span>{fmtDate(sm.started_at)}
+            <span className="font-mono text-[13px]">{runId}</span><span className="text-muted">·</span>{fmtDate(sm.started_at)}
             {took != null && <><span className="text-muted">·</span>took {fmtDuration(took)}</>}
-            <span className="text-muted">·</span>{finals.length} call(s)
+            <span className="text-muted">·</span>{plural(finals.length, "call")}
             <span className="text-muted">·</span>framework cost {money(sm.cost_usd)}
             {sm.pii_masked === false && <Chip tone="bad" icon="alert">not masked</Chip>}
           </div>
@@ -207,31 +214,38 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
         ) : (
           <Notice tone="warn"><b>This run has no decision.</b> It was {sm.status} before the end. The calls that finished are below.</Notice>
         )}
+        {sm.ab && (
+          <Notice icon="compare" className="mt-3">
+            <b>Version {sm.ab.side} of an A/B test</b> ({sm.ab.label}).{" "}
+            {sm.ab.other ? <a href={`${projectHref(project.key, "/compare")}?${sm.ab.side === "A" ? `a=${sm.run_id}&b=${sm.ab.other}` : `a=${sm.ab.other}&b=${sm.run_id}`}`}>Compare version B with version A</a>
+              : "The other version hasn't finished."}
+          </Notice>
+        )}
 
         {run.readiness && !rd && <Notice tone="warn">Couldn't build the readiness report: {(run.readiness as { error: string }).error}</Notice>}
         {d && !isLoad && !rd && (
-          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))] stagger">
+          <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             {Object.entries(d.scorecard).map(([name, s]) => (
               <ScoreCard key={name} ring={<Ring value={s.score} />} label={name[0].toUpperCase() + name.slice(1)}>
-                <div className="text-[12.5px] text-ink-2">{s.passed} passed · {s.failed} failed</div>
-                <div className="text-[11.5px] text-muted">coverage {pct(s.coverage)} of {s.total} check(s)</div>
+                <div className="text-[13px] text-ink-2">{s.passed} passed · {s.failed} failed</div>
+                <div className="text-[13px] text-muted">coverage {pct(s.coverage)} of {plural(s.total, "check")}</div>
               </ScoreCard>
             ))}
             <ScoreCard label="Coverage" ring={<Ring value={d.coverage.ratio} toneName={d.coverage.ratio >= d.coverage.min_required ? "good" : "warn"} />}>
-              <div className="text-[12.5px] text-ink-2">{d.coverage.verified_calls} of {d.coverage.planned_calls} calls verified</div>
-              <div className="text-[11.5px] text-muted">needs {pct(d.coverage.min_required)}{d.coverage.error_calls ? ` · ${d.coverage.error_calls} Vocto error(s)` : ""}</div>
+              <div className="text-[13px] text-ink-2">{d.coverage.verified_calls} of {d.coverage.planned_calls} calls verified</div>
+              <div className="text-[13px] text-muted">needs {pct(d.coverage.min_required)}{d.coverage.error_calls ? ` · ${plural(d.coverage.error_calls, "Vocto error")}` : ""}</div>
             </ScoreCard>
             {voice && (
               <Card className="grid gap-1">
-                <div className="flex items-center gap-2 text-ink-2 font-semibold text-[12.5px]"><Icon name="clock" />Response time</div>
+                <div className="flex items-center gap-2 text-ink-2 font-semibold text-[13px]"><Icon name="clock" />Response time</div>
                 <div className="text-[28px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">
                   {fmtMs(d.latency.p50_ms)}<small className="text-sm font-semibold text-muted ml-1">p50</small>
                 </div>
-                <div className="text-muted text-xs">p95 {fmtMs(d.latency.p95_ms)} · limits {fmtMs(d.latency.p50_limit_ms)} / {fmtMs(d.latency.p95_limit_ms)}</div>
+                <div className="text-muted text-[13px]">p95 {fmtMs(d.latency.p95_ms)} · limits {fmtMs(d.latency.p50_limit_ms)} / {fmtMs(d.latency.p95_limit_ms)}</div>
                 <div className="flex items-center gap-2 mt-1.5">
                   {d.latency.within_limits == null ? <Badge status="NOT_VERIFIED" label="not timed" />
                     : d.latency.within_limits ? <Badge status="PASS" label="within limits" /> : <Badge status="FAIL" label="too slow" />}
-                  <span className="text-muted text-[11.5px]">{d.latency.turns_measured} answers timed</span>
+                  <span className="text-muted text-[13px]">{d.latency.turns_measured} answers timed</span>
                 </div>
               </Card>
             )}
@@ -242,8 +256,12 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           <Tabs value={shown} onChange={setTab} tabs={tabs} className="mb-0" />
         </div>
 
+        {shown === "analysis" && rd && <TypeAnalysis mode={rd.mode.id} d={d} rd={rd} finals={finals} titles={titleOf} callHref={callLink} />}
+        {shown === "findings" && rd && rd.mode.id === "speech" && <ConditionsCard r={rd} callHref={callLink} />}
+        {shown === "findings" && rd && <FailuresCard r={rd} callHref={callLink} />}
+        {shown === "findings" && rd && <AnalysisCard runId={runId} r={rd} saved={run.analysis} callHref={callLink} apiKey={!!system?.api_key?.set} />}
         {shown === "findings" && rd && <FindingsList r={rd} callHref={(t, seq) => callLink(t) + (seq != null ? `?at=${seq}` : "")} />}
-        {shown === "numbers" && rd && <><MetricsCard r={rd} /><CoverageCard r={rd} /><MethodCard r={rd} /></>}
+        {shown === "numbers" && rd && <>{rd.mode.id !== "speech" && <ConditionsCard r={rd} callHref={callLink} />}<MetricsCard r={rd} /><CoverageCard r={rd} /><MethodCard r={rd} /></>}
 
         {shown === "load" && run.load && <LoadReport load={run.load} voice={voice} callHref={callLink} />}
 
@@ -270,7 +288,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
                 const calls = finals.filter((c) => c.scenario_id === r.scenario_id).sort((a, b) => a.repeat - b.repeat);
                 return (
                   <tr key={r.scenario_id}>
-                    <td><b>{shortScenario(r.scenario_id)}</b><div className="text-muted text-[11.5px] font-mono">{r.scenario_id}</div></td>
+                    <td><b>{shortScenario(r.scenario_id)}</b><div className="text-muted text-[13px] font-mono">{r.scenario_id}</div></td>
                     <td>{r.criticality === "critical" ? <Chip tone="bad" icon="flag">critical</Chip> : <Chip>normal</Chip>}</td>
                     <td>
                       <div className="flex gap-[5px]">
@@ -320,7 +338,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
         )}
 
         {shown === "setup" && info && (
-          <details open className="bg-surface border border-line rounded-[10px] p-5 group">
+          <details open className="glass rounded-[20px] p-5 group">
             <summary className="cursor-pointer font-semibold flex items-center gap-2 list-none">
               <Icon name="arrow" className="transition-transform group-open:rotate-90" />How this run was set up
             </summary>
@@ -345,7 +363,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
                 ["Personal data", info.pii_masked ? "Masked" : "Not masked"],
                 ["Vocto version", info.framework_version],
               ] as [string, string][]).map(([k, v]) => (
-                <div key={k}><dt className="text-muted text-[12px]">{k}</dt><dd className="font-medium break-words">{v}</dd></div>
+                <div key={k}><dt className="text-muted text-[13px]">{k}</dt><dd className="font-medium break-words">{v}</dd></div>
               ))}
             </dl>
           </details>
@@ -357,7 +375,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
 
 // A small count next to a tab name.
 function Count({ n, bad }: { n: number; bad?: boolean }) {
-  return <span className={cx("ml-1 px-1.5 rounded-full text-[11px] font-semibold tabular-nums", bad ? "bg-bad-soft text-bad" : "bg-surface-3 text-ink-2")}>{n}</span>;
+  return <span className={cx("ml-1 px-1.5 rounded-full text-[13px] font-semibold tabular-nums", bad ? "bg-bad-soft text-bad" : "bg-surface-3 text-ink-2")}>{n}</span>;
 }
 
 // One line under the decision: which layer decided, and the judge opinions that were left out of it.
@@ -383,7 +401,7 @@ function HeardCard({ heard, callLink }: { heard: NonNullable<DecisionDoc["heard_
       {bad ? (
         <div className="grid gap-1.5">
           {heard.misheard.map((m, i) => (
-            <a key={i} href={callLink(m.test_id)} className="text-[12.5px] text-ink flex flex-wrap gap-x-2 hover:no-underline hover:bg-surface-2/60 rounded-lg px-2 py-1">
+            <a key={i} href={callLink(m.test_id)} className="text-[13px] text-ink flex flex-wrap gap-x-2 hover:no-underline hover:bg-surface-2/60 rounded-lg px-2 py-1">
               <span>said <b className="font-mono">{m.said}</b></span><span className="text-muted">heard as “{m.heard}”</span>
             </a>
           ))}
@@ -409,7 +427,7 @@ function JudgesCard({ judges, projectKey, relabelled }: { judges: NonNullable<De
       <Table head={["Item", "Trust", "Passed", "Failed", "Needs you", "Didn't come up"]}>
         {judges.map((j) => (
           <tr key={j.rubric_item}>
-            <td><b>{j.title}</b><div className="text-muted text-[11.5px]">{j.calibration}</div></td>
+            <td><b>{j.title}</b><div className="text-muted text-[13px]">{j.calibration}</div></td>
             <td>{j.can_block ? <Chip tone="good" icon="shield">trusted</Chip> : <Chip icon="info">opinion only</Chip>}</td>
             <td>{n(j.passed, "text-good font-semibold")}</td>
             <td>{j.can_block ? n(j.failed, "text-bad font-semibold") : <span className={cx("tabular-nums", j.failed ? "text-ink-2 font-semibold" : "text-muted")}>{j.failed}{j.failed ? " (opinion)" : ""}</span>}</td>
@@ -428,7 +446,7 @@ function SafetyRunCard({ safety, callLink, projectKey }: { safety: SafetyResult;
   return (
     <Card id="run-safety">
       <CardHead level={2} title="Safety tests"
-        sub={`${safety.passed} of ${safety.calls} attack call(s) clean · ${safety.failed} with a finding${safety.to_review ? ` · ${safety.to_review} waiting for your label` : ""}${blocking ? ` · ${blocking} blocking` : ""}`}>
+        sub={`${safety.passed} of ${plural(safety.calls, "attack call")} clean · ${safety.failed} with a finding${safety.to_review ? ` · ${safety.to_review} waiting for your label` : ""}${blocking ? ` · ${blocking} blocking` : ""}`}>
         <Button size="sm" variant="ghost" icon="sliders" href={projectHref(projectKey, "/setup/safety")}>Choose attacks</Button>
       </CardHead>
       <div className="flex flex-wrap gap-1.5 mb-3">
@@ -442,18 +460,18 @@ function SafetyRunCard({ safety, callLink, projectKey }: { safety: SafetyResult;
         <div className="grid gap-2" id="safety-findings">
           {safety.findings.map((f, i) => (
             <a key={i} href={callLink(f.test_id)} data-finding={f.check_id}
-              className="flex items-start gap-3 p-3 border border-line rounded-[10px] hover:bg-surface-2/60 hover:no-underline transition-colors text-ink">
+              className="flex items-start gap-3 p-3 border border-line rounded-[12px] hover:bg-surface-2/60 hover:no-underline transition-colors text-ink">
               {f.result === "NEEDS_REVIEW" ? <Chip tone="warn" icon="help" className="font-bold">Needs you</Chip>
                 : f.result === "FAIL" && !f.can_block ? <Chip icon="info" className="font-bold">Opinion: fail</Chip>
                 : <Badge status={f.result} label={f.result === "FAIL" ? "Problem" : undefined} />}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <b className="text-[13.5px]">{f.title}</b>
-                  {f.severity === "blocker" && f.can_block && <Chip tone="bad" className="text-[11px]">blocker</Chip>}
-                  {!f.can_block && <Chip icon={f.result === "NEEDS_REVIEW" ? "help" : "info"} tone={f.result === "NEEDS_REVIEW" ? "warn" : "default"} className="text-[11px]">
+                  {f.severity === "blocker" && f.can_block && <Chip tone="bad" className="text-[13px]">blocker</Chip>}
+                  {!f.can_block && <Chip icon={f.result === "NEEDS_REVIEW" ? "help" : "info"} tone={f.result === "NEEDS_REVIEW" ? "warn" : "default"} className="text-[13px]">
                     {f.result === "NEEDS_REVIEW" ? "needs you · a person confirms safety findings" : "judges' opinion"}</Chip>}
                 </div>
-                <div className="text-[12.5px] text-ink-2 mt-0.5 break-words">{f.message}</div>
+                <div className="text-[13px] text-ink-2 mt-0.5 break-words">{f.message}</div>
               </div>
               <Icon name="arrow" className="text-muted mt-1 flex-none" />
             </a>

@@ -6,16 +6,16 @@ import { Icon } from "../components/Icon";
 import { Button, Card, CardHead, Choice, Chip, Divider, EmptyState, Field, Notice, PageHead, Seg, Skeleton, Switch, inputCls } from "../components/ui";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
-import { cx } from "../lib/format";
+import { cx, plural } from "../lib/format";
 import { navigate } from "../lib/router";
-import { channelLabel, projectHref } from "../lib/links";
+import { channelLabel, mainProfile, projectHref } from "../lib/links";
 import { MODE_TITLE } from "../lib/modes";
-import type { Job, Options, Profile, Project, RunDetail, RunInfo, TestModeId } from "../lib/types";
+import type { DrillFailure, Job, Options, PassRule, Profile, Project, RunDetail, RunInfo, SweepCondition, TestModeId } from "../lib/types";
 
 // What a test mode changes on this form (src/vatf/modes.py decides the same on the server).
 const VOICE_ONLY: TestModeId[] = ["timing", "speech"];
 const NO_SAFETY: TestModeId[] = ["functional", "timing", "speech", "resilience"];
-const DEFAULT_CONDITIONS: Partial<Record<TestModeId, string>> = { speech: "phone" };
+const DEFAULT_CONDITIONS: Partial<Record<TestModeId, string>> = {};
 
 const CHOICES: Record<string, [string, string][]> = {
   brain: [["llm", "Claude (LLM)"], ["rules", "Rules (offline)"]],
@@ -67,11 +67,14 @@ interface Form {
   start_agent: boolean;    // Vocto starts the agent itself (agent_process)
   planted_bug: string;
   conditions: string;      // voice: caller conditions preset over every test (Phase 5)
+  sweep: string[];         // voice, Speech mode: every test once under each of these conditions
+  drills: string[];        // Resilience: every test again with its booking or order tool failing, per failure
+  language: string;        // every caller speaks this language on this run; "" = each caller's own
 }
 
 // `mode` set: the Run tab of one test mode (Test modes › <mode>), under that page's own header.
 export function NewRun({ project, query, mode }: { project: Project; query: URLSearchParams; mode?: TestModeId }) {
-  useCrumbs(mode ? null : [{ label: "Agents", href: "#/projects" }, { label: project.name, href: projectHref(project.key) }, { label: "Run tests" }]);
+  useCrumbs(mode ? null : [{ label: project.name, href: projectHref(project.key) }, { label: "Run tests" }]);
   const { system } = useApp();
   const from = query.get("from");
   const { data, error } = useLoad(async () => {
@@ -102,7 +105,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
   const toast = useToast();
   useEffect(() => { if (prefillError) toast(prefillError, "bad"); }, [prefillError, toast]);
 
-  const [f, setF] = useState<Form>(() => initialForm(projects, prefill, query, !system?.api_key?.set, system?.default_model || "claude-haiku-5-5", mode));
+  const [f, setF] = useState<Form>(() => initialForm(projects, prefill, query, !system?.api_key?.set, system?.default_model || "claude-haiku-5-5", mode, system?.sweep_conditions, system?.drill_failures));
   // A mode other than the Full check runs its own tests only: no exit check, and safety on or off as the mode says.
   const inAMode = !!mode && mode !== "full";
   const voiceOnly = !!mode && VOICE_ONLY.includes(mode);
@@ -115,9 +118,16 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
   const exit = f.command === "exit-check" && !inAMode;
   const noKey = !system?.api_key?.set;
   const optKeys = Object.keys(profile.options || {}).filter((k) => k !== "bugs");
-  // The test cases this run can pick from: the channel's own, and in Resilience only those that break a tool.
-  const inMode = safetyMode ? [] : profile.scenarios.filter((x) => x.in_mode && (mode !== "resilience" || x.faults.length > 0));
-  const listed = mode === "resilience" ? profile.scenarios.filter((x) => x.faults.length > 0) : profile.scenarios;
+  // The test cases this run can pick from: the channel's own of this test type (src/vatf/modes.py own_cases:
+  // Timing and Speech add the Functional cases), and in Resilience its own cases plus the Functional ones that
+  // can be drilled (their booking or order tool fails on purpose, one failure at a time).
+  const ofType = (x: Profile["scenarios"][number]) => !mode || mode === "full" || mode === "regression" ? true
+    : mode === "functional" ? x.test_type === "functional"
+    : mode === "timing" || mode === "speech" ? x.test_type === mode || x.test_type === "functional"
+    : mode === "resilience" ? x.test_type === "resilience" || (x.test_type === "functional" && !!x.drill) : true;
+  const inMode = safetyMode ? [] : profile.scenarios.filter((x) => x.in_mode && ofType(x));
+  const listed = profile.scenarios.filter(ofType);
+  const drilling = mode === "resilience";
 
   const pickProfile = (projectPath: string, file: string) => {
     const proj = projects.find((p) => p.path === projectPath) || projects[0];
@@ -135,7 +145,21 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
   const plantedOn = plantedOf(profile, judgesOn, safetyOn);
   const exitBugs = planted ? plantedOn.map((b) => b.id) : exitBugsOf(profile, judgesOn, safetyOn);
   const startAgent = !!profile.agent_process && f.start_agent;
+  // Speech mode compares conditions: each test runs once per condition (times the repeats).
+  const sweeping = mode === "speech" && voice;
+  const conds = sweeping ? Math.max(f.sweep.length, 1) : 1;
   const safetyCalls = !safetyOn ? 0 : f.repeats ? (Number(f.repeats) || 1) * profile.safety!.attacks : profile.safety!.calls;
+  const languages = system?.languages || [];
+  const languagePick = languages.length > 1 && f.command === "run" && (
+    <Field label="Caller's language" hint={f.language
+      ? `Every caller speaks ${languages.find((l) => l.id === f.language)?.name || f.language} on this run, with a ${languages.find((l) => l.id === f.language)?.name || f.language} voice, whatever their own language.`
+      : "Each caller speaks their own language (set on the caller), else the agent's first language."}>
+      <select id="caller-language" className={inputCls} value={f.language} onChange={(e) => set({ language: e.target.value })}>
+        <option value="">Each caller's own</option>
+        {languages.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+      </select>
+    </Field>
+  );
   const request = useMemo(() => {
     const agent_options: Options = {};
     for (const [k, v] of Object.entries(f.options)) if (String(v) !== String(d[k] ?? "")) agent_options[k] = v;
@@ -149,15 +173,21 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
       repeats: f.repeats || null, agent_options, offline: f.offline, model: f.model, judges: f.judges, safety: safetyOn,
       speech: f.speech, stt_model: f.stt_model, stt_check_model: f.stt_check_model, show_pii: f.show_pii,
       start_agent: f.command === "run" && startAgent, planted_bug: f.command === "run" && startAgent ? f.planted_bug : "",
-      conditions: voice ? f.conditions : "as_written",
+      conditions: voice && !sweeping ? f.conditions : "as_written",
+      ...(sweeping && f.command === "run" ? { sweep: f.sweep } : {}),
+      ...(drilling && f.command === "run" && f.drills.length ? { drills: f.drills } : {}),
       ...(mode && f.command === "run" ? { test_mode: mode } : {}),
+      ...(f.language && f.command === "run" ? { language: f.language } : {}),
     };
-  }, [f, profile, d, inMode, safetyOn, startAgent, voice, mode]);
+  }, [f, profile, d, inMode, safetyOn, startAgent, voice, mode, sweeping, drilling]);
 
   const planned = useMemo(() => {
     const sc = inMode.filter((x) => exit || f.scenarios.has(x.id));   // inMode is empty in Safety mode
-    const reps = (x: { repeats?: number }) => Number(f.repeats) || x.repeats || 3;
-    const per = sc.reduce((a, x) => a + reps(x), 0) + safetyCalls;
+    const reps = (x: { repeats?: number }) => (Number(f.repeats) || x.repeats || 3) * conds;
+    // Resilience: a test case's own broken tool is one set of calls, and each failure drilled another.
+    const sets = (x: Profile["scenarios"][number]) =>
+      drilling ? (x.test_type === "resilience" ? 1 : 0) + (x.drill ? f.drills.length : 0) : 1;
+    const per = sc.reduce((a, x) => a + reps(x) * sets(x), 0) + safetyCalls;
     if (exit && planted) {  // the clean agent runs everything; each planted bug only its own scenario
       return per + plantedOn.reduce((a, b) => {
         const x = inMode.find((s) => s.id === b.scenario);
@@ -165,7 +195,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
       }, 0);
     }
     return exit ? per * (1 + exitBugs.length) : per;
-  }, [inMode, exit, f.scenarios, f.repeats, exitBugs.length, safetyCalls, planted, plantedOn]);
+  }, [inMode, exit, f.scenarios, f.repeats, f.drills, drilling, exitBugs.length, safetyCalls, planted, plantedOn, conds]);
 
   const [starting, setStarting] = useState(false);
   const start = async () => {
@@ -183,7 +213,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
   const toggle = (s: Set<string>, v: string) => { const n = new Set(s); n.has(v) ? n.delete(v) : n.add(v); return n; };
   const n = (i: number) => i - (exit ? 1 : 0);   // section numbers shift when the scenario card is hidden
   const picked = inMode.filter((x) => f.scenarios.has(x.id)).length;
-  const nothing = safetyMode ? !safetyOn : !exit && picked === 0;
+  const nothing = safetyMode ? !safetyOn : (!exit && picked === 0) || (sweeping && f.sweep.length === 0) || (drilling && planned === 0);
   const wrongChannel = voiceOnly && !voice;
 
   return (
@@ -224,7 +254,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
         </Notice>
       )}
       <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="flex flex-col gap-4 stagger">
+        <div className="flex flex-col gap-4">
           <Card>
             <CardHead level={2} title="1 · Channel" sub="how Vocto calls the agent" />
             <div className="flex flex-wrap gap-2">
@@ -232,10 +262,10 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                 <Choice key={x.file} radio on={x.file === profile.file} off={!x.ok || (voiceOnly && x.mode !== "voice")} onClick={() => pickProfile(f.project, x.file)} data-profile={x.file} className="flex-1 min-w-[220px]">
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <Icon name={x.mode === "voice" ? "mic" : "text"} size={15} />
-                    <b>{channelLabel(x, project.profiles)}</b>
+                    <b>{channelLabel(x, project.profiles, project.example)}</b>
                   </div>
-                  <div className="text-ink-2 text-[12.5px]">
-                    {voiceOnly && x.mode !== "voice" ? `${MODE_TITLE[mode!]} measures speech, so it needs the voice channel` : x.ok ? (x.mode === "voice" ? "Like a phone call: real speech both ways, response times" : "Text messages: fast and cheap, the same checks") : "Not ready: finish its setup first"}
+                  <div className="text-ink-2 text-[13px]">
+                    {voiceOnly && x.mode !== "voice" ? `${MODE_TITLE[mode!]} measures speech, so it needs the voice channel` : x.ok ? (x.connection.type === "phone_call" ? `Rings ${x.connection.target || "the agent's number"} over the real phone network` : x.mode === "voice" ? "Like a phone call: real speech both ways, response times" : "Text messages: fast and cheap, the same checks") : "Not ready: finish its setup first"}
                   </div>
                 </Choice>
               ))}
@@ -260,13 +290,13 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
 
           {!exit && !safetyMode && (
             <Card>
-              <CardHead level={2} title="2 · Test cases" sub={mode === "resilience" ? `${inMode.length} break a tool on purpose` : `${inMode.length} run in ${profile.mode} mode`}>
+              <CardHead level={2} title="2 · Test cases" sub={mode === "resilience" ? `${inMode.length} to break on purpose` : `${inMode.length} run in ${profile.mode} mode`}>
                 <Button size="sm" variant="ghost" id="all" onClick={() => set({ scenarios: new Set(inMode.map((x) => x.id)) })}>All</Button>
                 <Button size="sm" variant="ghost" id="none" onClick={() => set({ scenarios: new Set() })}>None</Button>
               </CardHead>
               <div className="flex flex-col gap-2">
                 {mode === "resilience" && !listed.length && (
-                  <Notice tone="warn">None of this agent's test cases breaks a tool yet. <a href={projectHref(project.key, "/setup/cases")}>Add a broken tool to a test case</a> (it times out, fails, answers slowly or answers rubbish).</Notice>
+                  <Notice tone="warn">None of this agent's test cases breaks a tool or ends in a booking or order to drill yet. <a href={projectHref(project.key, "/setup/cases")}>Add a test case</a> with an action to check, or a broken tool.</Notice>
                 )}
                 {listed.map((x) => (
                   <Choice key={x.id} on={f.scenarios.has(x.id) && x.in_mode} off={!x.in_mode} data-scenario={x.id}
@@ -277,16 +307,18 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                       {x.criticality === "critical" ? <Chip tone="bad" icon="flag">critical</Chip> : <Chip>normal</Chip>}
                       <Chip>{x.style === "scripted" ? "scripted lines" : `simulated caller${x.persona ? ` · ${x.persona}` : ""}`}</Chip>
                       {x.faults.length > 0 && <Chip tone="warn" icon="bolt">{x.faults.join(", ")}</Chip>}
+                      {drilling && x.drill && <Chip icon="bolt">drilled: {f.drills.length} failure{f.drills.length === 1 ? "" : "s"}</Chip>}
                       {x.audio?.noise && <Chip icon="wave">{x.audio.noise} noise</Chip>}
                       {!!x.audio?.barge_in && <Chip icon="bolt">barge-in</Chip>}
                       {!x.in_mode && <Chip>{x.modes.join("/")} only</Chip>}
                     </div>
-                    <div className="text-ink-2 font-mono text-[11.5px] mt-[3px]">
-                      {x.id} · {x.repeats}× · {x.checks} check(s){x.expected ? ` · expects ${x.expected.replace("_", " ")}` : ""}
+                    <div className="text-ink-2 font-mono text-[13px] mt-[3px]">
+                      {x.id} · {x.repeats}× · {plural(x.checks, "check")}{x.expected ? ` · expects ${x.expected.replace("_", " ")}` : ""}
                     </div>
                   </Choice>
                 ))}
               </div>
+              {drilling && <DrillPicker all={system?.drill_failures || []} on={f.drills} set={(drills) => set({ drills })} />}
             </Card>
           )}
 
@@ -298,7 +330,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                   <div className="grid gap-1.5 font-semibold text-[13px]">
                     Start the agent
                     <Switch id="start-agent" checked={f.start_agent} onChange={(v) => set({ start_agent: v, planted_bug: v ? f.planted_bug : "" })} label="Start the agent for me" />
-                    <span className="font-normal text-xs text-muted">
+                    <span className="font-normal text-[13px] text-muted">
                       {f.start_agent ? "Vocto starts the agent on this computer before the first call and stops it after the last. Stop it first if it is already running."
                         : "Off: the agent must already be running at its address."}
                     </span>
@@ -315,7 +347,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
               )}
               {!exit && profile.bugs && (
                 <div>
-                  <div className="flex flex-wrap items-center gap-2.5 mb-2"><b className="text-[12.5px]">Bug switches</b><span className="text-muted text-[12.5px]">{OPTION_HELP.bugs}</span></div>
+                  <div className="flex flex-wrap items-center gap-2.5 mb-2"><b className="text-[13px]">Bug switches</b><span className="text-muted text-[13px]">{OPTION_HELP.bugs}</span></div>
                   <div className="flex flex-wrap gap-2" id="bugs">
                     {profile.bugs.map((b) => {
                       const voiceOnly = /^voice only/i.test(b.help) && !voice;
@@ -323,7 +355,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                       return (
                         <Tip key={b.name} content={b.help}>
                           <button type="button" data-bug={b.name} disabled={voiceOnly} onClick={() => set({ bugs: toggle(f.bugs, b.name) })}
-                            className={cx("inline-flex items-center gap-1.5 px-[9px] py-0.5 rounded-full text-xs font-semibold border leading-[18px] transition-colors",
+                            className={cx("inline-flex items-center gap-1.5 px-[9px] py-0.5 rounded-full text-[13px] font-semibold border leading-[18px] transition-colors",
                               voiceOnly ? "opacity-45 cursor-not-allowed bg-surface-2 text-ink-2 border-line"
                                 : on ? "cursor-pointer bg-bad-soft text-bad border-[color-mix(in_srgb,var(--bad)_35%,transparent)]"
                                   : "cursor-pointer bg-surface-2 text-ink-2 border-line hover:border-line-strong")}>
@@ -359,7 +391,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                       )}
                     </Field>
                   );
-                }) : <div className="text-muted text-[12.5px]">Nothing to choose: Vocto calls the agent at its address.</div>}
+                }) : <div className="text-muted text-[13px]">Nothing to choose: Vocto calls the agent at its address.</div>}
               </div>
             </div>
           </Card>
@@ -369,12 +401,12 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
             <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="caller">
               <Choice radio on={!f.offline} data-offline="0" onClick={() => set({ offline: false })}>
                 <b className="block font-semibold">Real run</b>
-                <div className="text-ink-2 text-[12.5px]">Claude plays the caller and checks it stayed on script. Uses your API key.</div>
+                <div className="text-ink-2 text-[13px]">Claude plays the caller and checks it stayed on script. Uses your API key.</div>
               </Choice>
               <Choice radio on={f.offline} data-offline="1"
                 onClick={() => set({ offline: true, options: Object.fromEntries(Object.entries(f.options).filter(([k]) => !(k in (profile.offline_options || {})))) })}>
                 <b className="block font-semibold">Free dry run</b>
-                <div className="text-ink-2 text-[12.5px]">
+                <div className="text-ink-2 text-[13px]">
                   Rule-based caller, no validator, no API calls
                   {Object.keys(profile.offline_options || {}).length > 0 && " (the practice agent answers by rules too)"}. A smoke test.
                   {profile.agent_process && !Object.keys(profile.offline_options || {}).length && " The agent still thinks with its own brain."}
@@ -394,28 +426,29 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
           {voice && (
             <Card>
               <CardHead level={2} title={`${n(5)} · Caller's voice and ears`} />
+              {languagePick && <div className="mb-4 max-w-[420px]">{languagePick}</div>}
               <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="speech">
                 <Choice radio on={f.speech === "local"} data-speech="local" onClick={() => set({ speech: "local" })}>
                   <b className="block font-semibold">Real speech</b>
-                  <div className="text-ink-2 text-[12.5px]">Piper speaks, Whisper listens, on this computer. Models download once (~750 MB).</div>
+                  <div className="text-ink-2 text-[13px]">Piper speaks, Whisper listens, on this computer. Models download once (~750 MB).</div>
                 </Choice>
                 <Choice radio on={f.speech === "codec"} data-speech="codec" onClick={() => set({ speech: "codec" })}>
                   <b className="block font-semibold">Test tones</b>
-                  <div className="text-ink-2 text-[12.5px]">Only for testing Vocto itself: never use it to judge an agent.</div>
+                  <div className="text-ink-2 text-[13px]">Only for testing Vocto itself: never use it to judge an agent.</div>
                 </Choice>
               </div>
-              <div className="mt-4">
+              {sweeping ? <SweepPicker all={system?.sweep_conditions || []} on={f.sweep} set={(sweep) => set({ sweep })} /> : <div className="mt-4">
                 <div className="font-semibold text-[13px] mb-1">Caller conditions</div>
-                <div className="text-muted text-xs mb-2">Laid over every test, without editing them. Each call keeps its own caller's voice and behaviour; the report splits results by condition.</div>
+                <div className="text-muted text-[13px] mb-2">Laid over every test, without editing them. Each call keeps its own caller's voice and behaviour; the report splits results by condition.</div>
                 <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="conditions">
                   {(system?.conditions || [{ id: "as_written", title: "As written", about: "Each test's own audio." }]).map((c) => (
                     <Choice key={c.id} radio on={f.conditions === c.id} data-conditions={c.id} onClick={() => set({ conditions: c.id })}>
                       <b className="block font-semibold">{c.title}</b>
-                      <div className="text-ink-2 text-[12.5px]">{c.about}</div>
+                      <div className="text-ink-2 text-[13px]">{c.about}</div>
                     </Choice>
                   ))}
                 </div>
-              </div>
+              </div>}
               {f.speech === "local" && (
                 <div className="grid gap-3 grid-cols-1 md:grid-cols-2 mt-3.5">
                   <Field label="Caller hears with" hint="Fast model for the live call.">
@@ -432,7 +465,10 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
           <Card>
             <CardHead level={2} title={`${n(5) + (voice ? 1 : 0)} · Run settings`} />
             <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
-              <Field label="Repeats per test case" hint="Ready needs every repeat of a critical test case to pass.">
+              <Field label={sweeping ? "Repeats per test and condition" : drilling ? "Repeats per test and failure" : "Repeats per test case"}
+                hint={sweeping ? "1 is usually enough here: every condition is its own call. Raise it to see how steady each condition is."
+                  : drilling ? "1 is usually enough here: every failure is its own call. Raise it to see how steady the agent is."
+                  : "Ready needs every repeat of a critical test case to pass."}>
                 <input id="repeats" className={inputCls} type="number" min={1} max={50} placeholder={`from test settings (${profile.thresholds?.repeats ?? 3})`}
                   value={f.repeats} onChange={(e) => set({ repeats: e.target.value })} />
               </Field>
@@ -440,7 +476,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                 <div className="grid gap-1.5 font-semibold text-[13px]">
                   AI judges
                   <Switch id="judges" checked={f.judges} onChange={(v) => set({ judges: v })} label="Judge tone, facts and scope" />
-                  <span className="font-normal text-xs text-muted">
+                  <span className="font-normal text-[13px] text-muted">
                     {f.judges ? <>Two judges read every call (a little extra cost). They advise until you <a href={projectHref(project.key, "/judges")}>calibrate them</a>.</>
                       : "Off: only hard checks (tools, database, logs, timing)."}
                   </span>
@@ -450,7 +486,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                 <div className="grid gap-1.5 font-semibold text-[13px]">
                   Safety tests
                   <Switch id="safety" checked={f.safety} onChange={(v) => set({ safety: v })} label="Include safety tests" />
-                  <span className="font-normal text-xs text-muted">
+                  <span className="font-normal text-[13px] text-muted">
                     {f.safety ? <>{profile.safety.attacks} attack calls written for this agent: off-topic questions, pushing for secrets, prompt tricks and more. <a href={projectHref(project.key, "/setup/safety")}>Choose them on Safety tests</a>.</>
                       : "Off: only the test cases above."}
                   </span>
@@ -459,7 +495,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
               <div className="grid gap-1.5 font-semibold text-[13px]">
                 Personal data
                 <Switch id="pii" checked={f.show_pii} onChange={(v) => set({ show_pii: v })} label="Keep names and dates readable" />
-                <span className={cx("font-normal text-xs", f.show_pii ? "text-bad" : "text-muted")}>
+                <span className={cx("font-normal text-[13px]", f.show_pii ? "text-bad" : "text-muted")}>
                   {f.show_pii ? "This run will NOT be masked. Don't share or commit it." : "Off: names, dates of birth and ids are masked in the saved run."}
                 </span>
               </div>
@@ -473,21 +509,25 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
             <div className="flex flex-col gap-[9px]">
               <Row label="Agent"><b className="text-right">{project.name}</b></Row>
               <Row label="Channel"><Chip tone={voice ? "agent" : "caller"} icon={voice ? "mic" : "text"}>{voice ? "Voice" : "Text"}</Chip></Row>
+              {!voice && languagePick}
               {mode && <Row label="Test mode"><b>{MODE_TITLE[mode]}</b></Row>}
               {!safetyMode && <Row label={exit ? "Runs" : "Test cases"}><b>{exit ? 1 + exitBugs.length : picked}</b></Row>}
               <Row label="Planned calls"><b className="tabular-nums">{planned}</b></Row>
               <Row label="Caller"><b>{f.offline ? "rules (free)" : "Claude"}</b></Row>
               <Row label="AI judges"><b>{judgesOn ? "on" : "off"}</b></Row>
-              {voice && <Row label="Caller conditions"><b>{system?.conditions?.find((c) => c.id === f.conditions)?.title || "As written"}</b></Row>}
+              {voice && !sweeping && <Row label="Caller conditions"><b>{system?.conditions?.find((c) => c.id === f.conditions)?.title || "As written"}</b></Row>}
+              {f.language && <Row label="Caller's language"><b>{languages.find((l) => l.id === f.language)?.name || f.language}</b></Row>}
+              {sweeping && <Row label="Conditions compared"><b>{f.sweep.length}</b></Row>}
+              {drilling && <Row label="Failures tried"><b>{f.drills.length}</b></Row>}
               {profile.safety?.enabled && <Row label={safetyMode ? "Attack calls" : "Safety tests"}><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
               {!exit && startAgent && <Row label="Agent"><b>{f.planted_bug ? <Chip tone="bad">{f.planted_bug}</Chip> : "started by Vocto"}</b></Row>}
               {!exit && startAgent && f.planted_bug && (
-                <Notice tone="warn" icon="info" className="text-[12.5px]">With a planted bug the right answer is <b>Not ready</b> for the test case that should catch it.</Notice>
+                <Notice tone="warn" icon="info" className="text-[13px]">With a planted bug the right answer is <b>Not ready</b> for the test case that should catch it.</Notice>
               )}
               {!exit && f.bugs.size > 0 && (
                 <>
                   <Row label="Bugs on"><div className="flex flex-wrap justify-end gap-1.5">{[...f.bugs].map((b) => <Chip key={b} tone="bad">{b}</Chip>)}</div></Row>
-                  <Notice tone="warn" icon="info" className="text-[12.5px]">With bugs switched on, the right answer is <b>Not ready</b>: that means Vocto caught them.</Notice>
+                  <Notice tone="warn" icon="info" className="text-[13px]">With bugs switched on, the right answer is <b>Not ready</b>: that means Vocto caught them.</Notice>
                 </>
               )}
             </div>
@@ -497,12 +537,32 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
               {starting ? "Starting…" : exit ? "Start exit check" : "Start run"}
             </Button>
             {activeJob && (
-              <Notice tone="warn" className="mt-2.5 text-[12.5px]">A run is in progress. <a href={activeJobHref}>Watch it</a>; start this one when it's done.</Notice>
+              <Notice tone="warn" className="mt-2.5 text-[13px]">A run is in progress. <a href={activeJobHref}>Watch it</a>; start this one when it's done.</Notice>
             )}
           </Card>
+          {!exit && <PassRules rules={profile.pass_rules?.[mode || "full"]} href={projectHref(project.key, "/setup/rules")} />}
         </div>
       </div>
     </>
+  );
+}
+
+// What makes this type of run pass (src/vatf/modes.py pass_rules), so the owner sees the rules before running.
+function PassRules({ rules, href }: { rules?: PassRule[]; href: string }) {
+  if (!rules?.length) return null;
+  return (
+    <Card id="pass-rules">
+      <CardHead title="What passes" sub="from this agent's Pass rules" />
+      <ul className="flex flex-col gap-2 text-[13px]">
+        {rules.map((r) => (
+          <li key={r.text} className="flex items-start gap-2" data-blocks={r.blocks ? "yes" : "no"}>
+            <Icon name={r.blocks ? "shield" : "info"} size={14} className={cx("mt-[3px] shrink-0", r.blocks ? "text-ink" : "text-muted")} />
+            <span className={r.blocks ? "text-ink-2" : "text-muted"}>{r.text}</span>
+          </li>
+        ))}
+      </ul>
+      <div className="text-[13px] mt-3"><a href={href}>Change the rules</a></div>
+    </Card>
   );
 }
 
@@ -510,12 +570,13 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   return <div className="flex items-start gap-2.5"><span className="text-muted flex-1">{label}</span>{children}</div>;
 }
 
-function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSearchParams, offline: boolean, model: string, mode?: TestModeId): Form {
+function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSearchParams, offline: boolean, model: string, mode?: TestModeId, sweepAll?: SweepCondition[], drillAll?: DrillFailure[]): Form {
   let projectPath = projects[0].path;
   if (prefill && projects.some((p) => p.path === prefill.project)) projectPath = prefill.project;
   else if (query.get("project") && projects.some((p) => p.path === query.get("project"))) projectPath = query.get("project")!;
   const project = projects.find((p) => p.path === projectPath)!;
-  const wanted = prefill?.profile_file || query.get("profile") || "profile.yaml";
+  // The agent's main connection (its voice one when it has one) unless a run or the address names another.
+  const wanted = prefill?.profile_file || query.get("profile") || mainProfile(project)?.file || "profile.yaml";
   const voiceFirst = !!mode && VOICE_ONLY.includes(mode) && !prefill && !query.get("profile");
   const profile = (voiceFirst && project.profiles.find((p) => p.mode === "voice" && p.ok))
     || project.profiles.find((p) => p.file === wanted) || project.profiles[0];
@@ -525,7 +586,11 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     options: {}, bugs: new Set(splitBugs(defaultsOf(profile, offline).bugs)),
     offline, model, speech: "local", stt_model: "base.en", stt_check_model: "small.en", repeats: "", show_pii: false, judges: true, safety: true,
     start_agent: true, planted_bug: "", conditions: (mode && DEFAULT_CONDITIONS[mode]) || "as_written",
+    sweep: mode === "speech" ? (sweepAll || []).filter((c) => c.default).map((c) => c.id) : [],
+    drills: mode === "resilience" ? (drillAll || []).filter((c) => c.default).map((c) => c.id) : [],
+    language: "",
   };
+  if ((mode === "speech" || mode === "resilience") && !prefill) f.repeats = "1";
   if (prefill) {
     f.offline = !!prefill.offline;
     if (prefill.scenario_ids?.length) f.scenarios = new Set(prefill.scenario_ids);
@@ -536,6 +601,9 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     f.judges = prefill.judges?.why !== "Judges were switched off for this run.";
     f.safety = !!prefill.safety;
     f.conditions = prefill.conditions || "as_written";
+    if (mode === "speech" && prefill.sweep?.length) f.sweep = [...prefill.sweep];
+    if (mode === "resilience") f.drills = [...(prefill.drills || [])];
+    f.language = prefill.caller_language || "";
     const d = defaultsOf(profile, f.offline);
     f.bugs = new Set(splitBugs(d.bugs));
     for (const [k, v] of Object.entries(prefill.agent_options || {})) {
@@ -545,4 +613,62 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     }
   }
   return f;
+}
+
+// Resilience: which tool failures to drill. Each picked test case runs again once per failure, with its
+// booking or order tool failing on its first call (a retry works), and the report compares them.
+function DrillPicker({ all, on, set }: { all: DrillFailure[]; on: string[]; set: (v: string[]) => void }) {
+  const toggle = (id: string) => set(on.includes(id) ? on.filter((x) => x !== id) : [...on, id]);
+  return (
+    <div className="mt-4" id="drills">
+      <div className="font-semibold text-[13px] mb-1">Failures to try</div>
+      <div className="text-muted text-[13px] mb-2">Each test case that ends in a booking or order runs again once per failure, with that tool failing the first time it is used (a retry works, as with most real outages). It passes when the agent gets it done on a retry or tells the caller honestly that it couldn't, never claiming something that didn't happen or making it twice.</div>
+      <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
+        {all.map((c) => (
+          <Choice key={c.id} on={on.includes(c.id)} data-drill={c.id} onClick={() => toggle(c.id)}>
+            <b className="block font-semibold">{c.title}</b>
+            <div className="text-ink-2 text-[13px]">{c.about}{c.expected === "success" ? " The task must still get done." : ""}</div>
+          </Choice>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Speech mode: which caller conditions to compare. Each test runs once under every condition picked,
+// and the report puts them side by side, so you see which ones the agent can't handle.
+function SweepPicker({ all, on, set }: { all: SweepCondition[]; on: string[]; set: (v: string[]) => void }) {
+  const [showAccents, setShowAccents] = useState(on.some((id) => id.startsWith("accent:")));
+  const toggle = (id: string) => set(on.includes(id) ? on.filter((x) => x !== id) : [...on, id]);
+  const lines = all.filter((c) => c.group === "line");
+  const accents = all.filter((c) => c.group === "accent");
+  const pickedAccents = on.filter((id) => id.startsWith("accent:")).length;
+  return (
+    <div className="mt-4" id="sweep">
+      <div className="font-semibold text-[13px] mb-1">Conditions to compare</div>
+      <div className="text-muted text-[13px] mb-2">Every test runs once under each condition you pick. The report shows them side by side, so you see which ones break the agent. Keep “As written” on: it is the clean result the others are compared with.</div>
+      <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
+        {lines.map((c) => (
+          <Choice key={c.id} on={on.includes(c.id)} data-sweep={c.id} onClick={() => toggle(c.id)}>
+            <b className="block font-semibold">{c.title}</b>
+            <div className="text-ink-2 text-[13px]">{c.about}</div>
+          </Choice>
+        ))}
+      </div>
+      <button type="button" className="mt-3 text-[13px] font-medium text-accent inline-flex items-center gap-1" onClick={() => setShowAccents(!showAccents)} id="sweep-accents">
+        <Icon name="chevron" size={14} className={showAccents ? "rotate-90 transition-transform" : "transition-transform"} />Accents{pickedAccents ? ` (${pickedAccents} picked)` : ""}
+      </button>
+      {showAccents && (
+        <div className="grid gap-2 grid-cols-1 md:grid-cols-2 mt-2">
+          {accents.map((c) => (
+            <Choice key={c.id} on={on.includes(c.id)} data-sweep={c.id} onClick={() => toggle(c.id)}>
+              <b className="block font-semibold">{c.title}</b>
+              <div className="text-ink-2 text-[13px]">{c.about}</div>
+            </Choice>
+          ))}
+        </div>
+      )}
+      {on.length === 0 && <Notice tone="warn" className="mt-3">Pick at least one condition.</Notice>}
+    </div>
+  );
 }

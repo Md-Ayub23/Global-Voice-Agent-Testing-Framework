@@ -87,10 +87,12 @@ class InProcessToolProxy:
 
         self._sink.emit("tool_proxy", "fault_injected", {"call_id": call_id, "tool": tool, "fault": dict(fault)},
                         turn=self.turn)
-        kind, forward = fault["type"], bool(fault.get("forward", False))
+        kind = fault["type"]
+        # A slow answer and a rubbish answer reach the backend unless the fault says forward: false.
+        forward = bool(fault.get("forward", kind in ("slow", "malformed_response")))
         reached = False
         status, body, ms = 0, None, 0
-        if forward or kind in ("slow", "malformed_response"):
+        if forward or kind == "slow":
             status, body, ms = self._forward(tool, args)
             reached = True
         if kind == "timeout":
@@ -100,6 +102,14 @@ class InProcessToolProxy:
         if kind == "http_error":
             code = fault.get("status", 500)
             return self._respond(call_id, tool, code, {"error": f"upstream returned {code}"}, ms, reached)
+        if kind == "rate_limited":
+            # Too many requests: the service refuses for now and says when to try again.
+            wait = fault.get("retry_after_s", 2)
+            return self._respond(call_id, tool, 429, {"error": "rate limited: too many requests",
+                                                      "retry_after_s": wait}, ms, reached)
+        if kind == "auth_expired":
+            # The agent's login to the service has expired (an access token past its time).
+            return self._respond(call_id, tool, 401, {"error": "unauthorized: access token expired"}, ms, reached)
         if kind == "slow":
             self._wait(fault.get("delay_ms", 0))
             return self._respond(call_id, tool, status, body, ms + fault.get("delay_ms", 0), reached)

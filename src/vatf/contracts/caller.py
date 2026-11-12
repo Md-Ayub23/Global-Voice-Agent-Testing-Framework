@@ -15,6 +15,7 @@ class CallerAction:
     say: str | None
     hang_up: bool = False
     barge_in: bool = False
+    audio: str | None = None     # a recording of the line to play instead of synthetic speech (voice)
 
 
 class CallerSimulator(Protocol):

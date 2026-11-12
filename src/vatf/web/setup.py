@@ -25,6 +25,7 @@ from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ..gateway import gateway_address, tool_url, uses_gateway
 from ..loader import ProjectError, load_profile, load_project, schema_errors
 from ..logs import sample_logs
+from .. import recordings
 from ..probe import BackendProbe, ProbeSetupError, check_backend
 from ..util import MissingSecret, expand_env
 from . import data
@@ -33,7 +34,9 @@ PROJECTS_DIR = "projects"
 ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SECTIONS = {"name", "description", "agent_prompt", "domain", "languages", "connection", "test_id", "tools", "tool_gateway",
             "backend", "logs", "judges", "safety", "thresholds", "limits", "metrics", "pii", "agent_process",
-            "planted_bugs", "regression", "alerts", "health_checks", "load", "monitor"}
+            "planted_bugs", "regression", "alerts", "health_checks", "load", "monitor", "costs"}
+# Written whole: a price the form cleared is gone, not kept from before.
+WHOLE = {"costs"}
 
 # Framework defaults, shown in the forms as what an empty field means (client_profile.schema.yaml).
 DEFAULTS = {
@@ -189,6 +192,12 @@ def profile_detail(root: Path, project: str, file: str) -> dict[str, Any]:
     try:
         merged, _ = load_profile(folder, file)
         problems += [f"{file}: {e}" for e in schema_errors("client_profile", merged)]
+        heard = (merged.get("logs") or {}).get("heard_pattern")
+        if heard:
+            try:
+                re.compile(heard)
+            except re.error as e:
+                problems.append(f"What the agent heard: the pattern is not valid ({e}).")
         if raw.get("extends"):
             base, _ = load_profile(folder, raw["extends"])
     except ProjectError as e:
@@ -228,7 +237,7 @@ def save_profile(root: Path, project: str, file: str, sections: Mapping[str, Any
         value = _clean(value) if isinstance(value, (Mapping, list)) else value
         if value is None or (isinstance(value, (Mapping, list)) and not value):
             doc.pop(key, None)
-        elif key in doc and key not in replace:
+        elif key in doc and key not in replace and key not in WHOLE:
             doc[key] = deep_update(doc[key], value)
         else:
             doc[key] = value
@@ -548,3 +557,18 @@ def test_logs(root: Path, project: str, file: str) -> dict[str, Any]:
         return {"ok": False, "message": result.error}
     return {"ok": True, "message": f"Read {len(result.lines)} recent line(s) from {result.source}.",
             "lines": result.lines}
+
+
+# ---- recorded caller lines ------------------------------------------------------------------------
+
+def save_recording(root: Path, project: str, name: str, raw: bytes) -> dict[str, Any]:
+    """An uploaded recording of a caller line, saved in the agent's recordings/ folder."""
+    return recordings.save(_folder(root, project), name or "recording.wav", raw)
+
+
+def recording_file(root: Path, project: str, rel: str) -> Path:
+    path = recordings.resolve(_folder(root, project), rel)
+    if not path.is_file():
+        raise data.NotFound(f"{rel} not found")
+    return path
+

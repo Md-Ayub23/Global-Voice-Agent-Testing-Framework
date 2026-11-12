@@ -18,17 +18,14 @@ export function Ring({ value, size = 56, stroke = 4, toneName }: { value: number
   const v = value == null ? 0 : Math.max(0, Math.min(1, value));
   const t = toneName || (value == null ? "neutral" : v >= 0.999 ? "good" : v >= 0.8 ? "warn" : "bad");
   const color = { good: "var(--good)", warn: "var(--warn)", bad: "var(--bad)", neutral: "var(--line-strong)" }[t];
-  const [offset, setOffset] = useState(c);
-  useEffect(() => {
-    const id = setTimeout(() => setOffset(c * (1 - v)), 60);
-    return () => clearTimeout(id);
-  }, [c, v]);
+  // Numbers people read are drawn at their value straight away: no sweep from zero on every visit.
+  const offset = c * (1 - v);
   return (
     <div className="relative flex-none" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--surface-3)" strokeWidth={stroke} />
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
-          strokeDasharray={c} strokeDashoffset={offset} style={{ transition: "stroke-dashoffset 1s cubic-bezier(.2,.8,.2,1)" }} />
+          strokeDasharray={c} strokeDashoffset={offset} />
       </svg>
       <b className="absolute inset-0 grid place-items-center text-[13px] font-semibold tabular-nums">{value == null ? "—" : `${Math.round(v * 100)}%`}</b>
     </div>
@@ -45,7 +42,7 @@ const tickLabel = (t: number) => (t >= 1000 ? `${(t / 1000).toFixed(t % 1000 ? 1
 
 // Response time per agent answer in one call (voice): verdict.metrics.latency_turns.
 export function LatencyBars({ rows, limits, width = 560 }: { rows: LatencyTurn[] | undefined; limits: Limits | null; width?: number }) {
-  if (!rows || !rows.length) return <div className="text-muted text-[12.5px]">No answers were timed in this call.</div>;
+  if (!rows || !rows.length) return <div className="text-muted text-[13px]">No answers were timed in this call.</div>;
   const W = width, H = Math.round(Math.max(170, W * 0.42)), L = 44, R = 10, T = 16, B = 26;
   const narrow = (W - L - R) / rows.length < 58;
   const max = niceMax(Math.max(...rows.map((r) => r.ms ?? 0), limits?.p95 || 0, 1) * 1.08);
@@ -55,19 +52,20 @@ export function LatencyBars({ rows, limits, width = 560 }: { rows: LatencyTurn[]
   const ticks = [0, max / 4, max / 2, (3 * max) / 4, max];
   return (
     <svg className="chart w-full block overflow-visible" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Response time per answer">
+      <defs><linearGradient id="aur-bar" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="var(--accent)" /><stop offset="1" stopColor="var(--accent-2)" /></linearGradient></defs>
       <g>{ticks.map((t) => <line key={t} x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="var(--line)" />)}</g>
       {ticks.map((t) => <text key={t} x={L - 8} y={y(t) + 4} textAnchor="end">{tickLabel(t)}</text>)}
       {rows.map((r, i) => {
         const cx = L + step * i + step / 2;
         const over = !!limits && r.ms != null && r.counted && r.ms > limits.p95;
-        const fill = r.ms == null ? "var(--line-strong)" : !r.counted ? "var(--muted)" : over ? "var(--bad)" : "var(--caller)";
+        const fill = r.ms == null ? "var(--line-strong)" : !r.counted ? "var(--muted)" : over ? "var(--bad)" : "url(#aur-bar)";
         const h = r.ms == null ? 3 : Math.max(3, y(0) - y(r.ms));
         const top = y(0) - h;
         return (
           <TipG key={r.seq} content={<><b>Turn {r.turn}</b> · event #{r.seq}<br />{r.ms == null ? "no answer" : fmtMs(r.ms)}<br />{r.counted ? (over ? "over the p95 limit" : "counts toward the gate") : `not counted: ${r.note}`}</>}>
             <rect x={cx - step / 2} y={T} width={step} height={H - T - B} fill="transparent" />
-            <path d={`M${cx - bw / 2},${y(0)} V${top + 4} q0,-4 4,-4 H${cx + bw / 2 - 4} q4,0 4,4 V${y(0)} Z`} fill={fill}
-              opacity={r.counted ? 1 : 0.55} style={{ animation: `rise .5s cubic-bezier(.2,.8,.2,1) ${i * 0.05}s both` }} />
+            <path d={`M${cx - bw / 2},${y(0)} V${top + 4} q0,-4 4,-4 H${cx + bw / 2 - 4} q4,0 4,4 V${y(0)} Z`} className="bar-grow" fill={fill}
+              opacity={r.counted ? 1 : 0.55} />
             {r.ms != null && (
               <text x={cx} y={top - 5} textAnchor="middle" style={{ fill: "var(--ink-2)", fontWeight: 600 }}>
                 {over ? "! " : ""}{narrow ? `${(r.ms / 1000).toFixed(1)}s` : fmtMs(r.ms)}
@@ -99,7 +97,7 @@ export function LatencyDots({ calls, limits, runId, width = 760 }: { calls: Call
       byScenario.get(c.scenario_id)!.push({ ...r, test_id: c.test_id, repeat: c.repeat });
     }
   }
-  if (!byScenario.size) return <div className="text-muted text-[12.5px]">No answers were timed.</div>;
+  if (!byScenario.size) return <div className="text-muted text-[13px]">No answers were timed.</div>;
   const names = [...byScenario.keys()];
   const all = names.flatMap((n) => byScenario.get(n)!.map((r) => r.ms as number));
   const max = niceMax(Math.max(...all, limits?.p95 || 0) * 1.05);
@@ -151,14 +149,14 @@ function StripTile({ run }: { run: RunSummary }) {
   const bg = { good: "bg-good", bad: "bg-bad", warn: "bg-warn", neutral: "bg-line-strong", run: "bg-accent" }[t];
   return (
     <a href={runHref(run)} aria-label={statusLabel(s)} {...tip}
-      className={`flex-1 max-w-[18px] min-w-1 overflow-hidden h-full rounded grid place-items-center text-white transition-transform duration-150 hover:-translate-y-0.5 ${bg}`}>
+      className={`flex-1 max-w-[18px] min-w-1 overflow-hidden h-full rounded grid place-items-center text-white transition-[filter] duration-150 hover:brightness-110 ${bg}`}>
       <Icon name={t === "good" ? "check" : t === "bad" ? "x" : t === "warn" ? "alert" : "minus"} size={10} strokeWidth={3} />
     </a>
   );
 }
 export function DecisionStrip({ runs }: { runs: RunSummary[] }) {
   const list = runs.slice(0, 40).reverse();
-  if (!list.length) return <div className="text-muted text-[12.5px]">No runs yet.</div>;
+  if (!list.length) return <div className="text-muted text-[13px]">No runs yet.</div>;
   return <div className="flex gap-1 items-end h-[34px]">{list.map((r) => <StripTile key={r.run_id} run={r} />)}</div>;
 }
 
@@ -237,13 +235,13 @@ export function Waveform({ runId, testId, audio, events }: { runId: string; test
     };
   }, [data, audio]);
 
-  if (error) return <div className="text-muted text-[12.5px] p-3.5">{error}</div>;
-  if (!data) return <div className="h-[120px] rounded-[10px] animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]" />;
+  if (error) return <div className="text-muted text-[13px] p-3.5">{error}</div>;
+  if (!data) return <div className="h-[120px] rounded-[12px] animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]" />;
   const lanes = Object.keys(data.channels);
   return (
     <div
       ref={box}
-      className="relative rounded-[10px] bg-surface-2 border border-line overflow-hidden cursor-pointer"
+      className="relative rounded-[12px] bg-surface-2 border border-line overflow-hidden cursor-pointer"
       onClick={(e) => {
         if (!audio) return;
         const r = e.currentTarget.getBoundingClientRect();
@@ -253,7 +251,7 @@ export function Waveform({ runId, testId, audio, events }: { runId: string; test
       <canvas ref={canvas} className="block w-full h-[120px]" />
       <div ref={head} className="absolute inset-y-0 left-0 w-0.5 bg-accent pointer-events-none shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_20%,transparent)]" />
       {lanes.map((name, i) => (
-        <span key={name} className="absolute left-2.5 text-[11px] font-bold px-1.5 py-px rounded-[5px] bg-surface"
+        <span key={name} className="absolute left-2.5 text-[13px] font-bold px-1.5 py-px rounded-[5px] bg-surface"
           style={{ top: 6 + i * 60, color: name === "caller" ? "var(--caller)" : "var(--agent)" }}>
           {name === "caller" ? "Caller (left)" : name === "agent" ? "Agent (right)" : name}
         </span>

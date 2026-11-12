@@ -86,7 +86,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
       <Block title="Safety tests" icon="shield"
         sub={<>Calls that try to make the agent go wrong: questions outside its job, pushing for passwords, prompt tricks, made-up facts, other people's data, abuse and more. They are written for this agent from its industry ({domainLabel(page.industry === "generic" ? "" : page.industry) || "general"}), its tools and its policy, and run when you tick <b>Include safety tests</b> on New run.</>}
         aside={last ? (
-          <a href={runHref({ run_id: last.run_id, project_key: projectKey })} className="inline-flex items-center gap-2 text-[12.5px]">
+          <a href={runHref({ run_id: last.run_id, project_key: projectKey })} className="inline-flex items-center gap-2 text-[13px]">
             <Badge status={last.decision} /> last run: {last.passed} of {last.calls} safe
           </a>
         ) : undefined}>
@@ -98,7 +98,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
             <div className="flex items-center gap-3 flex-wrap">
               <Seg id="safety-intensity" value={s.intensity} onChange={(v) => write({ intensity: v })}
                 options={INTENSITIES.map((i) => ({ value: i.value, label: i.label }))} />
-              <span id="safety-count" className="text-[12.5px] text-ink-2">
+              <span id="safety-count" className="text-[13px] text-ink-2">
                 <b className="text-ink tabular-nums">{on.length}</b> attack calls × {repeats} = <b className="text-ink tabular-nums">{on.length * repeats}</b> calls
                 {live ? <span className="text-muted"> ({live} with an AI attacker, live runs only)</span> : null}
               </span>
@@ -121,10 +121,10 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
                   <div key={p.id} data-pack={p.id} className={cx("rounded-lg border p-2.5 grid gap-1.5", s.packs.has(p.id) ? "border-accent/50 bg-accent-soft/40" : "border-line")}>
                     <Check checked={s.packs.has(p.id)} onChange={(v) => togglePack(p.id, v)}
                       label={<span className="inline-flex items-center gap-1.5 flex-wrap">{p.title}
-                        {p.id !== "own" && <Chip className="text-[11px]">{count} of {byPack(p.id).length}</Chip>}
-                        {yours > 0 && <Chip tone="accent" className="text-[11px]">{yours} of yours</Chip>}</span>}
+                        {p.id !== "own" && <Chip className="text-[13px]">{count} of {byPack(p.id).length}</Chip>}
+                        {yours > 0 && <Chip tone="accent" className="text-[13px]">{yours} of yours</Chip>}</span>}
                       hint={p.what} />
-                    <button type="button" data-add-question={p.id} className="text-[12px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start ml-6"
+                    <button type="button" data-add-question={p.id} className="text-[13px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start ml-6"
                       onClick={() => addQuestion(p.id)}>
                       <Icon name="plus" size={12} /> Add your own question
                     </button>
@@ -153,7 +153,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
             {!canaries.filter(Boolean).length && <Help>Without planted secrets, leaks are still caught when the agent says something shaped like a password, key or card number.</Help>}
           </Block>
           <Block title="Every attack call">
-            <button type="button" id="safety-attacks" className="text-[12.5px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start" onClick={() => setOpen((o) => !o)}>
+            <button type="button" id="safety-attacks" className="text-[13px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start" onClick={() => setOpen((o) => !o)}>
               <Icon name="chevron" size={13} className={cx("transition-transform", open && "rotate-90")} />
               {open ? "Hide" : "Show"} the {page.attacks.length} calls and what the caller says
             </button>
@@ -161,7 +161,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
               <div className="grid gap-4">
                 {page.packs.filter((p) => s.packs.has(p.id)).map((p) => (
                   <div key={p.id} className="grid gap-1.5">
-                    <div className="text-[12.5px] font-semibold text-ink-2">{p.title}</div>
+                    <div className="text-[13px] font-semibold text-ink-2">{p.title}</div>
                     {byPack(p.id).map((a) => <AttackRow key={a.id} a={a} s={s} liveOnly={page.live_only} onToggle={toggleAttack} />)}
                   </div>
                 ))}
@@ -188,9 +188,9 @@ function AttackRow({ a, s, liveOnly, onToggle }: { a: SafetyAttack; s: SafetyDra
     <div data-attack={a.id} className={cx("rounded-lg border border-line p-2.5", !on && "opacity-70")}>
       <Check checked={!s.skip.has(a.id) && !tooHard} onChange={(v) => !tooHard && onToggle(a.id, v)}
         label={<span className="inline-flex items-center gap-1.5 flex-wrap">{a.title}
-          {a.adaptive && <Chip tone="accent" icon="sparkles" className="text-[11px]">AI attacker, live only</Chip>}
-          {a.custom && <Chip tone="accent" className="text-[11px]">yours</Chip>}
-          {why && <span className="text-[11.5px] font-normal text-muted">{why}</span>}</span>}
+          {a.adaptive && <Chip tone="accent" icon="sparkles" className="text-[13px]">AI attacker, live only</Chip>}
+          {a.custom && <Chip tone="accent" className="text-[13px]">yours</Chip>}
+          {why && <span className="text-[13px] font-normal text-muted">{why}</span>}</span>}
         hint={a.lines.length ? (
           <span className="grid gap-0.5">{a.lines.map((l, i) => <span key={i}>{a.adaptive ? l : `“${l}”`}</span>)}</span>
         ) : undefined} />

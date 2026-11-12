@@ -3,7 +3,7 @@
 // stream in only they are added (and animate in); a tool answer fills in its request card, and
 // a second listen is attached to the agent turn it re-checked.
 import { useImperativeHandle, useMemo, useRef, type ReactNode, type Ref } from "react";
-import { cx, fmtDuration, fmtMs, fmtSecs } from "../lib/format";
+import { cx, fmtDuration, fmtMs, fmtSecs, plural } from "../lib/format";
 import type { EventData, Limits, TraceEvent } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 import { Chip, Spinner, Table } from "./ui";
@@ -73,10 +73,21 @@ function build(events: TraceEvent[]): { items: Item[]; owner: Map<number, number
         else add({ kind: "sys", seq: e.seq, tone: "", icon: "ear", text: <><b>Second listen</b> ({d.model || ""}): {d.text || ""}</> });
         break;
       }
+      case "agent_heard":
+        add({ kind: "sys", seq: e.seq, tone: "", icon: "ear", text: <><b>Agent understood</b>{d.source === "log" ? " (from its logs)" : ""}: “{d.text || ""}”</> });
+        break;
       case "probe_result":
         if (!d.ok) add({ kind: "sys", seq: e.seq, tone: "bad", icon: "db", text: `Database check ${d.probe} failed: ${d.error || "unknown error"}` });
         else add({ kind: "db", seq: e.seq, e });
         break;
+      case "state_diff": {
+        const changed = (d.tables || []).filter((t: any) => t.count).map((t: any) => `${t.table} (${t.count})`);
+        add({ kind: "sys", seq: e.seq, tone: d.error ? "bad" : "", icon: "db",
+          text: d.error ? `Could not compare the tables before and after: ${d.error}`
+            : changed.length ? <><b>Rows changed during the call</b>: {changed.join(", ")}</>
+            : `Nothing changed in ${(d.tables || []).length} watched table${(d.tables || []).length === 1 ? "" : "s"}` });
+        break;
+      }
       case "validator_result":
         add(d.on_script
           ? { kind: "sys", seq: e.seq, tone: "good", icon: "check", text: "Validator: the simulated caller stayed on script" }
@@ -144,7 +155,7 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
           case "sys":
             return (
               <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`}
-                className={cx("self-center inline-flex items-center gap-2 text-[12.5px] px-3 py-1 rounded-full border max-w-[92%] animate-rise",
+                className={cx("self-center inline-flex items-center gap-2 text-[13px] px-3 py-1 rounded-full border max-w-[92%] animate-rise",
                   it.tone === "bad" ? "text-bad bg-bad-soft border-transparent" : it.tone === "good" ? "text-good bg-good-soft border-transparent" : "text-muted bg-surface-2 border-line")}>
                 <Icon name={it.icon} size={14} className="flex-none" /><span>{it.text}</span>
               </div>
@@ -155,9 +166,9 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
             const own = d.platform_transcript && d.platform_transcript.trim() !== (d.heard_text || "").trim() ? d.platform_transcript : null;
             return (
               <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`} className="flex gap-2.5 items-end max-w-full md:max-w-[86%] animate-rise rounded-2xl">
-                <div className="size-[30px] rounded-[10px] grid place-items-center text-white flex-none bg-agent"><Icon name="bot" /></div>
+                <div className="size-[30px] rounded-[12px] grid place-items-center text-white flex-none bg-agent"><Icon name="bot" /></div>
                 <div className="rounded-2xl rounded-bl-[5px] px-3.5 py-2.5 bg-surface-2 border border-line min-w-0">
-                  <div className="text-[11.5px] font-bold flex gap-2 items-center mb-0.5 flex-wrap text-agent">
+                  <div className="text-[13px] font-bold flex gap-2 items-center mb-0.5 flex-wrap text-agent">
                     Agent <span className="text-muted font-medium inline-flex gap-1">turn {it.e.turn ?? ""} · {d.audio ? play(d.audio.start_ms) : fmtSecs(it.e.t_ms)}</span>
                   </div>
                   <div className="whitespace-pre-wrap break-words">{d.silent ? <span className="text-muted">(said nothing)</span> : d.heard_text || ""}</div>
@@ -172,9 +183,9 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                       {d.interrupted && <Chip tone="warn" icon="hang">interrupted · stopped {fmtMs(d.stopped_after_ms)} after the caller cut in</Chip>}
                     </div>
                   )}
-                  {own && <div className="mt-2 pt-[7px] border-t border-dashed border-line-strong text-ink-2 text-[12.5px]"><b>Agent's own text:</b> {own}</div>}
+                  {own && <div className="mt-2 pt-[7px] border-t border-dashed border-line-strong text-ink-2 text-[13px]"><b>Agent's own text:</b> {own}</div>}
                   {it.second && (
-                    <div className="mt-2 pt-[7px] border-t border-dashed border-line-strong text-ink-2 text-[12.5px] animate-rise">
+                    <div className="mt-2 pt-[7px] border-t border-dashed border-line-strong text-ink-2 text-[13px] animate-rise">
                       <b className="inline-flex items-center gap-1"><Icon name="ear" size={13} /> Second listen</b> <span className="text-muted">({it.second.model || ""})</span>: {it.second.text || ""}
                     </div>
                   )}
@@ -186,13 +197,18 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
             const d = it.e.data;
             return (
               <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`} className="flex flex-row-reverse gap-2.5 items-end self-end max-w-full md:max-w-[86%] animate-rise rounded-2xl">
-                <div className="size-[30px] rounded-[10px] grid place-items-center text-white flex-none bg-caller"><Icon name="user" /></div>
+                <div className="size-[30px] rounded-[12px] grid place-items-center text-white flex-none bg-caller"><Icon name="user" /></div>
                 <div className="rounded-2xl rounded-br-[5px] px-3.5 py-2.5 bg-caller-soft min-w-0">
-                  <div className="text-[11.5px] font-bold flex gap-2 items-center mb-0.5 flex-wrap text-caller">
+                  <div className="text-[13px] font-bold flex gap-2 items-center mb-0.5 flex-wrap text-caller">
                     Caller <span className="text-muted font-medium inline-flex gap-1">turn {it.e.turn ?? ""} · {d.audio ? play(d.audio.start_ms) : fmtSecs(it.e.t_ms)}</span>
                   </div>
                   <div className="whitespace-pre-wrap break-words">{d.text || ""}</div>
-                  {d.barge_in && <div className="flex gap-1.5 flex-wrap mt-[7px]"><Chip tone="warn" icon="bolt">cut in while the agent was talking</Chip></div>}
+                  {(d.barge_in || d.recording) && (
+                    <div className="flex gap-1.5 flex-wrap mt-[7px]">
+                      {d.barge_in && <Chip tone="warn" icon="bolt">cut in while the agent was talking</Chip>}
+                      {d.recording && <Chip icon="mic" title={`Played from ${d.recording}, a recording of a real caller; the words above are what is said in it`}>real caller recording</Chip>}
+                    </div>
+                  )}
                 </div>
               </div>
             );
@@ -203,14 +219,14 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
             const failed = resp && !resp.ok;
             return (
               <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`}
-                className={cx("self-stretch md:mx-10 border border-line border-l-[3px] rounded-[10px] px-3 py-2.5 text-[13px] animate-rise",
+                className={cx("self-stretch md:mx-10 border border-line border-l-[3px] rounded-[12px] px-3 py-2.5 text-[13px] animate-rise",
                   it.fault ? "border-l-bad bg-[color-mix(in_srgb,var(--bad-soft)_45%,var(--surface))]" : failed ? "border-l-bad bg-surface" : "border-l-tool bg-surface")}>
                 <div className="flex items-center gap-2 flex-wrap">
                   <Icon name="tool" className="text-tool" />
-                  {req && <span className="text-muted text-[12.5px]">Agent uses tool</span>}
+                  {req && <span className="text-muted text-[13px]">Agent uses tool</span>}
                   <b className="font-mono text-[13px]">{it.tool}</b>
                   <span className="flex-1" />
-                  {it.e && <span className="text-muted text-[11.5px]">turn {it.e.turn ?? ""} · #{it.e.seq}</span>}
+                  {it.e && <span className="text-muted text-[13px]">turn {it.e.turn ?? ""} · #{it.e.seq}</span>}
                 </div>
                 {req && <KV obj={req.args} />}
                 {it.fault && (
@@ -223,14 +239,14 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                 <div className="mt-2 pt-2 border-t border-dashed border-line">
                   {resp ? (
                     <>
-                      <div className="flex items-center gap-2 flex-wrap text-[12.5px]">
+                      <div className="flex items-center gap-2 flex-wrap text-[13px]">
                         <Chip tone={resp.ok ? "good" : "bad"} icon={resp.ok ? "check" : "x"}>{resp.ok ? "OK" : "Failed"} {resp.status}</Chip>
                         <span className="text-muted">{fmtMs(resp.duration_ms)}{resp.reached_backend ? "" : " · never reached the database"} · #{it.resp!.seq}</span>
                       </div>
                       <KV obj={resp.body} />
                     </>
                   ) : (
-                    <span className="flex items-center gap-2 text-[12.5px] text-muted"><Spinner />waiting for the answer…</span>
+                    <span className="flex items-center gap-2 text-[13px] text-muted"><Spinner />waiting for the answer…</span>
                   )}
                 </div>
               </div>
@@ -240,23 +256,23 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
             const d = it.e.data;
             const rows: Record<string, unknown>[] | null = d.rows || null;
             return (
-              <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`} className="self-stretch md:mx-10 border border-line border-l-[3px] border-l-tool rounded-[10px] bg-surface px-3 py-2.5 text-[13px] animate-rise">
+              <div key={it.seq} ref={keep(it.seq)} id={`ev-${it.seq}`} className="self-stretch md:mx-10 border border-line border-l-[3px] border-l-tool rounded-[12px] bg-surface px-3 py-2.5 text-[13px] animate-rise">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <Icon name="db" className="text-tool" /><span className="text-muted text-[12.5px]">Database after the call</span>
+                  <Icon name="db" className="text-tool" /><span className="text-muted text-[13px]">Database after the call</span>
                   <b className="font-mono text-[13px]">{d.probe}</b><span className="flex-1" />
-                  <span className="text-muted text-[11.5px]">{rows ? `${rows.length} row(s)` : ""} · #{it.seq}</span>
+                  <span className="text-muted text-[13px]">{rows ? `${plural(rows.length, "row")}` : ""} · #{it.seq}</span>
                 </div>
                 {rows ? (
                   rows.length ? <div className="mt-2"><RowsTable rows={rows} /></div>
-                    : <div className="text-muted text-[12.5px] mt-1.5">No rows: nothing was stored by this call.</div>
-                ) : <div className="font-mono text-[12.5px] mt-1.5">{value(d.value)}</div>}
+                    : <div className="text-muted text-[13px] mt-1.5">No rows: nothing was stored by this call.</div>
+                ) : <div className="font-mono text-[13px] mt-1.5">{value(d.value)}</div>}
               </div>
             );
           }
         }
       })}
       {typing && (
-        <div className={cx("inline-flex gap-2 items-center text-muted text-[12.5px] pt-1.5", typing === "caller" ? "self-end pr-10" : "self-start pl-10")}>
+        <div className={cx("inline-flex gap-2 items-center text-muted text-[13px] pt-1.5", typing === "caller" ? "self-end pr-10" : "self-start pl-10")}>
           <span className="inline-flex gap-[3px]">
             {[0, 0.15, 0.3].map((d) => <i key={d} className="size-1.5 rounded-full bg-current animate-dot" style={{ animationDelay: `${d}s` }} />)}
           </span>
@@ -272,7 +288,7 @@ function KV({ obj }: { obj: Record<string, unknown> | null | undefined }) {
   const entries = obj == null ? [] : typeof obj === "object" && !Array.isArray(obj) ? Object.entries(obj) : [["result", obj] as [string, unknown]];
   if (!entries.length) return null;
   return (
-    <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-[3px] mt-2 text-[12.5px]">
+    <div className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-[3px] mt-2 text-[13px]">
       {entries.map(([k, v]) => (
         <div key={k} className="contents">
           <span className="text-muted">{k}</span>
@@ -287,7 +303,7 @@ export function RowsTable({ rows }: { rows: Record<string, unknown>[] }) {
   return (
     <Table compact head={Object.keys(rows[0])}>
       {rows.map((r, i) => (
-        <tr key={i}>{Object.values(r).map((v, j) => <td key={j} className="font-mono text-[12.5px]">{String(v)}</td>)}</tr>
+        <tr key={i}>{Object.values(r).map((v, j) => <td key={j} className="font-mono text-[13px]">{String(v)}</td>)}</tr>
       ))}
     </Table>
   );

@@ -256,6 +256,11 @@ def test_new_project_then_forms(root):
     detail = setup.profile_detail(root, made["path"], "profile.yaml")
     assert detail["merged"]["connection"]["type"] == "websocket_audio"
     assert any("no scenarios" in p for p in detail["problems"])
+    # A new agent is not ready yet, but its pages still need to know how it is reached (the sidebar reads this).
+    from vatf.web.data import profile_info
+    brief = profile_info(root, root / made["path"], "profile.yaml")
+    assert not brief["ok"] and brief["connection"]["type"] == "websocket_audio"
+    assert brief["connection"]["target"] == "wss://x.example/call"
 
     bad = setup.save_profile(root, made["path"], "profile.yaml", {"tools": [{"name": "block_card", "effect": "maybe"}]})
     assert not bad["saved"] and "maybe" in " ".join(bad["problems"])

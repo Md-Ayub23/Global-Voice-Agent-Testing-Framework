@@ -371,7 +371,7 @@ def test_transcript_shows_conversation_tools_database_and_judgement(tmp_path):
     text = Path(decision["_transcript"]).read_text(encoding="utf-8")
     for expected in ["AGENT            Riverside Clinic", "CALLER", "AGENT uses tool  book_appointment(",
                      "vatf breaks tool book_appointment: injected timeout", "FAILED 504",
-                     "database check   appointments_for_test: 0 row(s)", "Said     : success",
+                     "database check   appointments_for_test: 0 rows", "Said     : success",
                      "Outcome  : FALSE_SUCCESS  -> FAIL", "DECISION: NO_GO"]:
         assert expected in text, expected
     call_dir = orch.store.call_dir(decision["run_id"], decision["calls"][0]["test_id"])

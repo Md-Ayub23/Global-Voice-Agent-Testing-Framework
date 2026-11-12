@@ -14,15 +14,18 @@ from typing import Any
 US_1, US_2, UK = "en_US-lessac-medium", "en_US-amy-medium", "en_GB-alba-medium"
 
 
-def _p(pid: str, title: str, description: str, traits: dict[str, str], voice: str, rate: float = 1.0,
-       interrupts: bool = False) -> dict[str, Any]:
+def _p(pid: str, title: str, description: str, traits: dict[str, str], voice: str | None, rate: float = 1.0,
+       interrupts: bool = False, behaviour: dict[str, Any] | None = None, speech: dict[str, Any] | None = None,
+       use: str = "any") -> dict[str, Any]:
+    """`use`: the test type the caller is made for (any, timing or speech); the test plan writer offers the
+    timing and speech callers only when it writes those tests."""
     return {
         "schema_version": "0.1", "kind": "persona", "id": pid,
         "description": description,
         "traits": {"patience": "medium", "verbosity": "normal", "mood": "calm", "clarity": "high", **traits},
-        "speech": {"tts_voice": voice, "speaking_rate": rate},
-        "behaviour": {"interrupts": interrupts},
-        "_title": title,
+        "speech": {**({"tts_voice": voice} if voice else {}), "speaking_rate": rate, **(speech or {})},
+        "behaviour": {"interrupts": interrupts, **(behaviour or {})},
+        "_title": title, "_use": use,
     }
 
 
@@ -65,7 +68,38 @@ LIBRARY: dict[str, dict[str, Any]] = {p["id"]: p for p in [
     _p("second-language", "Caller speaking a second language",
        "English is not their first language. Uses short, simple sentences, sometimes the wrong word, and asks "
        "the agent to say things more simply.", {"clarity": "medium"}, UK, 0.9),
+    # Conversation & timing: how the caller takes turns (voice calls).
+    _p("says-mm-hm", "Caller who says \"mm-hm\"",
+       "Listens actively: says \"mm-hm\" or \"okay\" while the agent explains. The agent should keep going, "
+       "not stop or start again.", {}, US_1, behaviour={"backchannels": True}, use="timing"),
+    _p("pauses-mid-sentence", "Caller who pauses mid-sentence",
+       "Stops to think in the middle of longer sentences. The agent should wait for the end, not answer half a "
+       "sentence.", {"patience": "high"}, US_2, 0.95, behaviour={"pauses_mid_sentence": True, "fillers": True}, use="timing"),
+    _p("goes-quiet", "Caller who goes quiet",
+       "Goes silent once in the call (looking for a card or a date). The agent should check in politely after a "
+       "while, not hang up or keep talking over the silence.", {}, UK, behaviour={"goes_quiet": True}, use="timing"),
+    # Speech & accents: how the caller sounds (voice calls).
+    _p("quiet-caller", "Quiet, soft-spoken caller",
+       "Speaks softly, as if on a bad headset. Says everything once, clearly but quietly.", {}, US_2,
+       speech={"volume_db": -12}, use="speech"),
+    _p("indian-english", "Caller with an Indian English accent",
+       "Speaks fluent English with an Indian accent and spells names when asked.", {}, None,
+       speech={"accent": "indian"}, use="speech"),
+    _p("scottish-english", "Caller with a Scottish accent",
+       "Speaks with a Scottish accent, quickly and naturally.", {}, None, 1.05, speech={"accent": "scottish"}, use="speech"),
+    _p("spanish-speaker", "Spanish speaker using English",
+       "A first-language Spanish speaker using English: an accent, short sentences, numbers said one by one.",
+       {"clarity": "medium"}, None, 0.95, speech={"accent": "spanish-l1"}, use="speech"),
+    _p("mandarin-speaker", "Mandarin speaker using English",
+       "A first-language Mandarin speaker using English: an accent and some names spelled letter by letter.",
+       {"clarity": "medium"}, None, 0.95, speech={"accent": "mandarin-l1"}, use="speech"),
 ]}
+
+
+def for_type(test_type: str) -> list[str]:
+    """The library callers the test plan writer may use for a test type: the general ones, plus the ones made
+    for Timing or Speech when it writes those."""
+    return [pid for pid, p in LIBRARY.items() if p["_use"] in ("any", test_type)]
 
 
 def title(pid: str) -> str:
@@ -76,10 +110,11 @@ def persona_doc(pid: str) -> dict[str, Any]:
     """The persona file's contents (without the library's own title field)."""
     doc = copy.deepcopy(LIBRARY[pid])
     doc.pop("_title")
+    doc.pop("_use")
     return doc
 
 
 def catalog() -> list[dict[str, Any]]:
     """For the dashboard: every library persona with its title and settings."""
     return [{"id": pid, "title": p["_title"], "description": p["description"], "traits": p["traits"],
-             "speech": p["speech"], "behaviour": p["behaviour"]} for pid, p in LIBRARY.items()]
+             "speech": p["speech"], "behaviour": p["behaviour"], "use": p["_use"]} for pid, p in LIBRARY.items()]

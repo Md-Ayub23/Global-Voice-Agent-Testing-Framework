@@ -25,10 +25,48 @@ export const projectOfJob = (job: Job | null, projects: Project[] | null) =>
 
 export const projectByKey = (projects: Project[] | null, key: string) => projects?.find((p) => p.key === key) ?? null;
 
-/** "Voice" / "Text" for a profile, with its name when a project has two of the same kind. */
-export function channelLabel(profile: Profile, all: Profile[]): string {
-  const base = profile.mode === "voice" ? "Voice" : "Text";
-  return all.filter((p) => p.mode === profile.mode).length > 1 ? `${base} · ${profile.name || profile.file}` : base;
+/** How Vocto reaches the agent through this profile, in a few words ("Phone · Twilio", "Voice WebSocket", "Text (HTTP)").
+ * Same words as connection_label in src/vatf/web/data.py. `example`: one of Vocto's practice agents. */
+export function connectionWords(profile: Profile, example = false): string {
+  const c = profile.connection;
+  if (c.type === "phone_call") {
+    const prov = (profile.options?.provider || "twilio").toString();
+    return `Phone · ${prov.charAt(0).toUpperCase()}${prov.slice(1)}`;
+  }
+  if (c.type === "twilio_media_stream") return "Twilio media stream";
+  if (c.type === "text_http") return "Text (HTTP)";
+  if (c.type === "text_python") return example ? "Practice agent (text)" : "Python function";
+  if (c.launch && example) return "Practice agent (voice)";
+  return "Voice WebSocket";
+}
+
+/** A profile's name in pickers: how Vocto reaches the agent, plus the file when two read the same. */
+export function channelLabel(profile: Profile, all: Profile[], example = false): string {
+  const words = connectionWords(profile, example);
+  const twins = all.filter((p) => connectionWords(p, example) === words);
+  return twins.length < 2 ? words : `${words} (${profile.file.replace(/\.ya?ml$/, "")})`;
+}
+
+const VOICE_ORDER = ["phone_call", "websocket_audio", "twilio_media_stream"];
+/** The agent's main connection; same rule as main_profile in src/vatf/web/data.py. */
+export function mainProfile(project: Pick<Project, "profiles">): Profile | null {
+  const ps = project.profiles;
+  if (!ps.length) return null;
+  const first = ps.find((p) => p.file === "profile.yaml") || ps[0];
+  if (first.mode === "voice") return first;
+  const voice = ps.filter((p) => p.mode === "voice")
+    .sort((a, b) => (VOICE_ORDER.indexOf(a.connection?.type) + 10) % 10 - (VOICE_ORDER.indexOf(b.connection?.type) + 10) % 10);
+  return voice[0] || first;
+}
+
+/** How Vocto reaches the agent, in plain words. */
+export function reachLabel(profile: Profile): string {
+  const c = profile.connection;
+  if (c.type === "phone_call") return "real phone number";
+  if (c.launch) return "started by Vocto";
+  if (c.type === "twilio_media_stream") return "phone audio stream";
+  if (c.type === "websocket_audio") return "voice web link";
+  return c.type === "text_http" ? "web address" : "in this computer";
 }
 
 export const modeLabel = (m: Mode | null | undefined) => (m === "voice" ? "Voice" : m === "text" ? "Text" : "—");

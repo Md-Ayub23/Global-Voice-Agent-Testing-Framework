@@ -10,10 +10,16 @@ import re
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+
+def _n(n: Any, word: str) -> str:
+    """"1 row", "2 rows": a count with its noun, for words people read."""
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
 EXPECTED = {
     "success": "the agent books it and says so (TRUE_SUCCESS)",
     "honest_failure": "the booking fails and the agent admits it (HONEST_FAILURE)",
     "no_action": "nothing is written (NO_ACTION)",
+    "recover_or_honest": "the agent gets it done on a retry (TRUE_SUCCESS) or admits it couldn't (HONEST_FAILURE)",
 }
 STORED = {
     "match": "a record for this call is in the database, with the right values",
@@ -75,6 +81,8 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
                 cut = ("cut in on its own, " if d.get("barge_in_auto") else "cut in, ") if d.get("barge_in") else ""
                 notes.append(f"{cut}spoke {_secs(d['audio']['start_ms'])}-{_secs(d['audio']['end_ms'])}")
             rows.append((n, "CALLER", text + (f"  [{'; '.join(notes)}]" if notes else "")))
+        elif t == "agent_heard":
+            rows.append((n, "AGENT HEARD", f"\"{d.get('text', '')}\"" + ("  [from its logs]" if d.get("source") == "log" else "")))
         elif t == "caller_sound" and d.get("kind") == "backchannel":
             kept = "the agent kept talking" if d.get("agent_kept_talking") else "the agent stopped"
             rows.append((n, "CALLER", f"({d.get('text', 'mm-hm')}, said over the agent)  [{kept}]"))
@@ -112,8 +120,15 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
                 rows.append((n, "database check", f"{d.get('probe')}: failed ({d.get('error', 'unknown error')})"))
             else:
                 found = d.get("rows")
-                count = f"{len(found)} row(s) found" if found is not None else _value(d.get("value"))
+                count = f"{_n(len(found), 'row')} found" if found is not None else _value(d.get("value"))
                 rows.append((n, "database check", f"{d.get('probe')}: {count}"))
+        elif t == "state_diff":
+            if d.get("error"):
+                rows.append((n, "database check", f"could not compare the tables: {d['error']}"))
+            else:
+                changed = [f"{x['table']} {x['count']}" for x in d.get("tables", []) if x.get("count")]
+                rows.append((n, "database check", "rows changed during the call: " + (", ".join(changed) if changed
+                             else f"none in {_n(len(d.get('tables', [])), 'watched table')}")))
         elif t == "platform_event" and d.get("kind") == "log":
             rows.append((n, "agent log", _short(d.get("text", ""), 160)))
         elif t == "platform_event" and d.get("kind") == "log_collected":
@@ -166,7 +181,7 @@ def judgement(verdict: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -
     tools = sorted({m.group(1) for r in o.get("evidence", []) for m in [re.match(r"(\w+) returned", r["note"])] if m})
     did = o["did"]
     action = " / ".join(tools) or "the write tool"
-    did_text = (f"{action} called {did.get('write_calls', 0)} time(s), {did.get('ok_calls', 0)} succeeded"
+    did_text = (f"{action} called {_n(did.get('write_calls', 0), 'time')}, {did.get('ok_calls', 0)} succeeded"
                 if did.get("write_calls") else "the agent never called the write tool")
     return [
         ("Expected", EXPECTED.get(o["expected"], o["expected"])),

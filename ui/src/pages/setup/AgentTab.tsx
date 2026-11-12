@@ -12,10 +12,13 @@ type Kind = "phone" | "websocket_audio" | "text_http" | "in_repo";
 function Identity({ detail, reload }: TabProps) {
   const file = owner(detail, "name");
   const src = file === detail.file ? detail.raw : detail.base;
-  const d = useDraft({ name: str(src.name), description: str(src.description), domain: str(src.domain) }, file, detail.project, reload);
+  const langs = Array.isArray(src.languages) && src.languages.length ? (src.languages as string[]) : ["en"];
+  const d = useDraft({ name: str(src.name), description: str(src.description), domain: str(src.domain), languages: langs,
+    agent_prompt: str(src.agent_prompt) }, file, detail.project, reload);
+  const spoken = (d.draft.languages as string[]).join(",");
   return (
     <Card>
-      <Block title="The agent" sub={file !== detail.file ? "Shared by the voice and text setups of this project." : undefined}>
+      <Block title="Agent brief" sub={`AI writes the test cases for every test type from this.${file !== detail.file ? " Shared by all of this agent's connections." : ""}`}>
         <Grid>
           <Field label="Name"><Text id="agent-name" value={d.draft.name as string} onChange={(v) => d.setDraft({ ...d.draft, name: v })} /></Field>
           <Field label="Industry" hint="Shown on the dashboard as the type of agent.">
@@ -27,9 +30,19 @@ function Identity({ detail, reload }: TabProps) {
           </Field>
         </Grid>
         <Field label="What it does"><Area value={d.draft.description as string} onChange={(v) => d.setDraft({ ...d.draft, description: v })} rows={2} /></Field>
+        <Field label="The agent's prompt" hint="Paste its system prompt as written. Its tools and database checks are read too.">
+          <Area id="agent-prompt" value={d.draft.agent_prompt as string} onChange={(v) => d.setDraft({ ...d.draft, agent_prompt: v })} rows={6}
+            placeholder="You are the booking assistant for… Always confirm the date and time before booking. Never…" />
+        </Field>
+        <Field label="Language it speaks" hint="Vocto's callers speak the agent's first language, unless a caller (Set up › Callers) has its own. A Tamil call uses Tamil voices and hears with Whisper's multilingual models.">
+          <Select id="agent-languages" value={spoken}
+            options={[["en", "English"], ["ta", "Tamil"], ["en,ta", "English first, Tamil too"], ["ta,en", "Tamil first, English too"]]}
+            onChange={(v) => d.setDraft({ ...d.draft, languages: (v || "en").split(",") })} />
+        </Field>
       </Block>
       <Problems items={d.problems} />
-      <SaveBar id="save-identity" dirty={d.dirty} busy={d.busy} onSave={() => void d.save()} onRevert={d.revert} />
+      <SaveBar id="save-identity" dirty={d.dirty} busy={d.busy} onRevert={d.revert}
+        onSave={() => void d.save({ ...d.draft, agent_prompt: (d.draft.agent_prompt as string).trim() ? d.draft.agent_prompt : null })} />
     </Card>
   );
 }
@@ -93,16 +106,16 @@ function Connection({ detail, reload }: TabProps) {
       <Block title="How Vocto reaches the agent" sub="The address Vocto calls, and how it talks to the agent.">
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <Choice radio on={kind === "phone"} onClick={() => pick("phone")} data-kind="phone">
-            <b>Phone number</b><div className="text-muted text-[12.5px]">Vocto rings the agent's real number through your Twilio or Plivo account. Tests the whole phone line.</div>
+            <b>Phone number</b><div className="text-muted text-[13px]">Vocto rings the agent's real number through your Twilio or Plivo account. Tests the whole phone line.</div>
           </Choice>
           <Choice radio on={kind === "websocket_audio"} onClick={() => pick("websocket_audio")} data-kind="websocket_audio">
-            <b>Voice (phone-like)</b><div className="text-muted text-[12.5px]">Audio over a WebSocket. The caller really speaks and listens.</div>
+            <b>Voice (phone-like)</b><div className="text-muted text-[13px]">Audio over a WebSocket. The caller really speaks and listens.</div>
           </Choice>
           <Choice radio on={kind === "text_http"} onClick={() => pick("text_http")} data-kind="text_http">
-            <b>Text over HTTP</b><div className="text-muted text-[12.5px]">Fast, cheap runs against the same agent: no speech.</div>
+            <b>Text over HTTP</b><div className="text-muted text-[13px]">Fast, cheap runs against the same agent: no speech.</div>
           </Choice>
           <Choice radio on={kind === "in_repo"} off={kind !== "in_repo"} data-kind="in_repo" title="For Vocto's own practice agents">
-            <b>Built into Vocto</b><div className="text-muted text-[12.5px]">Vocto's own practice agents, run inside Vocto.</div>
+            <b>Built into Vocto</b><div className="text-muted text-[13px]">Vocto's own practice agents, run inside Vocto.</div>
           </Choice>
         </div>
         {kind === "in_repo" ? (
@@ -241,7 +254,7 @@ function PhoneFields({ conn, options, setConn, setOpt }: { conn: Obj; options: O
       <Field label="Public address for Vocto's phone line (optional)" hint={`${name} streams each call's audio back to Vocto. Leave it empty and Vocto opens a free Cloudflare link by itself for each run. Fill it only if your team has its own: an https:// address that forwards to port 8766 on this computer.`}>
         <Text id="phone-public" mono value={str(options.public_url)} placeholder="opened by Vocto" onChange={(v) => setOpt("public_url", v.trim())} />
       </Field>
-      <Notice tone="warn" icon="info" className="text-[12.5px]">
+      <Notice tone="warn" icon="info" className="text-[13px]">
         Every test call is a real phone call billed by {name} (and by the agent's own provider).{" "}
         {plivo ? "A free trial Plivo account may only call numbers you verified, so add credit before testing a client's number."
           : "A Twilio trial account can't be used: it plays a message and waits for a key press at the start of each call."}{" "}
@@ -309,7 +322,7 @@ function StartAgent({ detail, reload }: TabProps) {
               <Field label={i ? "" : "Name"}><Text mono value={b.id} placeholder="skip_confirmation" onChange={(v) => setBug(i, { id: v })} /></Field>
               <Field label={i ? "" : "What it does"}><Text value={b.title} placeholder="Places the order without confirming it" onChange={(v) => setBug(i, { title: v })} /></Field>
               <Field label={i ? "" : "Caught by scenario"}>
-                <input list="ap-scenarios" className={cx(inputCls, "font-normal font-mono text-[12.5px]")}
+                <input list="ap-scenarios" className={cx(inputCls, "font-normal font-mono text-[13px]")}
                   value={b.scenario} onChange={(e) => setBug(i, { scenario: e.target.value })} />
               </Field>
               <Field label={i ? "" : "Judge item (optional)"}><Text mono value={b.judge} placeholder="polite-professional-tone" onChange={(v) => setBug(i, { judge: v })} /></Field>
@@ -326,12 +339,57 @@ function StartAgent({ detail, reload }: TabProps) {
   );
 }
 
+const CURRENCIES: [string, string][] = [["USD", "US dollars ($)"], ["INR", "Indian rupees (₹)"], ["EUR", "Euros (€)"], ["GBP", "Pounds (£)"]];
+
+// Running costs: the owner's prices for this channel, for the cost per completed task in reports.
+function RunningCosts({ detail, reload }: TabProps) {
+  // Prices differ by channel (a voice minute isn't a chat message), so they live in this setup's own file
+  // unless the shared file already has them.
+  const file = detail.raw.costs === undefined && detail.extends && detail.base.costs !== undefined ? detail.extends : detail.file;
+  const src = asObj(file === detail.file ? detail.raw.costs : detail.base.costs);
+  const d = useDraft({
+    currency: str(src.currency) || "USD", per_call: (src.per_call as number | undefined) ?? null, per_minute: (src.per_minute as number | undefined) ?? null,
+    per_reply: (src.per_reply as number | undefined) ?? null, per_tool_call: (src.per_tool_call as number | undefined) ?? null,
+  }, file, detail.project, reload);
+  const x = d.draft;
+  const set = (patch: Partial<typeof x>) => d.setDraft({ ...x, ...patch });
+  const nums = ["per_call", "per_minute", "per_reply", "per_tool_call"] as const;
+  const any = nums.some((k) => Number(x[k] || 0) > 0);
+  const save = () => d.save({ costs: any ? Object.fromEntries([["currency", x.currency], ...nums.filter((k) => Number(x[k] || 0) > 0).map((k) => [k, Number(x[k])])]) : null });
+  const voice = detail.merged.mode === "voice";
+  return (
+    <Card>
+      <Block title="Running costs" sub="What a call to this agent costs you, so reports show the cost per call and per completed task (and two versions can be compared on cost). Vocto can't see your bills: enter your own prices. Leave them empty to show no cost.">
+        <Grid cols={3}>
+          <Field label="Currency"><Select id="cost-currency" value={x.currency as string} options={CURRENCIES} onChange={(v) => set({ currency: v })} /></Field>
+          <Field label="Per call" hint="A fixed amount for every call (a platform fee, a phone number's share).">
+            <Num id="cost-per-call" step={0.001} min={0} value={x.per_call as number | null} onChange={(v) => set({ per_call: v ?? null })} />
+          </Field>
+          <Field label="Per minute of a call" hint={voice ? "All in: the phone line, speech to text, text to speech and the AI, per minute." : "For a chat agent, usually left empty: use Per reply."}>
+            <Num id="cost-per-minute" step={0.001} min={0} value={x.per_minute as number | null} onChange={(v) => set({ per_minute: v ?? null })} />
+          </Field>
+          <Field label="Per reply" hint="Every answer the agent gives: the AI request behind it.">
+            <Num id="cost-per-reply" step={0.0001} min={0} value={x.per_reply as number | null} onChange={(v) => set({ per_reply: v ?? null })} />
+          </Field>
+          <Field label="Per tool call" hint="Every request the agent makes to your systems, if they charge for it.">
+            <Num id="cost-per-tool" step={0.0001} min={0} value={x.per_tool_call as number | null} onChange={(v) => set({ per_tool_call: v ?? null })} />
+          </Field>
+        </Grid>
+        <Help>Cost per completed task = what all the calls that should have booked or ordered something cost, divided by how many really did. A failed call still costs money, so an agent that needs two tries per booking costs twice as much per booking.</Help>
+      </Block>
+      <Problems items={d.problems} />
+      <SaveBar id="save-costs" dirty={d.dirty} busy={d.busy} onSave={() => void save()} onRevert={d.revert} />
+    </Card>
+  );
+}
+
 export function AgentTab(props: TabProps) {
   const conn = asObj(props.detail.merged.connection);
   return (
     <div className="grid gap-4">
       <Identity {...props} />
       <Connection {...props} />
+      <RunningCosts {...props} />
       {!conn.launch && conn.type !== "text_python" && <StartAgent {...props} />}
     </div>
   );

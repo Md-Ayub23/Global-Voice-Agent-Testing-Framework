@@ -23,7 +23,7 @@ function AgentSettings() {
             <a key={p.key} href={projectHref(p.key, "/setup/rules")} className="group flex items-center gap-3 px-5 py-2.5 hover:bg-surface-2/70 hover:no-underline text-ink transition-colors">
               <ProjectAvatar name={p.name} k={p.key} size={28} />
               <b className="text-[13.5px] flex-1 min-w-0 truncate">{p.name}</b>
-              <span className="text-accent-ink text-[12.5px] font-semibold inline-flex items-center gap-1">Pass rules <Icon name="arrow" size={13} className="transition-transform group-hover:translate-x-0.5" /></span>
+              <span className="text-accent-ink text-[13px] font-semibold inline-flex items-center gap-1">Pass rules <Icon name="arrow" size={13} className="transition-transform group-hover:translate-x-0.5" /></span>
             </a>
           ))}
         </div>
@@ -50,7 +50,7 @@ function SecretRow({ s, onSaved }: { s: Secret; onSaved: (list: Secret[]) => voi
         <Icon name="lock" className="text-muted" />
         <b className="font-mono text-[13px]">{s.name}</b>
         {s.set ? <Badge status="PASS" label={s.hint ? `set · ${s.hint}` : "set"} /> : <Badge status="NOT_VERIFIED" label="missing" />}
-        <span className="text-muted text-[12px] flex-1 min-w-[140px]">used by {s.projects.join(", ")}</span>
+        <span className="text-muted text-[13px] flex-1 min-w-[140px]">used by {s.projects.join(", ")}</span>
         {!open && <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>{s.set ? "Replace" : "Set"}</Button>}
       </div>
       {open && (
@@ -75,11 +75,11 @@ function Secrets() {
         {rows && rows.length > 0 && (rows.every((s) => s.set) ? <Badge status="PASS" label="all set" /> : <Badge status="NOT_VERIFIED" label={`${rows.filter((s) => !s.set).length} missing`} />)}
       </CardHead>
       <p className="text-ink-2 mb-1">
-        Write a secret in any setup field as <span className="font-mono text-[12.5px] bg-surface-2 px-1 rounded">{"${NAME}"}</span>, for example a token in a header. Its value is kept here, on this computer only, and never stored in the project.
+        Write a secret in any setup field as <span className="font-mono text-[13px] bg-surface-2 px-1 rounded">{"${NAME}"}</span>, for example a token in a header. Its value is kept here, on this computer only, and never stored in the project.
       </p>
       {error && <Notice tone="bad">{error.message}</Notice>}
       {!rows ? <Skeleton height={80} /> : rows.length ? rows.map((s) => <SecretRow key={s.name} s={s} onSaved={setList} />)
-        : <div className="text-muted text-[12.5px] py-3">No agent uses a secret yet.</div>}
+        : <div className="text-muted text-[13px] py-3">No agent uses a secret yet.</div>}
     </Card>
   );
 }
@@ -133,7 +133,7 @@ export function Settings() {
             <CardHead level={2} title="Anthropic API key">{k.set ? <Badge status="PASS" label="set" /> : <Badge status="NOT_VERIFIED" label="not set" />}</CardHead>
             <p className="text-ink-2 mb-3">Real runs use Claude to play the caller and to check it stayed on script. Free dry runs need no key.</p>
             {k.set && (
-              <div className="flex items-center gap-2 text-[12.5px] mb-3">
+              <div className="flex items-center gap-2 text-[13px] mb-3">
                 <Icon name="key" /><span>Using a key ending <b className="font-mono">{k.hint || ""}</b>{k.source === "shell" ? " from this computer's environment" : ""}.</span>
               </div>
             )}
@@ -153,12 +153,12 @@ export function Settings() {
             <div className="flex flex-col gap-2">
               <Row label="Voices" top>
                 <div className="flex flex-wrap gap-1.5">
-                  {sys.models.piper_voices.length ? sys.models.piper_voices.map((v) => <Chip key={v} icon="mic">{v}</Chip>) : <span className="text-muted text-[12.5px]">none yet</span>}
+                  {sys.models.piper_voices.length ? sys.models.piper_voices.map((v) => <Chip key={v} icon="mic">{v}</Chip>) : <span className="text-muted text-[13px]">none yet</span>}
                 </div>
               </Row>
               <Row label="Hearing" top>
                 <div className="flex flex-wrap gap-1.5">
-                  {sys.models.whisper.length ? sys.models.whisper.map((w) => <Chip key={w.name} icon="ear">{w.name} · {mb(w.bytes)}</Chip>) : <span className="text-muted text-[12.5px]">none yet</span>}
+                  {sys.models.whisper.length ? sys.models.whisper.map((w) => <Chip key={w.name} icon="ear">{w.name} · {mb(w.bytes)}</Chip>) : <span className="text-muted text-[13px]">none yet</span>}
                 </div>
               </Row>
               <Row label="Disk used">{mb(sys.models.bytes)}</Row>

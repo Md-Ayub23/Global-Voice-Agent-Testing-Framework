@@ -8,7 +8,7 @@ from typing import Any, Mapping
 from .. import alerts, ciconfig, health
 from ..attacks import is_safety
 from ..baseline import BaselineError, clear_baseline, load_baseline, run_snapshot, set_baseline
-from ..compare import DEFAULTS as GATE_DEFAULTS, compare, rules as gate_rules
+from ..compare import DEFAULTS as GATE_DEFAULTS, as_ab, compare, rules as gate_rules
 from ..conditions import PRESETS
 from ..loader import ProjectError, load_project
 from . import data
@@ -88,7 +88,14 @@ def compare_runs(root: Path, runs: Path, run_a: str, run_b: str) -> dict[str, An
                 t["title"] = titles.get(sid, t["title"])
     except (ProjectError, KeyError, OSError):
         profile = {}
-    out = compare(a, b, profile, run_a)
+    a_info = data._safe_json(a_dir / "run.json") or {}
+    ab = (a_info.get("ab") or {}), (info.get("ab") or {})
+    pair = bool(ab[0].get("group")) and ab[0].get("group") == ab[1].get("group") and ab[0].get("side") == "A"
+    if pair:    # an A/B test of two versions: B against A, worded so, and nothing blocks
+        out = as_ab(compare(a, b, {"regression": {"enabled": False}}, "ab"))
+        out["ab"] = {"labels": {"A": ab[0].get("label", "A"), "B": ab[1].get("label", "B")}}
+    else:
+        out = compare(a, b, profile, run_a)
     out["runs"] = {"a": data.run_summary(runs, run_a), "b": data.run_summary(runs, run_b)}
     out["same_agent"] = a.get("profile_id") == b.get("profile_id")
     out["snapshots"] = {"a": a, "b": b}

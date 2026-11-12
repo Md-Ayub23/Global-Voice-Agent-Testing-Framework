@@ -91,3 +91,47 @@ class LineEffects:
         t = (self._run - 1) * frame_ms + np.arange(n) * frame_ms / n    # ms since the gap began
         gain = np.clip(1.0 - (t - 10.0) / 50.0, 0.0, 1.0)
         return (self._last * gain).astype(np.float32)
+
+
+class NetworkJitter:
+    """An unsteady network between the caller and the agent: frames are delayed by a varying amount
+    (jitter_ms, the spread of the delay), so they arrive in bursts with gaps, and a share of them
+    (reorder_pct) swap places with the next frame, as when a provider's jitter buffer is overrun.
+
+    The audio itself is untouched and the caller's track still records when each word was spoken, so
+    the agent's answer times include the network's extra delay, as a real caller would feel it.
+    WebSocket and phone media streams never drop or reorder on their own (TCP); this models the path
+    before them, so it is used sparingly. Seeded per call, so a call can be replayed exactly.
+    """
+
+    def __init__(self, sample_rate: int, *, jitter_ms: float = 0.0, reorder_pct: float = 0.0, seed: str = ""):
+        self.sr = sample_rate
+        self.jitter_s = max(0.0, min(float(jitter_ms or 0), 500.0)) / 1000.0
+        self.reorder = max(0.0, min(float(reorder_pct or 0), 20.0)) / 100.0
+        self._rng = np.random.default_rng(int(hashlib.sha256(f"net:{seed}".encode()).hexdigest()[:12], 16))
+        self._last_at = 0.0
+        self.frames = 0
+        self.reordered = 0
+        self.max_delay_ms = 0.0
+
+    @property
+    def active(self) -> bool:
+        return self.jitter_s > 0 or self.reorder > 0
+
+    def arrival(self, due: float) -> float:
+        """When a frame due at `due` (seconds on the call clock) arrives: due plus a delay that drifts
+        between 0 and about 2x the jitter, never before the frame before it (frames keep their order
+        on the wire; reordering is decided separately)."""
+        self.frames += 1
+        delay = abs(self._rng.normal(self.jitter_s, self.jitter_s / 2)) if self.jitter_s else 0.0
+        at = max(due + delay, self._last_at)
+        self._last_at = at
+        self.max_delay_ms = max(self.max_delay_ms, (at - due) * 1000)
+        return at
+
+    def swap(self) -> bool:
+        """Does this frame swap places with the next one?"""
+        if self.reorder and self._rng.random() < self.reorder:
+            self.reordered += 1
+            return True
+        return False

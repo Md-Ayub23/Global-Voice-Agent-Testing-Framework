@@ -1,192 +1,217 @@
-// One project's home: who the agent is, what's left to set up, its readiness in each test mode, its
-// numbers and recent runs.
-import { CountUp } from "../components/CountUp";
-import { ActivityChart, Kpi, MiniHistory, ProjectAvatar, When } from "../components/dash";
-import { Icon, type IconName } from "../components/Icon";
-import { Hero, heroToneOf } from "../components/runbits";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, Notice, Skeleton, Table, rowLink } from "../components/ui";
+// One agent's own page: how it is connected, its latest result in each test type, what to fix first, how it has
+// done over its last runs and what is left to set up. Nothing about other agents lives here (that is Home).
+import { KpiStrip, ProjectAvatar, RunLine, When } from "../components/dash";
+import { Icon } from "../components/Icon";
+import { Badge, Button, Card, CardHead, EmptyState, LiveDot, Notice, Skeleton, Table, rowLink } from "../components/ui";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
-import { cx, fmtMs, money, pct } from "../lib/format";
-import { domainLabel, modeLabel, projectHref, projectOfJob, runHref } from "../lib/links";
+import { cx, fmtMs, money, pct, plural } from "../lib/format";
+import { domainLabel, mainProfile, projectHref, projectOfJob, runHref } from "../lib/links";
+import { MODE_TITLE, TEST_TYPES, TONE_DOT, TONE_TEXT, TYPE_STATUS, modeTitle, runLabel, unavailableWords } from "../lib/modes";
 import { navigate } from "../lib/router";
-import { decisionTitle } from "../lib/status";
-import { ReadinessBoard } from "../components/modecards";
-import { modeTitle, runLabel } from "../lib/modes";
-import type { JudgeSummary, Project, ProjectOverview, ProjectStats, RunSummary } from "../lib/types";
+import type { ModeBrief, Project, ProjectOverview, TestModeId } from "../lib/types";
 
-interface Step { key: string; title: string; icon: IconName; done: boolean; need: "required" | "recommended" | "optional"; text: string; href: string; problem?: boolean }
-
-function stepsOf(p: Project, stats: ProjectStats, judges?: JudgeSummary, safetyRun?: RunSummary): Step[] {
-  const main = p.profiles.find((x) => x.file === "profile.yaml") || p.profiles[0];
-  const k = p.key;
-  const tools = main?.tools?.length ?? 0;
-  const conn = !!main && main.ok && !!(main.connection.target || main.connection.launch);
-  return [
-    { key: "agent", title: "Connect the agent", icon: "plug", need: "required", href: projectHref(k, "/setup/connection"), done: conn, problem: !!main && !main.ok,
-      text: conn ? `${p.channels.map(modeLabel).join(" and ")} connection set` : main && !main.ok ? `${main.problems.length} thing(s) to fix` : "Add the agent's address" },
-    { key: "tools", title: "Tools", icon: "tool", need: "recommended", href: projectHref(k, "/setup/tools"), done: tools > 0,
-      text: tools ? `${tools} tool${tools === 1 ? "" : "s"} watched` : "See and break the agent's API calls" },
-    { key: "backend", title: "Database", icon: "db", need: "recommended", href: projectHref(k, "/setup/backend"), done: !!main?.backend && main.backend !== "none",
-      text: main?.backend && main.backend !== "none" ? (main.backend === "sql" ? "Database connected" : "API connected") : "Check what really got saved" },
-    { key: "logs", title: "Logs", icon: "logs", need: "optional", href: projectHref(k, "/setup/logs"), done: !!main?.logs && main.logs !== "none",
-      text: main?.logs && main.logs !== "none" ? "Agent logs collected" : "Keep the agent's logs with each call" },
-    { key: "plan", title: "Test cases", icon: "plan", need: "required", href: projectHref(k, "/setup/cases"), done: stats.scenarios > 0,
-      text: stats.scenarios ? `${stats.scenarios} scenario${stats.scenarios === 1 ? "" : "s"}` : "Write them, or let Claude draft them" },
-    { key: "callers", title: "Callers", icon: "user", need: "recommended", href: projectHref(k, "/setup/callers"), done: stats.personas > 0,
-      text: stats.personas ? `${stats.personas} persona${stats.personas === 1 ? "" : "s"}` : "Add callers from the library" },
-    { key: "judges", title: "AI judges", icon: "scale", need: "recommended", href: projectHref(k, judges?.labelled_calls ? "/judges" : "/setup/judges"),
-      done: !!judges && judges.items > 0 && main?.judges !== false && !!judges.labelled_calls,
-      text: main?.judges === false ? "Off: turn on to check tone and facts" : !judges ? "Check tone, facts and scope"
-        : judges.labelled_calls ? `${judges.calibrated} of ${judges.items} items trusted to block` : `${judges.items} items · label calls to trust them` },
-    { key: "safety", title: "Safety tests", icon: "shield", need: "recommended", href: projectHref(k, safetyRun ? `/runs/${safetyRun.run_id}` : "/setup/safety"),
-      done: !!safetyRun, problem: !!safetyRun?.safety?.failed,
-      text: main?.safety?.enabled === false ? "Off: turn on to try attacks on the agent"
-        : safetyRun?.safety ? `Last run: ${safetyRun.safety.passed} of ${safetyRun.safety.calls} attacks handled safely`
-        : `${main?.safety?.attacks ?? 0} attack calls ready · include them in a run` },
-    { key: "run", title: "First run", icon: "play", need: "required", href: projectHref(k, "/test"), done: stats.runs > 0,
-      text: stats.runs ? `${stats.runs} run${stats.runs === 1 ? "" : "s"} so far` : "Start a test run" },
-    { key: "baseline", title: "Baseline", icon: "anchor", need: "recommended", href: projectHref(k, "/runs"), done: !!main?.baseline,
-      text: main?.baseline ? "Every run is compared with it" : "Mark a good run, so later runs show what got worse" },
-    { key: "ops", title: "CI & alerts", icon: "bell", need: "optional", href: projectHref(k, "/setup/ops"), done: !!(main?.alerts || main?.health_checks),
-      text: main?.alerts || main?.health_checks ? [main.alerts ? `${main.alerts} alert${main.alerts === 1 ? "" : "s"}` : "", main.health_checks ? "health checks on" : ""].filter(Boolean).join(" · ")
-        : "Run in CI, on a schedule, and get a message when it is not ready" },
-  ];
+// The one line under the agent's name that says where it stands.
+function verdict(modes: ModeBrief[]): { tone: "good" | "bad" | "warn" | "neutral"; text: string } {
+  const types = modes.filter((m) => TEST_TYPES.includes(m.id));
+  const failed = types.filter((m) => m.status === "failed");
+  const ran = types.filter((m) => !["not_run", "unavailable"].includes(m.status));
+  if (!ran.length) return { tone: "neutral", text: "Not tested yet" };
+  if (failed.length) return { tone: "bad", text: `${failed.length} test type${failed.length === 1 ? "" : "s"} failed: ${failed.map((m) => MODE_TITLE[m.id]).join(", ")}` };
+  const gaps = ran.filter((m) => m.status === "evidence");
+  if (gaps.length) return { tone: "warn", text: `No failures, but ${gaps.map((m) => MODE_TITLE[m.id]).join(", ")} need more evidence` };
+  return { tone: "good", text: `Passed all ${ran.length} test type${ran.length === 1 ? "" : "s"} it ran` };
 }
 
-function SetupSteps({ steps }: { steps: Step[] }) {
-  const done = steps.filter((s) => s.done).length;
-  const required = steps.filter((s) => s.need === "required");
-  const ready = required.every((s) => s.done);
+function StatusWords({ m }: { m: ModeBrief }) {
+  const st = TYPE_STATUS[m.status];
+  const quiet = m.status === "not_run" || m.status === "unavailable";
   return (
-    <Card>
-      <CardHead level={2} title={ready ? "Setup" : "Get this agent ready"} sub={`${done} of ${steps.length} done`}>
-        <div className="w-[140px] h-1.5 rounded-full bg-surface-3 overflow-hidden" aria-hidden="true">
-          <div className="h-full rounded-full bg-accent transition-[width] duration-700" style={{ width: `${(done / steps.length) * 100}%` }} />
-        </div>
-      </CardHead>
-      <div className="grid gap-2.5 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3" id="setup-steps">
-        {steps.map((s, i) => (
-          <a key={s.key} href={s.href} data-step={s.key}
-            className={cx("group flex items-start gap-3 p-3 rounded-[10px] border transition-colors hover:no-underline text-ink",
-              s.done ? "border-line bg-surface hover:bg-surface-2" : s.problem ? "border-[color-mix(in_srgb,var(--warn)_40%,transparent)] bg-warn-soft/50 hover:bg-warn-soft"
-                : "border-line hover:border-line-strong hover:bg-surface-2")}>
-            <span className={cx("size-6 mt-px rounded-full grid place-items-center flex-none text-[12px] font-medium tabular-nums",
-              s.done ? "bg-good-soft text-good" : s.problem ? "bg-warn-soft text-warn" : "border border-line-strong text-ink-2")}>
-              {s.done ? <Icon name="check" size={13} strokeWidth={2.5} /> : s.problem ? <Icon name="alert" size={13} /> : i + 1}
-            </span>
-            <span className="flex-1 min-w-0">
-              <span className="flex items-center gap-2 flex-wrap">
-                <b className="text-[13.5px] font-medium">{s.title}</b>
-                {!s.done && s.need !== "required" && <span className="font-mono text-[10.5px] text-muted uppercase tracking-[.06em]">{s.need}</span>}
-              </span>
-              <span className="block text-[12.5px] text-ink-2 mt-0.5">{s.text}</span>
-            </span>
-            <Icon name="chevron" size={16} className="text-muted mt-1 transition-transform group-hover:translate-x-0.5" />
-          </a>
-        ))}
-      </div>
-    </Card>
+    <span className={cx("inline-flex items-center gap-1.5 whitespace-nowrap", quiet ? "text-muted" : TONE_TEXT[st.tone])}>
+      {!quiet && <i className={cx("size-[7px] rounded-full", TONE_DOT[st.tone])} />}
+      {m.status === "unavailable" ? unavailableWords(m) : st.label}
+    </span>
   );
 }
 
 export function ProjectOverviewPage({ project }: { project: Project }) {
-  useCrumbs([{ label: "Agents", href: "#/projects" }, { label: project.name }]);
+  useCrumbs([{ label: project.name }]);
   const { activeJob, projects } = useApp();
   const { data, error } = useLoad(() => api.get<ProjectOverview>(`/api/project/${project.key}`), [project.key, activeJob?.status]);
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton height={520} />;
+  const k = project.key;
   const s = data.stats;
-  const steps = stepsOf(data.project, s, data.judges, data.recent_runs.find((r) => r.safety));
+  const conn = data.connection;
+  const byId = new Map(data.mode_summary.map((m) => [m.id, m]));
+  const types = TEST_TYPES.map((id) => byId.get(id)).filter((m): m is ModeBrief => !!m);
+  const v = verdict(types);
+  const running = activeJob && projectOfJob(activeJob, projects)?.key === k ? activeJob : null;
+  const findings = types.filter((m) => (m.status === "failed" || m.status === "watch" || m.status === "evidence") && m.top_finding && m.run_id);
+  const main = mainProfile(data.project);
+  const voiceTrend = data.trend.some((t) => t.p95_ms != null);
+  const lim = s.latency_limits?.p95_ms ?? null;
+  const ran = types.filter((m) => !["not_run", "unavailable"].includes(m.status));
   const j = data.judges;
-  const last = s.last_decided;
-  const running = activeJob && projectOfJob(activeJob, projects)?.key === project.key;
-  const lat = s.latency, lim = s.latency_limits;
-  const latTone = lat && lim?.p95_ms && lat.p95_ms != null ? (lat.p95_ms <= lim.p95_ms ? "good" : "bad") : "accent";
+
+  // What is left to set up, only the things not done (done items need no space).
+  const todo: { key: string; text: string; href: string; need: string }[] = [];
+  if (!conn.connected) todo.push({ key: "connect", text: main && !main.ok ? `Fix the connection: ${plural(main.problems.length, "thing")} to fix` : "Connect the agent so Vocto can call it", href: projectHref(k, "/setup/connection"), need: "Needed" });
+  if (!s.scenarios) todo.push({ key: "cases", text: "Add test cases, or let Claude draft them", href: projectHref(k, "/test/functional"), need: "Needed" });
+  if (main && !main.tools?.length) todo.push({ key: "tools", text: "Add the agent's tools, so tests can check and break its API calls", href: projectHref(k, "/setup/tools"), need: "Recommended" });
+  if (main && (!main.backend || main.backend === "none")) todo.push({ key: "backend", text: "Connect its database or API, so tests check what really got saved", href: projectHref(k, "/setup/backend"), need: "Recommended" });
+  if (!s.personas) todo.push({ key: "callers", text: "Add callers from the library", href: projectHref(k, "/setup/callers"), need: "Recommended" });
+  if (s.runs && !main?.baseline) todo.push({ key: "baseline", text: "Mark a good run as the baseline, so Regression can compare with it", href: projectHref(k, "/runs"), need: "Recommended" });
+  if (j && j.items > 0 && !j.labelled_calls) todo.push({ key: "judges", text: "Label a few calls, so the AI judges can be trusted to fail a run", href: projectHref(k, "/judges"), need: "Optional" });
 
   return (
     <>
-      <div className="flex items-start gap-4 mt-2 mb-6 flex-wrap">
-        <ProjectAvatar name={project.name} k={project.key} size={56} />
+      <div className="flex items-start gap-4 mt-2 mb-5 flex-wrap" id="agent-head">
+        <ProjectAvatar kind={conn.kind} size={44} />
         <div className="flex-1 min-w-[240px]">
-          <h1 className="text-[24px] font-semibold tracking-[-.02em]">{project.name}</h1>
-          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-            <Chip>{domainLabel(project.domain)}</Chip>
-            {project.channels.map((c) => <Chip key={c} tone={c === "voice" ? "agent" : "caller"} icon={c === "voice" ? "mic" : "text"}>{modeLabel(c)}</Chip>)}
-            {project.example && <Chip tone="accent" icon="flag">practice agent</Chip>}
-            {project.ready ? <Chip tone="good" icon="check">ready to run</Chip> : <Chip tone="warn" icon="alert">needs setup</Chip>}
+          <h1 className="text-[21px] font-semibold tracking-[-.015em] leading-tight">{project.name}</h1>
+          <div className="text-ink-2 mt-1 text-[13px]">
+            {domainLabel(project.domain)} · {conn.connected ? <>{conn.label}{conn.text_too ? " + text" : ""}</> : <span className="text-warn">Not connected</span>}
+            {project.example && !conn.label.startsWith("Practice") ? " · practice agent" : ""}
           </div>
-          {project.description && <p className="text-ink-2 mt-2 max-w-[760px]">{project.description}</p>}
+          <div id="verdict" className={cx("mt-2 text-[13.5px] font-medium inline-flex items-center gap-2", v.tone === "neutral" ? "text-ink-2" : TONE_TEXT[v.tone])}>
+            <i className={cx("size-2 rounded-full", TONE_DOT[v.tone])} />{v.text}
+          </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Button icon="settings" href={projectHref(project.key, "/setup/connection")}>Set up</Button>
-          {running
-            ? <Button variant="primary" icon="activity" href={projectHref(project.key, "/live")}>Watch live run</Button>
-            : <Button id="run-tests" variant="primary" icon="play" href={projectHref(project.key, "/test")}>Run tests</Button>}
+          {!conn.connected
+            ? <Button id="connect" variant="primary" icon="plug" href={projectHref(k, "/setup/connection")}>Connect agent</Button>
+            : <Button id="release-check" variant="primary" icon="play" href={projectHref(k, "/test/full")}>Release check</Button>}
         </div>
       </div>
 
-      <div className="flex flex-col gap-4">
-        {data.modes && last ? <ReadinessBoard modes={data.modes} k={project.key} /> : last ? (
-          <Hero tone={heroToneOf(last.decision)} eyebrow={<>Latest release readiness · <When iso={last.started_at} /></>}
-            title={decisionTitle(last.decision)}
-            actions={<Button href={runHref(last)} icon="file">Open report</Button>}>
-            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-ink-2">
-              {modeLabel(last.mode)} run{last.offline ? " (free dry run)" : ""} · {last.calls_started} calls ·
-              <span className="text-good font-semibold">{last.counts.PASS || 0} passed</span>
-              {(last.counts.FAIL || 0) > 0 && <span className="text-bad font-semibold">{last.counts.FAIL} failed</span>}
-            </div>
-          </Hero>
-        ) : null}
-
-        {j && j.to_review > 0 && (
-          <Notice tone="warn" icon="eye" className="flex-wrap">
-            <b>The AI judges disagree on {j.to_review} call(s).</b> Your label settles each one and teaches Vocto which judge to trust.{" "}
-            <a href={projectHref(project.key, "/labels")}>Label calls</a>
-          </Notice>
+      <div className="flex flex-col gap-6">
+        {running && (
+          <a href={projectHref(k, `/live/${running.id}`)} id="live-banner"
+            className="flex items-center gap-3 px-4 py-3 rounded-[12px] border border-line bg-surface text-ink hover:no-underline hover:bg-surface-2">
+            <LiveDot /><b className="font-medium flex-1">{running.kind === "exit-check" ? "Exit check running" : "Test run in progress"}</b>
+            <span className="text-accent-ink font-medium text-[13px] flex items-center gap-1">Watch live <Icon name="arrow" size={14} /></span>
+          </a>
         )}
 
-        <SetupSteps steps={steps} />
+        {s.runs > 0 && (
+          <KpiStrip id="agent-kpis" items={[
+            { label: "Test types passed", value: ran.length ? `${ran.filter((m) => m.status === "passed" || m.status === "watch").length} of ${ran.length}` : "—",
+              foot: `${types.length - ran.length} not run yet`, tone: ran.some((m) => m.status === "failed") ? "bad" : ran.length ? "good" : undefined },
+            { label: "Runs", value: s.runs, foot: `${s.calls} test calls` },
+            { label: "Slowest answer (p95)", value: s.latency ? fmtMs(s.latency.p95_ms) : "—",
+              foot: s.latency ? (lim ? `limit ${fmtMs(lim)}` : `typical ${fmtMs(s.latency.p50_ms)}`) : "after a voice run",
+              tone: s.latency && lim && s.latency.p95_ms != null ? (s.latency.p95_ms <= lim ? "good" : "bad") : undefined },
+            { label: "Test cases", value: s.scenarios, foot: `${s.personas} caller${s.personas === 1 ? "" : "s"}` },
+            { label: "Spend", value: money(s.cost_usd), foot: "Claude, this agent" },
+          ]} />
+        )}
 
-        {s.runs > 0 && <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 stagger">
-          <Kpi icon="layers" label="Test runs" value={<CountUp to={s.runs} />} foot={`${s.decided} with a decision${s.bug_runs ? ` · ${s.bug_runs} with bugs on` : ""}`} />
-          <Kpi icon="shield" label="Ready rate" tone={s.go_rate == null ? "accent" : s.go_rate >= 0.8 ? "good" : s.go_rate >= 0.5 ? "warn" : "bad"}
-            value={s.go_rate == null ? "—" : pct(s.go_rate)} foot={<MiniHistory items={s.history} empty="after your first run" />} />
-          <Kpi icon="phone" label="Test calls" value={<CountUp to={s.calls} />} foot={`${money(s.cost_usd)} spent`} />
-          <Kpi icon="clock" label="Voice response time" tone={latTone}
-            value={lat ? fmtMs(lat.p95_ms) : "—"}
-            foot={lim ? (lat ? <>p95 · p50 {fmtMs(lat.p50_ms)} · limit {fmtMs(lim.p95_ms)}</> : <>no voice run yet{lim.p95_ms ? <> · p95 limit {fmtMs(lim.p95_ms)}</> : null}</>) : "text-only agent"} />
-        </div>}
-
-        <div className={cx("grid gap-4 items-start grid-cols-1", s.runs > 0 && "xl:grid-cols-[minmax(0,1fr)_380px]")}>
+        <section id="readiness">
+          <div className="flex items-baseline gap-3 mb-2.5">
+            <h2 className="font-semibold text-[15px] flex-1">Results by test type</h2>
+            <span className="text-muted text-[13px] hidden sm:inline">latest run of each</span>
+          </div>
           <Card flush>
-            <div className="flex items-center px-[18px] pt-4 pb-3"><h2 className="font-semibold text-base flex-1">Recent runs</h2>
-              <Button href={projectHref(project.key, "/runs")} variant="ghost" size="sm">All results <Icon name="arrow" /></Button></div>
-            {data.recent_runs.length ? (
-              <Table head={["Readiness", "Test", "Calls", "Pass / fail", "p95", "When"]}>
-                {data.recent_runs.map((r) => (
-                  <tr key={r.run_id} className={rowLink} onClick={() => navigate(runHref(r))}>
-                    <td><Badge status={r.decision || r.status} label={runLabel(r)} /></td>
-                    <td>{modeTitle(r.test_mode)} · {modeLabel(r.mode)}{r.offline ? <span className="text-muted"> · dry run</span> : null}{r.agent_options?.bugs ? <span className="text-bad text-xs font-semibold"> · bugs on</span> : null}</td>
-                    <td className="tabular-nums">{r.calls_started}{r.planned ? `/${r.planned}` : ""}</td>
-                    <td className="tabular-nums whitespace-nowrap"><span className="text-good">{r.counts.PASS || 0}</span> / <span className="text-bad">{r.counts.FAIL || 0}</span></td>
-                    <td className="tabular-nums">{r.mode === "voice" ? fmtMs(r.p95_ms) : <span className="text-muted">—</span>}</td>
-                    <td className="text-muted"><When iso={r.started_at} /></td>
-                  </tr>
-                ))}
-              </Table>
-            ) : (
-              <EmptyState icon="play" title="No runs yet" text="Pick a test mode to get the agent's first release readiness report."
-                action={project.ready ? <Button variant="primary" icon="play" href={projectHref(project.key, "/test")}>Test modes</Button> : undefined} />
-            )}
+            <Table head={["Test type", "Checks", "Result", "Latest finding", "Runs", "Last run"]}>
+              {types.map((m) => (
+                <tr key={m.id} className={rowLink} data-type={m.id} onClick={() => navigate(projectHref(k, `/test/${m.id}`))}>
+                  <td className="whitespace-nowrap"><b className="font-medium">{MODE_TITLE[m.id as TestModeId]}</b></td>
+                  <td className="text-ink-2 min-w-[220px]">{m.question}</td>
+                  <td>{m.run_id
+                    ? <a href={projectHref(k, `/runs/${m.run_id}`)} onClick={(e) => e.stopPropagation()} className="hover:no-underline"><StatusWords m={m} /></a>
+                    : <span title={m.why || undefined}><StatusWords m={m} /></span>}</td>
+                  <td className="text-ink-2 max-w-[340px]"><span className="line-clamp-2">{m.top_finding || m.headline || (m.status === "unavailable" ? m.why : "") || <span className="text-muted">—</span>}</span></td>
+                  <td className="tabular-nums text-ink-2">{m.runs || <span className="text-muted">0</span>}</td>
+                  <td className="text-muted whitespace-nowrap">{m.at ? <When iso={m.at} /> : "—"}</td>
+                </tr>
+              ))}
+            </Table>
           </Card>
-          {s.runs > 0 && (
-            <Card>
-              <CardHead level={2} title="Activity" sub="last 14 days" />
-              <ActivityChart days={data.activity} />
+        </section>
+
+        {findings.length > 0 && (
+          <section id="findings">
+            <CardHead level={2} title="Findings" sub="the top finding of each test type that did not pass cleanly" className="mb-2.5" />
+            <div className=" rounded-[20px] glass divide-y divide-line overflow-hidden">
+              {findings.map((m) => (
+                <a key={m.id} href={projectHref(k, `/runs/${m.run_id}`)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 hover:no-underline text-ink">
+                  <i className={cx("size-[7px] rounded-full flex-none", TONE_DOT[TYPE_STATUS[m.status].tone === "good" ? "warn" : TYPE_STATUS[m.status].tone])} />
+                  <b className="font-medium whitespace-nowrap">{MODE_TITLE[m.id]}</b>
+                  <span className="text-ink-2 flex-1 min-w-0 truncate">{m.top_finding}</span>
+                  <span className="text-accent-ink text-[13px] font-medium whitespace-nowrap inline-flex items-center gap-1">Open report<Icon name="arrow" size={13} /></span>
+                </a>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {data.trend.length > 1 && (
+          <section id="trend">
+            <CardHead level={2} title="This agent over time" sub={`last ${data.trend.length} runs · click a dot to open its report`} className="mb-2.5" />
+            <div className={cx("grid gap-4 grid-cols-1", voiceTrend && "lg:grid-cols-2")}>
+              <Card>
+                <CardHead title="Test calls passed" />
+                <RunLine aria="Share of test calls passed in each run" max={1} fmt={pct} onOpen={(id) => navigate(projectHref(k, `/runs/${id}`))}
+                  points={data.trend.map((t) => ({ run_id: t.run_id, at: t.at, decision: t.decision, value: t.pass_rate, label: modeTitle(t.test_mode) }))} />
+              </Card>
+              {voiceTrend && (
+                <Card>
+                  <CardHead title="Slowest answer (p95)" />
+                  <RunLine aria="The slowest answer time (p95) in each voice run" fmt={(x) => fmtMs(x)} tick={(x) => `${+(x / 1000).toFixed(1)} s`} limit={lim} onOpen={(id) => navigate(projectHref(k, `/runs/${id}`))}
+                    points={data.trend.map((t) => ({ run_id: t.run_id, at: t.at, decision: t.decision, value: t.p95_ms, label: modeTitle(t.test_mode) }))} />
+                </Card>
+              )}
+            </div>
+          </section>
+        )}
+
+        <div className={cx("grid gap-6 items-start grid-cols-1", todo.length > 0 && "xl:grid-cols-[minmax(0,1fr)_400px]")}>
+          <section>
+            <div className="flex items-center mb-2.5"><h2 className="font-semibold text-[15px] flex-1">Recent runs</h2>
+              <Button href={projectHref(k, "/runs")} variant="ghost" size="sm">All runs <Icon name="arrow" /></Button></div>
+            <Card flush>
+              {data.recent_runs.length ? (
+                <Table head={["Result", "Test type", "Calls", "Passed / failed", "When"]}>
+                  {data.recent_runs.slice(0, 6).map((r) => (
+                    <tr key={r.run_id} className={rowLink} onClick={() => navigate(runHref(r))}>
+                      <td><Badge status={r.decision || r.status} label={runLabel(r)} /></td>
+                      <td>{modeTitle(r.test_mode)}{r.offline ? <span className="text-muted"> · dry run</span> : null}{r.agent_options?.bugs ? <span className="text-bad text-[13px] font-medium"> · bugs on</span> : null}</td>
+                      <td className="tabular-nums">{r.calls_started}{r.planned ? `/${r.planned}` : ""}</td>
+                      <td className="tabular-nums whitespace-nowrap"><span className="text-good">{r.counts.PASS || 0}</span> / <span className="text-bad">{r.counts.FAIL || 0}</span></td>
+                      <td className="text-muted whitespace-nowrap"><When iso={r.started_at} /></td>
+                    </tr>
+                  ))}
+                </Table>
+              ) : (
+                <EmptyState icon="play" title="No runs yet"
+                  text={conn.connected ? "Open a test type in the sidebar to see its test cases and run them, or run the Release check." : "Connect the agent first, then run its tests."}
+                  action={conn.connected ? <Button variant="primary" icon="play" href={projectHref(k, "/test/functional")}>Open Functional tests</Button>
+                    : <Button variant="primary" icon="plug" href={projectHref(k, "/setup/connection")}>Connect agent</Button>} />
+              )}
             </Card>
+          </section>
+          {todo.length > 0 && (
+            <section id="setup-todo">
+              <CardHead level={2} title="Left to set up" sub={`${todo.length}`} className="mb-2.5" />
+              <div className=" rounded-[20px] glass divide-y divide-line overflow-hidden">
+                {todo.map((t) => (
+                  <a key={t.key} href={t.href} data-step={t.key} className="flex items-start gap-3 px-4 py-2.5 hover:bg-surface-2 hover:no-underline text-ink">
+                    <span className="flex-1 min-w-0 text-[13px]">{t.text}</span>
+                    <span className={cx("text-[13px] whitespace-nowrap", t.need === "Needed" ? "text-warn font-medium" : "text-muted")}>{t.need}</span>
+                  </a>
+                ))}
+              </div>
+            </section>
           )}
         </div>
+
+        {j && j.to_review > 0 && (
+          <Notice tone="warn" icon="eye">
+            <b>The AI judges disagree on {plural(j.to_review, "call")}.</b> Your label settles each one and teaches Vocto which judge to trust.{" "}
+            <a href={projectHref(k, "/labels")}>Label calls</a>
+          </Notice>
+        )}
       </div>
     </>
   );

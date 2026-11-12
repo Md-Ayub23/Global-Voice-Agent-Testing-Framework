@@ -15,6 +15,7 @@ agent behind it.
 | agent -> vatf | binary | PCM16 audio, any chunk size | May be sent faster than real time; vatf plays it out in order, like a phone's playout buffer. |
 | agent -> vatf | text | `{"type": "clear"}` | Drop audio sent but not yet played. This is how an agent stops talking when the caller interrupts. |
 | agent -> vatf | text | `{"type": "transcript", "text": "..."}` | Optional. What the agent says it is saying; stored as `platform_transcript` for comparison only. The simulated caller never sees it. |
+| agent -> vatf | text | `{"type": "heard", "text": "..."}` | Optional. What the agent's own speech recognition heard the caller say (one message per caller turn, or as often as it likes). Vocto joins them in order and compares them with what its caller really said: the metric "Caller words the agent misheard (WER)" in Speech & accents. The simulated caller never sees it. Agents that can't send it can write it to their logs instead (`logs.heard_pattern`). |
 | agent -> vatf | text | `{"type": "end"}` | The agent hung up (closing the socket means the same). |
 
 ## Timing

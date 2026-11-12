@@ -39,7 +39,7 @@ def draft(**over):
          "outcome": {"expected": "success", "tool": "place_order", "expect_count": 1,
                      "fields": [{"name": "size", "value": "large"}, {"name": "colour", "value": "red"}],
                      "success_phrases": ["placed"], "failure_phrases": ["couldn't"]},
-         "must_call": [], "must_not_call": [], "questions": [], "audio": {"noise": "none", "interrupt_line": ""}}
+         "must_call": [], "must_not_call": [], "questions": [], "audio": {"noise": "none", "line": "none", "interrupt_line": ""}}
     d.update(over)
     return d
 
@@ -54,7 +54,7 @@ DRAFTS = [
           outcome={"expected": "none", "tool": "none", "expect_count": 0, "fields": [], "success_phrases": [],
                    "failure_phrases": []}),
     draft(category="audio", kind="interruption", title="Caller cuts in to change the size", rule_ids=["R1"],
-          persona="interrupter", audio={"noise": "street", "interrupt_line": "Actually make it a medium."},
+          persona="interrupter", audio={"noise": "street", "line": "none", "interrupt_line": "Actually make it a medium."},
           questions=[{"title": "Handles the change", "question": "Did the agent take the new size?",
                       "pass_when": "It reads back a medium.", "fail_when": "It keeps the large."}]),
     draft(title="Orders a large vegetarian pizza please", why="Same as the first."),   # a duplicate
@@ -291,3 +291,67 @@ def test_long_answers_are_streamed():
         asyncio.run(client.complete(LLMRequest("plan_write", "claude-opus-5-5", "s", (LLMMessage("user", "u"),), tokens,
                                                json_schema={"type": "object"})))
     assert calls == ["create", "stream"]
+
+
+# ---- test cases per test type ------------------------------------------------------------------
+
+def typed_plan(folder, test_type, drafts):
+    def reply(req):
+        if req.purpose == "plan_understand":
+            return json.dumps(ANALYSIS)
+        assert f"TEST TYPE: " in req.system and test_type.split("_")[0] in req.system.lower()
+        kinds = req.json_schema["properties"]["tests"]["items"]["properties"]["kind"]["enum"]
+        assert all(planner.KINDS[k] in planner.TYPE_MIX[test_type] for k in kinds)
+        return json.dumps({"tests": drafts})
+    return asyncio.run(planner.write_plan(load_project(folder), ScriptedLLM(reply), count=len(drafts), test_type=test_type))
+
+
+def test_timing_drafts_are_voice_calls_with_the_right_caller(food):
+    plan = typed_plan(food, "timing", [
+        draft(category="timing", kind="cut_in_correction", title="Corrects the size mid read-back", rule_ids=[],
+              persona="clear-caller", audio={"noise": "none", "line": "none", "interrupt_line": "No, a medium, sorry."}),
+        draft(category="timing", kind="backchannel", title="Says mm-hm through the menu", rule_ids=[], persona="clear-caller"),
+    ])
+    assert plan["test_type"] == "timing" and plan["asked"]["mix"] == {"timing": 2}
+    cut, back = plan["tests"]
+    for t in plan["tests"]:
+        sc = t["scenario"]
+        assert sc["test_type"] == "timing" and sc["modes"] == ["voice"] and not t["problems"]
+        assert sc["criticality"] != "exploratory"          # timing tests aren't about a rule
+    assert cut["scenario"]["audio"]["barge_in"][0]["say"] == "No, a medium, sorry."
+    assert back["persona"] == "says-mm-hm" and any("says-mm-hm" in n or "mm-hm" in n for n in back["notes"])
+
+
+def test_speech_drafts_set_the_line_and_resilience_drafts_break_a_tool(food):
+    plan = typed_plan(food, "speech", [draft(category="speech", kind="bad_signal", title="Orders from a bad mobile line", rule_ids=[])])
+    sc = plan["tests"][0]["scenario"]
+    assert sc["audio"]["line"] == {"codec": "phone", "packet_loss_pct": 5} and sc["test_type"] == "speech"
+    plan = typed_plan(food, "resilience", [draft(category="error", kind="tool_timeout", title="Order system times out",
+                                                 rule_ids=["R3"], fault={"tool": "place_order", "type": "timeout", "status": 0})])
+    sc = plan["tests"][0]["scenario"]
+    assert sc["setup"]["faults"][0]["tool"] == "place_order" and sc["test_type"] == "resilience"
+    assert planner.latest_plan(food, "resilience") is None     # nothing saved until the dashboard saves it
+
+
+def test_voice_types_need_a_voice_connection(food):
+    p = food / "profile.yaml"
+    doc = yaml.safe_load(p.read_text(encoding="utf-8"))
+    doc["connection"] = {"type": "text_http", "target": "http://127.0.0.1:9/chat"}
+    p.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    with pytest.raises(planner.PlanError, match="voice"):
+        asyncio.run(planner.write_plan(load_project(food), ScriptedLLM(lambda r: "{}"), count=2, test_type="speech"))
+
+
+def test_old_files_are_placed_in_a_test_type():
+    from vatf.modes import type_of
+    assert type_of({"id": "a"}) == "functional"
+    assert type_of({"id": "b", "setup": {"faults": [{"tool": "x", "type": "timeout"}]}}) == "resilience"
+    assert type_of({"id": "c", "audio": {"barge_in": [{"agent_turn": 2, "offset_ms": 1, "say": "x"}]}}) == "timing"
+    assert type_of({"id": "d", "audio": {"line": {"codec": "phone"}}}) == "speech"
+    assert type_of({"id": "e", "audio": {"noise": "cafe"}, "test_type": "functional"}) == "functional"   # its own wins
+
+
+def test_library_has_timing_and_speech_callers():
+    assert {"says-mm-hm", "pauses-mid-sentence", "goes-quiet"} <= set(personas.for_type("timing"))
+    assert "indian-english" in personas.for_type("speech") and "indian-english" not in personas.for_type("timing")
+    assert personas.persona_doc("indian-english")["speech"]["accent"] == "indian"

@@ -199,6 +199,8 @@ class _Call:
             heard = (await asyncio.to_thread(self.gw.stt.transcribe, AudioClip(to_pcm16(audio), self.sr))).text
             if not heard.strip():
                 continue
+            if not self.twilio:     # what the agent understood (docs/voice-protocol.md "heard")
+                await self.ws.send(json.dumps({"type": "heard", "text": heard}))
             if self.speaking and not self.speaking.done():
                 try:
                     await self.speaking

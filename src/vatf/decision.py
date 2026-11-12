@@ -14,7 +14,10 @@ from collections import defaultdict
 from typing import Any, Mapping, Sequence
 
 from .evidence import utc_now
+from . import stats
 from .latency import percentile
+from .costs import prices, summary as cost_summary
+from .drills import by_failure
 from .metrics import by_condition, run_quality
 
 EXIT_CODES = {"GO": 0, "NO_GO": 1, "NO_GO_INSUFFICIENT_EVIDENCE": 2}
@@ -94,7 +97,7 @@ def _basis(verdicts: Sequence[Mapping[str, Any]], reasons: Sequence[Mapping[str,
         layers.append("trusted_judges")
     rules = {r["rule"] for r in reasons}
     for rule, layer in (("reliability", "reliability"), ("latency", "latency"), ("metric", "call_quality"),
-                        ("coverage", "evidence"),
+                        ("coverage", "evidence"), ("latency_sample", "evidence"),
                         ("needs_review", "evidence")):
         if rule in rules and layer not in layers:
             layers.append(layer)
@@ -214,7 +217,15 @@ class LocalDecisionEngine:
             if sc["criticality"] != "critical":
                 continue
             refs = [v["test_id"] for v in vs if v["status"] == "FAIL"]
-            if failed:
+            presets = {(v.get("conditions") or {}).get("preset") for v in vs}
+            if failed and len(presets) > 1:     # a Speech mode sweep: say which conditions it failed under
+                under = sorted({(v.get("conditions") or {}).get("title") or (v.get("conditions") or {}).get("preset", "?")
+                                for v in vs if v["status"] == "FAIL"})
+                reasons_bad.append({"rule": "reliability",
+                                    "message": f"Critical scenario {sc['id']} passed {passed} of {k} calls across "
+                                               f"{len(presets)} caller conditions; it failed under: {', '.join(under)}.",
+                                    "refs": refs})
+            elif failed:
                 reasons_bad.append({"rule": "reliability",
                                     "message": f"Critical scenario {sc['id']} passed {passed} of {k} repeats "
                                                f"({need} required).", "refs": refs})
@@ -245,15 +256,33 @@ class LocalDecisionEngine:
         timed = [ms for v in verdicts if v["status"] != "ERROR" for ms in v.get("metrics", {}).get("latency_ms", [])]
         p50, p95 = (percentile(timed, 50), percentile(timed, 95)) if voice else (None, None)
         within = None
+        p95_enough = stats.enough(95, len(timed))
+        over = sum(ms > p95_limit for ms in timed)
         if voice and timed:
-            within = p50 <= p50_limit and p95 <= p95_limit
-            if not within:
-                slow = [v["test_id"] for v in verdicts if v["status"] != "ERROR"
-                        and any(ms > p95_limit for ms in v.get("metrics", {}).get("latency_ms", []))]
+            slow = [v["test_id"] for v in verdicts if v["status"] != "ERROR"
+                    and any(ms > p95_limit for ms in v.get("metrics", {}).get("latency_ms", []))]
+            p50_ok, p95_ok = p50 <= p50_limit, p95 <= p95_limit
+            # Too few answers for a real p95 (it would just be one of the slowest few): the slowest-5% rule
+            # is read as "how many answers were over the limit". Clearly more than 5% over is too slow;
+            # a few over can't be told from bad luck, so it is not enough evidence either way.
+            clearly_slow = not p95_ok and (p95_enough or stats.wilson(over, len(timed))[0] > 0.05)
+            if not p50_ok or clearly_slow:
+                within = False
                 reasons_bad.append({"rule": "latency",
                                     "message": f"Agent too slow to answer: p50 {p50} ms (limit {p50_limit}), "
-                                               f"p95 {p95} ms (limit {p95_limit}) over {len(timed)} timed turns.",
+                                               f"p95 {p95} ms (limit {p95_limit}) over {len(timed)} timed turns"
+                                               + ("" if p95_enough or not clearly_slow else f"; {over} of {len(timed)} answers were over "
+                                                  f"{p95_limit} ms, clearly more than the 5% allowed") + ".",
                                     "refs": slow})
+            elif not p95_ok:
+                reasons_evidence.append({"rule": "latency_sample",
+                                         "message": f"Slowest answers: {over} of {len(timed)} timed answers took longer "
+                                                    f"than {p95_limit} ms. With fewer than {stats.need_for(95)} answers "
+                                                    "Vocto can't tell whether more than 5% of answers are that slow: "
+                                                    "run more calls (more repeats or test cases).",
+                                         "refs": slow})
+            else:
+                within = True
         elif voice:
             reasons_evidence.append({"rule": "coverage", "message": "No agent answer could be timed."})
 
@@ -305,6 +334,8 @@ class LocalDecisionEngine:
                 "turns_measured": len(timed) if voice else 0, "p50_ms": p50, "p95_ms": p95,
                 "p50_limit_ms": p50_limit, "p95_limit_ms": p95_limit,
                 "within_limits": within,
+                "p95_enough": p95_enough if voice else None, "p95_needs": stats.need_for(95),
+                "over_p95_limit": over if voice else 0,
             },
             "coverage": {
                 "planned_calls": planned, "verified_calls": verified, "error_calls": errors,
@@ -317,6 +348,8 @@ class LocalDecisionEngine:
             **({"heard_numbers": heard} if (heard := _heard_summary(verdicts)) else {}),
             **({"quality": quality} if quality else {}),
             **({"by_condition": conds} if (conds := by_condition(verdicts)) else {}),
+            **({"by_failure": fails} if (fails := by_failure(verdicts)) else {}),
+            **({"costs": cs} if (cs := cost_summary(verdicts, prices(profile))) else {}),
             "calls": [{"test_id": v["test_id"], "scenario_id": v["scenario_id"], "repeat": v["repeat"],
                        "status": v["status"]} for v in verdicts],
         }
@@ -346,7 +379,7 @@ def apply_regression(decision: dict[str, Any], comparison: Mapping[str, Any] | N
         new = [{"rule": "regression", "message": f"Worse than the baseline: {c['message']}",
                 **({"refs": refs} if (refs := _change_refs(decision, c)) else {})} for c in blocking]
         if decision["decision"] == "NO_GO":
-            later = ("coverage", "needs_review", "load_evidence")
+            later = ("coverage", "needs_review", "load_evidence", "latency_sample")
             reasons = [r for r in reasons if r["rule"] not in later] + new + [r for r in reasons if r["rule"] in later]
         else:
             reasons = new + [r for r in reasons if r["rule"] not in ("all_targets_met", "safety_warnings",

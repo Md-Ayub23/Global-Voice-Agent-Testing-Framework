@@ -27,7 +27,10 @@ Say numbers and dates the way people say them out loud (for example "the 14th of
 
 
 def caller_system_prompt(scenario: Mapping[str, Any], persona: Mapping[str, Any],
-                         agent_name: str, voice: bool = False) -> str:
+                         agent_name: str, voice: bool = False, language: str = "en") -> str:
+    from .languages import LANGUAGES
+
+    note = LANGUAGES.get(language, LANGUAGES["en"])["caller_note"]
     c = scenario["caller"]
     traits = ", ".join(f"{k}: {v}" for k, v in persona.get("traits", {}).items())
     facts = "\n".join(f"- {k}: {v}" for k, v in c.get("facts", {}).items())
@@ -52,17 +55,17 @@ End the call when: {c.get('end_when', 'your goal is reached or clearly cannot be
 To end the call, say a short goodbye and then write {HANG_UP} at the very end.
 
 Reply with only the words you say out loud: one or two short spoken sentences, no stage
-directions, no quotation marks, no descriptions of tone.""" + (VOICE_NOTE if voice else "")
+directions, no quotation marks, no descriptions of tone.""" + (VOICE_NOTE if voice else "") + note
 
 
 class LLMCaller:
     def __init__(self, scenario: Mapping[str, Any], persona: Mapping[str, Any], llm: Any, *,
                  model: str, agent_name: str, max_tokens: int = 2048, metadata: Mapping[str, str] = (),
-                 voice: bool = False):
+                 voice: bool = False, language: str = "en"):
         self._llm = llm
         self._model = model
         self._max_tokens = max_tokens
-        self._system = caller_system_prompt(scenario, persona, agent_name, voice)
+        self._system = caller_system_prompt(scenario, persona, agent_name, voice, language)
         self._metadata = dict(metadata or {})
         self._history: list[LLMMessage] = []
 
@@ -129,8 +132,11 @@ class ScriptThenLLM:
     listening to what the agent really says. The fixed lines keep runs comparable; the rest is
     what a real caller would do next (push on a weak answer, finish the order, hear the read-back)."""
 
-    def __init__(self, lines: Sequence[str], llm_caller: LLMCaller, turns: int):
+    def __init__(self, lines: Sequence[str], llm_caller: LLMCaller, turns: int,
+                 recordings: Sequence[str | None] = ()):
         self._lines = list(lines)
+        self._audio = list(recordings) + [None] * (len(self._lines) - len(recordings))
+        self._last_audio: str | None = None
         self._llm = llm_caller
         self._left = turns
         self.following_up = False
@@ -138,8 +144,9 @@ class ScriptThenLLM:
     async def next_turn(self, heard_text: str) -> CallerAction:
         if self._lines:
             line = self._lines.pop(0)
+            self._last_audio = self._audio.pop(0)
             self._llm.note_line(heard_text, line)      # so Claude knows the whole call when it takes over
-            return CallerAction(say=line)
+            return CallerAction(say=line, audio=self._last_audio)
         if self._left <= 0:
             return CallerAction(say=None, hang_up=True)
         self.following_up = True
@@ -149,7 +156,7 @@ class ScriptThenLLM:
     async def redo(self, heard_text: str) -> CallerAction:
         if not self.following_up:                       # a fixed line stays as it is
             self._llm.extend_heard(heard_text)
-            return CallerAction(say=self._llm.last_said())
+            return CallerAction(say=self._llm.last_said(), audio=self._last_audio)
         return await self._llm.redo(heard_text)
 
     def note_barge_in(self, heard_before: str, said: str) -> None:
@@ -157,13 +164,16 @@ class ScriptThenLLM:
 
 
 class ScriptedCaller:
-    def __init__(self, lines: Sequence[str]):
+    """The fixed lines of a scripted test case; a line may come with a recording to play (voice)."""
+
+    def __init__(self, lines: Sequence[str], recordings: Sequence[str | None] = ()):
         self._lines = list(lines)
+        self._audio = list(recordings) + [None] * (len(self._lines) - len(recordings))
 
     async def next_turn(self, heard_text: str) -> CallerAction:
         if not self._lines:
             return CallerAction(say=None, hang_up=True)
-        return CallerAction(say=self._lines.pop(0))
+        return CallerAction(say=self._lines.pop(0), audio=self._audio.pop(0))
 
 
 class RuleCaller:
