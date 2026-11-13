@@ -40,7 +40,9 @@ def snapshot(decision: Mapping[str, Any], info: Mapping[str, Any],
     for r in decision.get("reliability", []):
         tests[r["scenario_id"]] = {
             "title": titles.get(r["scenario_id"], r["scenario_id"]), "criticality": r["criticality"],
-            "k": r["k"], "passed": r["passed"], "failed": r["failed"], "unverified": r["unverified"]}
+            "k": r["k"], "passed": r["passed"], "failed": r["failed"], "unverified": r["unverified"],
+            # The test's fingerprint: a test edited since the other run is "changed", never a regression.
+            **({"sha": sha[:16]} if (sha := (info.get("scenario_sha256") or {}).get(r["scenario_id"])) else {})}
     lat = decision.get("latency") or {}
     judges = {j["rubric_item"]: {"title": j.get("title", j["rubric_item"]), "passed": j.get("passed", 0),
                                  "failed": j.get("failed", 0)} for j in decision.get("judges", [])}
@@ -57,6 +59,8 @@ def snapshot(decision: Mapping[str, Any], info: Mapping[str, Any],
         "finished_at": info.get("finished_at") or decision.get("created_at"),
         "decision": decision["decision"],
         "how": how_it_ran(info),
+        # What the run was made with: the agent's version label, the profile and prompt, judge models, Vocto.
+        **({"versions": dict(info["versions"])} if info.get("versions") else {}),
         "coverage": {k: (decision.get("coverage") or {}).get(k) for k in ("planned_calls", "verified_calls", "ratio")},
         "tests": tests,
         "scores": {} if load else {name: s.get("score") for name, s in (decision.get("scorecard") or {}).items()},

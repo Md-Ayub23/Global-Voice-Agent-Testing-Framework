@@ -39,7 +39,7 @@ export interface QualityRow {
   id: string; title: string; unit: MetricUnit; better: "lower" | "higher"; value: number | null; band: Band;
   good: number | null; warn: number | null; blocks: boolean; calls: number; about: string; detail?: Record<string, number | string>;
 }
-export interface SweepCondition { id: string; title: string; about: string; group: "line" | "accent"; default: boolean }
+export interface SweepCondition { id: string; title: string; about: string; group: "line" | "accent" | "ladder"; default: boolean }
 export interface ConditionRow {
   key?: string; label: string; preset?: string | null; lines?: string[];
   calls: number; passed: number; failed: number; pass_rate: number | null;
@@ -243,12 +243,20 @@ export interface RunSummary {
 export interface BaselineCounts {
   run_id: string | null; decision?: string | null; finished_at?: string | null; like_for_like: boolean;
   regressions: number; worse: number; better: number; new?: number; removed?: number; blocking: number;
+  /** Regression upgrade: failed once and didn't repeat on the reruns / flaky over the last 10 runs / edited since the baseline. */
+  suspected?: number; flaky?: number; changed?: number; fixed?: number;
+  rolling?: string[]; versions?: VersionChange[]; confirmed_by_reruns?: Record<string, number>;
 }
-export type Direction = "regression" | "worse" | "better" | "new" | "removed" | "same";
+/** What the two runs were made with, where it differs (agent version, profile, prompt, judge models...). */
+export interface VersionChange { field: string; title: string; before: string | null; after: string | null }
+export interface RunTrendPoint { run_id: string; at: string | null; decision: string | null; pass_rate: number | null; p95_ms: number | null; calls: number | null; version: string | null }
+export interface FlakyTest { scenario_id: string; title: string; passed: number; calls: number; runs: number; rate: number }
+export type Direction = "regression" | "worse" | "better" | "new" | "removed" | "same" | "suspected" | "flaky" | "changed";
 export interface Change {
   kind: "test" | "latency" | "score" | "metric" | "judge" | "safety" | "load" | "cost";
   id: string; title: string; direction: Direction; before: number | string | null; after: number | string | null;
   message: string; blocks: boolean; unit?: string; band_before?: string; band_after?: string; criticality?: string;
+  flaky_rate?: number;
 }
 export interface Comparison {
   source: string;
@@ -256,6 +264,9 @@ export interface Comparison {
   current: { run_id: string | null; finished_at: string | null; decision: string | null };
   like_for_like: boolean;
   differences: { field: string; title: string; before: unknown; after: unknown }[];
+  versions?: VersionChange[];
+  rolling?: string[];
+  confirmed_by_reruns?: Record<string, number>;
   gate_enabled: boolean;
   changes: Change[];
   counts: Record<Direction, number>;
@@ -309,7 +320,7 @@ export interface OpsPage {
 }
 export interface CiFile { path: string; text: string; secrets: string[] }
 
-export interface LatencyTurn { seq: number; turn: number; ms: number | null; counted: boolean; note: string }
+export interface LatencyTurn { seq: number; turn: number; ms: number | null; counted: boolean; note: string; tool?: boolean; full_wait_ms?: number | null }
 export interface Metrics {
   turns?: number;
   duration_ms?: number;
@@ -339,13 +350,24 @@ export interface CallBrief {
 
 export interface Limits { p50: number; p95: number }
 
+export interface TimingMoment { test_id: string; scenario_id?: string | null; seq: number; ms: number; tool?: boolean; full_wait_ms?: number | null }
+
 export interface DecisionDoc {
   decision: Decision;
   exit_code: number;
   reasons: { rule: string; message: string; refs?: string[] }[];
   scorecard: Record<string, { score: number | null; passed: number; failed: number; total: number; coverage: number }>;
   reliability: { scenario_id: string; criticality: string; k: number; passed: number; failed: number; pass_hat_k: boolean | null }[];
-  latency: { turns_measured: number; p50_ms: number | null; p95_ms: number | null; p50_limit_ms: number; p95_limit_ms: number; within_limits: boolean | null };
+  latency: {
+    turns_measured: number; p50_ms: number | null; p95_ms: number | null; p50_limit_ms: number; p95_limit_ms: number; within_limits: boolean | null;
+    p95_enough?: boolean | null; p95_needs?: number; over_p95_limit?: number;
+    /** Plain answers and answers that needed a tool, timed apart (tool: also the full wait for the real answer). */
+    split?: { plain: { n: number; p50_ms: number | null; p95_ms: number | null };
+      tool: { n: number; p50_ms: number | null; p95_ms: number | null; full_p50_ms: number | null; full_p95_ms: number | null; full_n: number } };
+    p95_range?: { low_ms: number | null; high_ms: number | null };
+    slowest?: TimingMoment[]; slow_stops?: TimingMoment[];
+    stages?: Record<string, { title: string; n: number; p50_ms: number | null; p95_ms: number | null }>;
+  };
   coverage: { planned_calls: number; verified_calls: number; error_calls: number; needs_review_calls?: number; ratio: number; min_required: number };
   judges?: { rubric_item: string; title: string; kappa: number | null; labelled_calls: number; can_block: boolean; calibration: string;
     passed: number; failed: number; needs_review: number; not_applicable: number }[];
@@ -357,6 +379,9 @@ export interface DecisionDoc {
   by_condition?: ConditionRow[];
   baseline?: BaselineCounts;
   load?: LoadDecision;
+  /** Regression runs: one point per run (newest last) and the flaky tests over the last 10 runs. */
+  trend?: RunTrendPoint[];
+  flaky?: FlakyTest[];
 }
 export type Layer = "all_checks" | "hard_checks" | "trusted_judges" | "reliability" | "latency" | "call_quality" | "evidence" | "regression" | "load";
 
@@ -379,6 +404,8 @@ export interface RunInfo {
   conditions?: string;
   sweep?: string[];
   drills?: string[];
+  drill_targets?: string[];
+  drill_repeats?: string[];
   /** Every caller spoke this language on this run (languages.py); absent = each caller's own. */
   caller_language?: string;
   trigger?: string;
@@ -501,25 +528,46 @@ export interface SafetyBrief { enabled: boolean; intensity: Intensity; attacks: 
 export type Intensity = "quick" | "standard" | "thorough";
 export interface SafetyFinding {
   test_id: string; scenario_id: string; pack: string; title: string; check_id: string;
-  severity: string; result: string; can_block: boolean; message: string;
+  severity: string; result: string; can_block: boolean; message: string; waiting?: boolean;
 }
-export interface SafetyResult {
+/** Attack success rate: unsafe / (unsafe + resisted), with its 95% range. */
+export interface AttackRate { rate?: number | null; low?: number | null; high?: number | null }
+export interface SafetyPackResult extends AttackRate {
+  calls: number; failed: number; to_review?: number; resisted?: number; not_landed?: number; errors?: number;
+}
+export interface OwaspRow extends AttackRate { id: string; title: string; packs: string[]; calls: number; unsafe: number; resisted: number; to_review: number }
+export interface SafetyResult extends AttackRate {
   calls: number; passed: number; failed: number; to_review?: number;
-  packs: Record<string, { calls: number; failed: number; to_review?: number }>;
+  resisted?: number; not_landed?: number; errors?: number; leaks?: number; review?: boolean;
+  packs: Record<string, SafetyPackResult>;
+  owasp?: OwaspRow[];
+  switched_off?: string[];
   findings: SafetyFinding[];
 }
-export interface SafetyPack { id: string; title: string; rubric: string; what: string; count: number; total: number }
+export interface SafetyPack { id: string; title: string; rubric: string; what: string; count: number; total: number; owasp?: string[] }
 export interface SafetyAttack {
   id: string; pack: string; title: string; level: Intensity; lines: string[]; adaptive: boolean; hard_checks: number; on: boolean;
-  custom: boolean;
+  custom: boolean; owasp?: string[]; voice_only?: boolean; poisoned?: boolean; language?: string;
 }
 /** One of your own safety questions (profile safety.custom). */
-export interface SafetyQuestion { pack?: string; title?: string; lines?: string[]; never_say?: string[]; safe_answer?: string; blocks?: boolean }
+export interface SafetyQuestion {
+  pack?: string; title?: string; lines?: string[]; never_say?: string[]; safe_answer?: string; blocks?: boolean;
+  language?: string; from?: string;
+}
+export interface AttackDraft { n: number; question: SafetyQuestion; why: string; problems: string[] }
 export interface SafetyPage {
-  settings: { enabled: boolean; intensity: Intensity; off_topic: "strict" | "friendly"; packs: string[]; canaries?: string[]; skip?: string[]; custom?: SafetyQuestion[] };
+  settings: {
+    enabled: boolean; intensity: Intensity; off_topic: "strict" | "friendly"; packs: string[]; canaries?: string[]; skip?: string[]; custom?: SafetyQuestion[];
+    review?: boolean; identity?: { enabled?: boolean; verify?: string; guarded?: string[] } | null; poison?: { tools?: string[]; lines?: string[] } | null;
+  };
   defaults: { enabled: boolean; intensity: Intensity; off_topic: string; packs: string[] };
   industry: string;
   policy_rules: string[];
+  identity: { verify: string; guarded: string[] } | null;
+  poison_tools: string[];
+  owasp: { id: string; title: string }[];
+  languages: { id: string; name: string }[];
+  tools: { name: string; effect: string }[];
   packs: SafetyPack[];
   attacks: SafetyAttack[];
   repeats: number;
@@ -530,7 +578,7 @@ export interface SafetyPage {
 }
 
 // Phase 7: load tests (src/vatf/load.py, loadstats.py, loadrun.py).
-export type LoadShape = "ramp" | "spike" | "soak" | "steady";
+export type LoadShape = "ramp" | "spike" | "soak" | "steady" | "find_limit";
 export type LoadCaller = "free" | "claude";
 export interface LoadLimits {
   max_failed_pct: number; p95_ms: number | null;
@@ -538,15 +586,22 @@ export interface LoadLimits {
   pass_drop: { blocks: boolean; points: number };
   drift: { blocks: boolean; pct: number };
   recovery: { blocks: boolean; pct: number; ms: number };
-  max_lag_ms: number; min_calls: number;
+  max_lag_ms: number; min_calls: number; min_answers: number;
 }
 export interface LoadSettings {
   shape: LoadShape; calls_at_once: number; start_at: number; steps: number; step_minutes: number; minutes: number;
   before_minutes: number; after_minutes: number; window_minutes: number; pause_seconds: number; max_calls: number;
   scenarios: string[]; caller: LoadCaller; judges: boolean; conditions: string; start_agent: boolean; limits: LoadLimits;
+  /** Calls per hour (Little's law) and the busiest time expected: the target and the headroom sentence. */
+  peak_calls_per_hour: number | null; call_minutes: number | null; expected_peak: number | null;
+  light: boolean; unique_facts: string[];
 }
+export interface LoadHeadroom { capacity: number; exact: boolean; peak: number | null; pct: number | null; text: string }
+export interface LoadLeak { in_test: string; in_scenario: string | null; seq: number; where: "said" | "tool"; from_test: string; from_scenario: string | null; fact: string; text: string }
+export interface PhoneLoadWarning { calls: number; calls_known: boolean; at_once: number; cost: number | null; currency: string | null; provider: string; text: string }
 export interface LoadStage { index: number; name: string; kind: string; level: number; start_s: number; seconds: number; end_s: number }
-export interface LoadPlan { shape: LoadShape; calls_at_once: number; seconds: number; peak: number; max_calls: number; stages: LoadStage[] }
+export interface LoadPlan { shape: LoadShape; calls_at_once: number; seconds: number; peak: number; max_calls: number; stages: LoadStage[];
+  expected_peak?: number | null; expected_calls?: number | null; warnings?: string[]; phone?: PhoneLoadWarning }
 export interface LoadProblem { rule: string; message: string; refs?: string[] }
 export interface LoadStageStats extends LoadStage {
   calls: number; finished: number; ok: number; failed: number; harness_errors: number; failed_pct: number | null;
@@ -557,6 +612,7 @@ export interface LoadStageStats extends LoadStage {
   quality: QualityRow[]; lag_p95_ms: number | null; lag_max_ms: number | null;
   in_flight_mean: number | null; in_flight_max: number | null;
   trusted: boolean; untrusted_why: string; problems: LoadProblem[]; meets_limits: boolean;
+  too_few?: boolean; p95_enough?: boolean; reached?: boolean;
 }
 export interface LoadSummary {
   mode: Mode; shape: LoadShape; calls_at_once: number; caller: LoadCaller; max_calls: number; p95_limit_ms: number | null;
@@ -571,10 +627,12 @@ export interface LoadSummary {
   lag_p95_ms: number | null; lag_max_ms: number | null;
   timeline: [number, number, number][];   // [seconds from the start, calls in progress, Vocto's event-loop lag ms]
   notes: string[];
+  expected_peak?: number | null; headroom?: LoadHeadroom; leaks?: LoadLeak[]; light?: boolean;
 }
 export interface LoadDecision {
   shape: LoadShape; calls_at_once: number; capacity: number | null; breaking: LoadSummary["breaking"];
   calls: number; failed: number; harness_errors: number; p95_limit_ms: number | null; unattributed_tool_calls: number;
+  expected_peak?: number | null; headroom?: LoadHeadroom; leaks?: LoadLeak[];
   stages: { index: number; name: string; kind: string; level: number; calls: number; finished: number; failed: number;
     failed_pct: number | null; pass_rate: number | null; trusted: boolean; meets_limits: boolean; p95_ms: number | null; p50_ms: number | null }[];
 }
@@ -586,7 +644,7 @@ export interface LoadPage {
   file: string; mode: Mode; saved: Partial<LoadSettings>; defaults: Omit<LoadSettings, "limits"> & { limits: LoadLimits };
   settings: LoadSettings | null; plan: LoadPlan | null; tests_used: string[]; error: string | null;
   p95_limit_ms: number | null; voice_p95_ms: number | null;
-  tests: { id: string; title: string; criticality: string; faults: boolean; style: string }[];
+  tests: { id: string; title: string; criticality: string; faults: boolean; style: string; facts?: string[] }[];
   agent: { launched_per_call: boolean; agent_process: boolean; uses_gateway: boolean; test_id_sent: boolean; test_id_header: string; max_call_seconds: number };
   baseline: (BaselineBrief & { load?: { capacity: number | null; levels: Record<string, unknown> } | null }) | null;
   baseline_problem: string | null;
@@ -685,6 +743,9 @@ export interface Readiness {
   conditions?: ConditionResult[];
   /** Resilience failure drills: how the calls ended, per kind of tool failure. */
   failures?: FailureResult[];
+  drill_grid?: DrillGrid | null;
+  speech?: SpeechSummary | null;
+  timing?: Record<string, unknown> | null;
   /** Functional: the job itself in numbers (every task step, readiness.py _functional). */
   functional?: FunctionalResult | null;
 }
@@ -698,16 +759,35 @@ export interface FunctionalResult {
   ends: { key: string; title: string; parts: { class: string; label: string; count: number; good: boolean }[] }[];
   intents: { id: string; title: string; passed: number; failed: number; range: string | null }[];
 }
-export interface DrillFailure { id: string; title: string; about: string; default: boolean; expected: string }
+export interface DrillFailure { id: string; title: string; about: string; default: boolean; expected: string;
+  lookup?: boolean; every?: boolean; refusal?: boolean; text_only?: boolean }
 export interface FailureResult {
-  key: string; title: string; about: string; status: "handled" | "struggled" | "broke" | "no_result"; status_text: string;
+  key: string; failure?: string; target?: "action" | "lookup"; repeat?: "once" | "every";
+  title: string; about: string; status: "handled" | "struggled" | "broke" | "no_result"; status_text: string;
   result: string; pass_rate: number | null; ended: string; recovered: number; honest: number; false_claims: number;
   duplicates: number; expected: string; failed_tests: string[]; proof: string | null;
+  retries?: number; max_retries?: number; early_429?: number; too_many_tries?: number;
+  longest_silence_ms?: number | null; informed?: string | null;
+}
+export interface DrillGrid {
+  columns: { key: string; title: string }[];
+  rows: { id: string; title: string; cells: Record<string, { state: "pass" | "fail" | "other"; text: string; why: string; call: string | null }> }[];
 }
 export interface ConditionResult {
   key: string; title: string; lines: string[]; status: "handled" | "struggled" | "broke" | "no_result"; status_text: string;
   result: string; pass_rate: number | null; understanding: string; understood_wer: number | null; p50: string | null;
   worse_than_clean: boolean; failed_tests: string[]; proof: string | null;
+  vs_clean?: string | null; by_type?: Record<string, { right: number; checked: number }>;
+  read_back_before_save?: number | null; saves_checked?: number | null; too_hard_calls?: number;
+}
+export interface RateRange { k: number; n: number; rate: number; low: number; high: number; text: string }
+export interface LadderStep { level: number; calls: number; passed: number; failed: number; pass_rate: number | null; details_right: number; details_checked: number; ok: boolean; failed_calls: string[] }
+export interface SpeechSummary {
+  details?: RateRange | null;
+  by_type?: { type: string; title: string; right: number; checked: number; rate: RateRange | null }[];
+  read_back?: RateRange | null; too_hard_calls?: number; voices?: "synthetic" | "real" | "mixed" | null;
+  wrong?: { test_id: string; scenario_id?: string | null; fact: string; type: string; said: string | null; saved: string | null; seq?: number | null; condition?: string | null }[];
+  ladder?: Record<"noise" | "loss", { unit: string; levels: LadderStep[]; works_to: number | null; text: string }> | null;
 }
 
 // One rule of a test type's "What passes" card (src/vatf/modes.py pass_rules).

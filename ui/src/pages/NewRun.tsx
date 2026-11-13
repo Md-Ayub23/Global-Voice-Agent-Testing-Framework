@@ -69,7 +69,10 @@ interface Form {
   conditions: string;      // voice: caller conditions preset over every test (Phase 5)
   sweep: string[];         // voice, Speech mode: every test once under each of these conditions
   drills: string[];        // Resilience: every test again with its booking or order tool failing, per failure
+  drill_on: string[];      // Resilience: what breaks: action (the booking or order tool) and/or lookup
+  drill_repeat: string[];  // Resilience: once (first call only) and/or every (every call)
   language: string;        // every caller speaks this language on this run; "" = each caller's own
+  agent_version: string;   // Regression: a label for the agent version under test (shown on the trend chart)
 }
 
 // `mode` set: the Run tab of one test mode (Test modes › <mode>), under that page's own header.
@@ -147,7 +150,10 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
   const startAgent = !!profile.agent_process && f.start_agent;
   // Speech mode compares conditions: each test runs once per condition (times the repeats).
   const sweeping = mode === "speech" && voice;
-  const conds = sweeping ? Math.max(f.sweep.length, 1) : 1;
+  // The breaking-point ladder (snr:/loss: steps) runs once per step on up to 5 probe test cases.
+  const isLadder = (id: string) => id.startsWith("snr:") || id.startsWith("loss:");
+  const ladderSteps = sweeping ? f.sweep.filter(isLadder).length : 0;
+  const conds = sweeping ? Math.max(f.sweep.filter((id) => !isLadder(id)).length, ladderSteps ? 0 : 1) : 1;
   const safetyCalls = !safetyOn ? 0 : f.repeats ? (Number(f.repeats) || 1) * profile.safety!.attacks : profile.safety!.calls;
   const languages = system?.languages || [];
   const languagePick = languages.length > 1 && f.command === "run" && (
@@ -175,19 +181,25 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
       start_agent: f.command === "run" && startAgent, planted_bug: f.command === "run" && startAgent ? f.planted_bug : "",
       conditions: voice && !sweeping ? f.conditions : "as_written",
       ...(sweeping && f.command === "run" ? { sweep: f.sweep } : {}),
-      ...(drilling && f.command === "run" && f.drills.length ? { drills: f.drills } : {}),
+      ...(drilling && f.command === "run" && f.drills.length ? { drills: f.drills, drill_on: f.drill_on, drill_repeat: f.drill_repeat } : {}),
       ...(mode && f.command === "run" ? { test_mode: mode } : {}),
       ...(f.language && f.command === "run" ? { language: f.language } : {}),
+      ...(f.agent_version.trim() && f.command === "run" ? { agent_version: f.agent_version.trim() } : {}),
     };
   }, [f, profile, d, inMode, safetyOn, startAgent, voice, mode, sweeping, drilling]);
 
+  // Resilience: drills per test case = each failure picked, times what breaks and how often, where that applies
+  // (drills.applies: e.g. a refusal only hits the booking tool, a dropped call needs a text run).
+  const hasLookups = (profile.tools || []).some((t) => t.effect !== "write");
+  const drillCount = useMemo(() => drillCombos(system?.drill_failures || [], f.drills, f.drill_on, f.drill_repeat, hasLookups, voice),
+    [system?.drill_failures, f.drills, f.drill_on, f.drill_repeat, hasLookups, voice]);
   const planned = useMemo(() => {
     const sc = inMode.filter((x) => exit || f.scenarios.has(x.id));   // inMode is empty in Safety mode
     const reps = (x: { repeats?: number }) => (Number(f.repeats) || x.repeats || 3) * conds;
     // Resilience: a test case's own broken tool is one set of calls, and each failure drilled another.
     const sets = (x: Profile["scenarios"][number]) =>
-      drilling ? (x.test_type === "resilience" ? 1 : 0) + (x.drill ? f.drills.length : 0) : 1;
-    const per = sc.reduce((a, x) => a + reps(x) * sets(x), 0) + safetyCalls;
+      drilling ? (x.test_type === "resilience" ? 1 : 0) + (x.drill ? drillCount : 0) : 1;
+    const per = sc.reduce((a, x) => a + reps(x) * sets(x), 0) + safetyCalls + ladderSteps * Math.min(5, sc.length);
     if (exit && planted) {  // the clean agent runs everything; each planted bug only its own scenario
       return per + plantedOn.reduce((a, b) => {
         const x = inMode.find((s) => s.id === b.scenario);
@@ -195,7 +207,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
       }, 0);
     }
     return exit ? per * (1 + exitBugs.length) : per;
-  }, [inMode, exit, f.scenarios, f.repeats, f.drills, drilling, exitBugs.length, safetyCalls, planted, plantedOn, conds]);
+  }, [inMode, exit, f.scenarios, f.repeats, drillCount, drilling, exitBugs.length, safetyCalls, planted, plantedOn, conds, ladderSteps]);
 
   const [starting, setStarting] = useState(false);
   const start = async () => {
@@ -318,7 +330,9 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                   </Choice>
                 ))}
               </div>
-              {drilling && <DrillPicker all={system?.drill_failures || []} on={f.drills} set={(drills) => set({ drills })} />}
+              {drilling && <DrillPicker all={system?.drill_failures || []} on={f.drills} set={(drills) => set({ drills })}
+                target={f.drill_on} setTarget={(drill_on) => set({ drill_on })} repeat={f.drill_repeat} setRepeat={(drill_repeat) => set({ drill_repeat })}
+                hasLookups={hasLookups} voice={voice} count={drillCount} />}
             </Card>
           )}
 
@@ -492,6 +506,12 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                   </span>
                 </div>
               )}
+              {f.command === "run" && (!mode || mode === "full" || mode === "regression") && (
+                <Field label="Agent version (optional)" hint="A label such as v1.4 or “new prompt”. It is saved with the run, shown on the Regression trend, and the comparison says when it changed.">
+                  <input id="agent-version" className={inputCls} value={f.agent_version} maxLength={80} placeholder="e.g. v1.4"
+                    onChange={(e) => set({ agent_version: e.target.value })} />
+                </Field>
+              )}
               <div className="grid gap-1.5 font-semibold text-[13px]">
                 Personal data
                 <Switch id="pii" checked={f.show_pii} onChange={(v) => set({ show_pii: v })} label="Keep names and dates readable" />
@@ -518,7 +538,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
               {voice && !sweeping && <Row label="Caller conditions"><b>{system?.conditions?.find((c) => c.id === f.conditions)?.title || "As written"}</b></Row>}
               {f.language && <Row label="Caller's language"><b>{languages.find((l) => l.id === f.language)?.name || f.language}</b></Row>}
               {sweeping && <Row label="Conditions compared"><b>{f.sweep.length}</b></Row>}
-              {drilling && <Row label="Failures tried"><b>{f.drills.length}</b></Row>}
+              {drilling && <Row label="Drills per test case"><b>{drillCount}</b></Row>}
               {profile.safety?.enabled && <Row label={safetyMode ? "Attack calls" : "Safety tests"}><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
               {!exit && startAgent && <Row label="Agent"><b>{f.planted_bug ? <Chip tone="bad">{f.planted_bug}</Chip> : "started by Vocto"}</b></Row>}
               {!exit && startAgent && f.planted_bug && (
@@ -588,7 +608,9 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     start_agent: true, planted_bug: "", conditions: (mode && DEFAULT_CONDITIONS[mode]) || "as_written",
     sweep: mode === "speech" ? (sweepAll || []).filter((c) => c.default).map((c) => c.id) : [],
     drills: mode === "resilience" ? (drillAll || []).filter((c) => c.default).map((c) => c.id) : [],
+    drill_on: ["action"], drill_repeat: ["once"],
     language: "",
+    agent_version: "",
   };
   if ((mode === "speech" || mode === "resilience") && !prefill) f.repeats = "1";
   if (prefill) {
@@ -602,7 +624,11 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
     f.safety = !!prefill.safety;
     f.conditions = prefill.conditions || "as_written";
     if (mode === "speech" && prefill.sweep?.length) f.sweep = [...prefill.sweep];
-    if (mode === "resilience") f.drills = [...(prefill.drills || [])];
+    if (mode === "resilience") {
+      f.drills = [...(prefill.drills || [])];
+      f.drill_on = [...(prefill.drill_targets || ["action"])];
+      f.drill_repeat = [...(prefill.drill_repeats || ["once"])];
+    }
     f.language = prefill.caller_language || "";
     const d = defaultsOf(profile, f.offline);
     f.bugs = new Set(splitBugs(d.bugs));
@@ -615,22 +641,72 @@ function initialForm(projects: Project[], prefill: RunInfo | null, query: URLSea
   return f;
 }
 
-// Resilience: which tool failures to drill. Each picked test case runs again once per failure, with its
-// booking or order tool failing on its first call (a retry works), and the report compares them.
-function DrillPicker({ all, on, set }: { all: DrillFailure[]; on: string[]; set: (v: string[]) => void }) {
+// Resilience: which tool failures to drill, what breaks and how often. Each picked test case runs again once
+// per failure and choice that applies (drills.py applies), and the report compares them.
+export function drillCombos(all: DrillFailure[], on: string[], target: string[], repeat: string[], hasLookups: boolean, voice: boolean): number {
+  let n = 0;
+  for (const id of on) {
+    const c = all.find((x) => x.id === id);
+    if (!c || (c.text_only && voice)) continue;
+    for (const t of target) {
+      if (t === "lookup" && (!c.lookup || !hasLookups)) continue;
+      for (const r of repeat) if (r === "once" || c.every) n++;
+    }
+  }
+  return n;
+}
+
+function DrillPicker({ all, on, set, target, setTarget, repeat, setRepeat, hasLookups, voice, count }: {
+  all: DrillFailure[]; on: string[]; set: (v: string[]) => void; target: string[]; setTarget: (v: string[]) => void;
+  repeat: string[]; setRepeat: (v: string[]) => void; hasLookups: boolean; voice: boolean; count: number;
+}) {
   const toggle = (id: string) => set(on.includes(id) ? on.filter((x) => x !== id) : [...on, id]);
+  const flip = (list: string[], v: string, put: (x: string[]) => void) =>
+    put(list.includes(v) ? (list.length > 1 ? list.filter((x) => x !== v) : list) : [...list, v]);
+  const crashes = all.filter((c) => !c.refusal && !c.text_only && c.id !== "slow" && c.id !== "saved_lost");
+  const groups: [string, string, DrillFailure[]][] = [
+    ["Crashes", "The tool breaks. A retry may work when only the first call fails.", crashes],
+    ["Slow or lost answers", "The tool works, but the answer is late or never comes back.", all.filter((c) => c.id === "slow" || c.id === "saved_lost" || c.text_only)],
+    ["Business refusals", "The tool says no. The agent should offer another option, never claim it worked. Each tool's answer can be written to sound like your own API on Test cases.", all.filter((c) => c.refusal)],
+  ];
   return (
-    <div className="mt-4" id="drills">
-      <div className="font-semibold text-[13px] mb-1">Failures to try</div>
-      <div className="text-muted text-[13px] mb-2">Each test case that ends in a booking or order runs again once per failure, with that tool failing the first time it is used (a retry works, as with most real outages). It passes when the agent gets it done on a retry or tells the caller honestly that it couldn't, never claiming something that didn't happen or making it twice.</div>
-      <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
-        {all.map((c) => (
-          <Choice key={c.id} on={on.includes(c.id)} data-drill={c.id} onClick={() => toggle(c.id)}>
-            <b className="block font-semibold">{c.title}</b>
-            <div className="text-ink-2 text-[13px]">{c.about}{c.expected === "success" ? " The task must still get done." : ""}</div>
-          </Choice>
-        ))}
+    <div className="mt-4 grid gap-4" id="drills">
+      <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+        <div>
+          <div className="font-semibold text-[13px] mb-1.5">What breaks</div>
+          <div className="flex flex-wrap gap-2" id="drill-on">
+            <Choice on={target.includes("action")} data-drill-on="action" onClick={() => flip(target, "action", setTarget)}>The booking or order tool</Choice>
+            <Choice on={target.includes("lookup")} data-drill-on="lookup" onClick={() => hasLookups && flip(target, "lookup", setTarget)}>
+              The lookups before it{!hasLookups ? " (this agent has none)" : ""}
+            </Choice>
+          </div>
+          <div className="text-muted text-[13px] mt-1.5">Lookups are the tools it reads first (free times, the menu, the account). When they fail, nothing may be booked on a guess.</div>
+        </div>
+        <div>
+          <div className="font-semibold text-[13px] mb-1.5">How often</div>
+          <div className="flex flex-wrap gap-2" id="drill-repeat">
+            <Choice on={repeat.includes("once")} data-drill-repeat="once" onClick={() => flip(repeat, "once", setRepeat)}>First call only</Choice>
+            <Choice on={repeat.includes("every")} data-drill-repeat="every" onClick={() => flip(repeat, "every", setRepeat)}>Every call</Choice>
+          </div>
+          <div className="text-muted text-[13px] mt-1.5">Every call is an outage that lasts the whole call: the agent must say so, stop retrying and offer a way forward.</div>
+        </div>
       </div>
+      {groups.map(([title, about, items]) => items.length > 0 && (
+        <div key={title}>
+          <div className="font-semibold text-[13px] mb-1">{title}</div>
+          <div className="text-muted text-[13px] mb-2">{about}</div>
+          <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
+            {items.map((c) => (
+              <Choice key={c.id} on={on.includes(c.id)} data-drill={c.id} onClick={() => toggle(c.id)}>
+                <b className="block font-semibold">{c.title}</b>
+                <div className="text-ink-2 text-[13px]">{c.about}{c.expected === "success" ? " The task must still get done." : ""}
+                  {c.text_only && voice ? " Runs in text runs only, so it is skipped here." : ""}</div>
+              </Choice>
+            ))}
+          </div>
+        </div>
+      ))}
+      <p className="text-[13px] text-ink-2" id="drill-count">{count ? `${count} drill${count === 1 ? "" : "s"} per test case.` : "Nothing to drill with these choices."}</p>
     </div>
   );
 }
@@ -643,6 +719,10 @@ function SweepPicker({ all, on, set }: { all: SweepCondition[]; on: string[]; se
   const lines = all.filter((c) => c.group === "line");
   const accents = all.filter((c) => c.group === "accent");
   const pickedAccents = on.filter((id) => id.startsWith("accent:")).length;
+  const ladder = all.filter((c) => c.group === "ladder");
+  const ladderOn = ladder.length > 0 && ladder.every((c) => on.includes(c.id));
+  const setLadder = (v: boolean) => set(v ? [...on.filter((id) => !ladder.some((c) => c.id === id)), ...ladder.map((c) => c.id)]
+    : on.filter((id) => !ladder.some((c) => c.id === id)));
   return (
     <div className="mt-4" id="sweep">
       <div className="font-semibold text-[13px] mb-1">Conditions to compare</div>
@@ -667,6 +747,12 @@ function SweepPicker({ all, on, set }: { all: SweepCondition[]; on: string[]; se
             </Choice>
           ))}
         </div>
+      )}
+      {ladder.length > 0 && (
+        <Choice on={ladderOn} data-sweep="ladder" onClick={() => setLadder(!ladderOn)} className="mt-3">
+          <b className="block font-semibold">Find the breaking point</b>
+          <div className="text-ink-2 text-[13px]">Up to 5 test cases (key ones first) run once at each step of cafe noise ({ladder.filter((c) => c.id.startsWith("snr:")).map((c) => c.id.slice(4)).join(", ")} dB) and packet loss ({ladder.filter((c) => c.id.startsWith("loss:")).map((c) => c.id.slice(5)).join(", ")}%). The report says how far it works (“works down to 5 dB”). These calls never decide the release.</div>
+        </Choice>
       )}
       {on.length === 0 && <Notice tone="warn" className="mt-3">Pick at least one condition.</Notice>}
     </div>

@@ -242,9 +242,14 @@ class JobManager:
                 raise JobError("a sweep of caller conditions applies to voice runs only")
             if not isinstance(sweep, list) or not all(isinstance(c, str) and known(c) for c in sweep):
                 raise JobError("unknown caller condition in the sweep")
-            if len(sweep) > 12:
-                raise JobError("pick at most 12 caller conditions")
+            if len(sweep) > 24:
+                raise JobError("pick at most 24 caller conditions")
             args += ["--sweep", ",".join(dict.fromkeys(sweep))]
+        version = str(req.get("agent_version") or "").strip()
+        if version:
+            if kind != "run" or len(version) > 80 or not re.fullmatch(r"[\w .:/@#+-]+", version):
+                raise JobError("the agent version label may use letters, digits, spaces and . : / @ # + - (up to 80)")
+            args += ["--agent-version", version]
         language = req.get("language")
         if language:
             from ..languages import LANGUAGES
@@ -261,6 +266,14 @@ class JobManager:
             if not isinstance(failures, list) or not all(isinstance(c, str) and c in FAILURES for c in failures):
                 raise JobError("unknown failure in the drills")
             args += ["--drills", ",".join(dict.fromkeys(failures))]
+            for key, flag, allowed in (("drill_on", "--drill-on", ("action", "lookup")),
+                                       ("drill_repeat", "--drill-repeat", ("once", "every"))):
+                picked = req.get(key) or []
+                if not isinstance(picked, list) or not picked or not all(p in allowed for p in picked):
+                    if key in req:
+                        raise JobError(f"{key.replace('_', ' ')} must be {' and/or '.join(allowed)}")
+                    continue
+                args += [flag, ",".join(dict.fromkeys(picked))]
         ab_with = req.get("ab_with")
         if ab_with:
             # A/B test: version B is another channel of this agent and/or other agent options.
@@ -309,6 +322,8 @@ class JobManager:
             if not profile.get("agent_process"):
                 raise JobError("this profile doesn't say how to start the agent (agent_process)")
             args.append("--start-agent")
+        if req.get("confirm_phone"):        # the page showed the phone-line cost and limit warning, and it was confirmed
+            args.append("--yes")
         if profile["mode"] == "voice":
             speech = req.get("speech") or "local"
             if speech not in ENGINES:

@@ -13,6 +13,8 @@ const BEHAVIOURS: [key: string, label: string, hint: string, fields: Knob[]][] =
     [["interrupt_after_ms", "After the agent talked (ms)", 2500], ["interrupt_chance", "Chance per long answer (0 to 1)", 0.5, 0.1], ["interrupt_max", "Most per call", 2]]],
   ["backchannels", "Says \"mm-hm\" while the agent talks", "A short \"mm-hm\" or \"okay\"; the agent should keep talking, not stop.",
     [["backchannel_after_ms", "After the agent talked (ms)", 1800], ["backchannel_chance", "Chance per answer (0 to 1)", 0.6, 0.1], ["backchannel_max", "Most per call", 3]]],
+  ["noises", "Coughs, or a door bangs, while the agent talks", "A short sound that is not speech; the agent should keep talking, not stop as if cut in.",
+    [["noise_after_ms", "After the agent talked (ms)", 2200], ["noise_chance", "Chance per answer (0 to 1)", 0.5, 0.1], ["noise_max", "Most per call", 2]]],
   ["pauses_mid_sentence", "Pauses in the middle of sentences", "On longer lines; the agent should wait for the rest, not jump in.",
     [["pause_ms", "Pause (ms)", 1200, 100], ["pause_chance", "Chance per line (0 to 1)", 0.5, 0.1]]],
   ["fillers", "Says um and uh", "Starts some answers with um, uh or hmm.", [["filler_chance", "Chance per line (0 to 1)", 0.4, 0.1]]],

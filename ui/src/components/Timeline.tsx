@@ -73,6 +73,17 @@ function build(events: TraceEvent[]): { items: Item[]; owner: Map<number, number
         else add({ kind: "sys", seq: e.seq, tone: "", icon: "ear", text: <><b>Second listen</b> ({d.model || ""}): {d.text || ""}</> });
         break;
       }
+      case "caller_heard":
+        add({ kind: "sys", seq: e.seq, tone: "", icon: "ear", text: <><b>Vocto's careful listen of the caller's line</b> (fair test): “{d.text || ""}”</> });
+        break;
+      case "caller_sound":
+        if (d.kind === "backchannel" || d.kind === "noise")
+          add({ kind: "sys", seq: e.seq, tone: d.agent_kept_talking ? "" : "bad", icon: d.kind === "noise" ? "speaker" : "mic",
+            text: <><b>Caller {d.kind === "noise" ? (d.sound === "door" ? "door bang" : d.sound || "noise") : `said “${d.text || "mm-hm"}”`}</b> over the agent: {d.agent_kept_talking ? "it kept talking" : "it stopped"}</> });
+        else if (d.kind === "silence")
+          add({ kind: "sys", seq: e.seq, tone: d.agent_spoke_after_ms == null ? "bad" : "", icon: "clock",
+            text: <><b>Caller went quiet</b>: {d.agent_spoke_after_ms == null ? "the agent never checked in" : `the agent spoke after ${fmtMs(d.agent_spoke_after_ms)}`}</> });
+        break;
       case "agent_heard":
         add({ kind: "sys", seq: e.seq, tone: "", icon: "ear", text: <><b>Agent understood</b>{d.source === "log" ? " (from its logs)" : ""}: “{d.text || ""}”</> });
         break;
@@ -203,6 +214,7 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                     Caller <span className="text-muted font-medium inline-flex gap-1">turn {it.e.turn ?? ""} · {d.audio ? play(d.audio.start_ms) : fmtSecs(it.e.t_ms)}</span>
                   </div>
                   <div className="whitespace-pre-wrap break-words">{d.text || ""}</div>
+                  {d.background && <div className="text-[13px] text-ink-2 mt-1.5 italic">A voice behind the caller: "{d.background}"</div>}
                   {(d.barge_in || d.recording) && (
                     <div className="flex gap-1.5 flex-wrap mt-[7px]">
                       {d.barge_in && <Chip tone="warn" icon="bolt">cut in while the agent was talking</Chip>}
@@ -232,7 +244,9 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                 {it.fault && (
                   <div className="flex gap-1.5 flex-wrap mt-2">
                     <Chip tone="bad" icon="bolt">
-                      Vocto injected {it.fault.type}{it.fault.delay_ms ? ` (${fmtMs(it.fault.delay_ms)})` : ""}{it.fault.forward ? " · still reaches the backend" : " · never reaches the backend"}
+                      {it.fault.type === "poisoned_data" ? `Vocto hid an instruction in this answer (${it.fault.field || "notes"})`
+                        : it.fault.type === "refused" ? `Vocto made the tool say no (${it.fault.status || 409})${it.fault.same_args ? " · the same request is refused again" : ""} · nothing saved`
+                        : <>Vocto injected {it.fault.type}{it.fault.delay_ms ? ` (${fmtMs(it.fault.delay_ms)})` : ""}{it.fault.forward ? " · still reaches the backend" : " · never reaches the backend"}</>}
                     </Chip>
                   </div>
                 )}

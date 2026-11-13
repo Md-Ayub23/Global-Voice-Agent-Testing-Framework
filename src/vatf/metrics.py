@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 from typing import Any, Iterable, Mapping, Sequence
 
 from . import stats
@@ -79,6 +80,12 @@ METRICS: tuple[Metric, ...] = (
            "How long the agent kept talking after the caller cut in (scripted cut-ins and callers who cut in)."),
     Metric("backchannel_kept", "Kept talking through \"mm-hm\"", "%", "higher", 90, 70, "share", True,
            "Share of the caller's \"mm-hm\"s the agent talked through, as it should, instead of stopping."),
+    Metric("noise_kept", "Kept talking through a cough or bang", "%", "higher", 90, 70, "share", True,
+           "Share of the caller's coughs, door bangs and clatters the agent talked through, as it should: they "
+           "are not speech, so stopping for one is a false cut-in."),
+    Metric("paused_cut_off", "Cut the caller off in a pause", "%", "lower", 10, 25, "share", True,
+           "Share of the caller's mid-sentence pauses the agent jumped into before the caller had finished "
+           "(counted apart from \"talked over the caller\")."),
     Metric("checkin_ms", "Checked in after caller silence", "ms", "lower", 7000, 12000, "p90", True,
            "When the caller went quiet, how long until the agent checked in (\"are you still there?\")."),
     Metric("talk_share", "Agent share of talk time", "%", "lower", 65, 80, "mean", True,
@@ -92,6 +99,9 @@ METRICS: tuple[Metric, ...] = (
            "Word error rate between what the caller said and what the agent reports it understood "
            "(its own speech recognition). Only for agents that report it: the \"heard\" message, or a "
            "log pattern (Logs › What the agent heard)."),
+    Metric("repeated_question", "Said the same thing again", "%", "lower", 5, 15, "share", False,
+           "Share of calls where the agent said nearly the same thing it had already said (often asking the "
+           "same question again), when the caller hadn't asked it to repeat or repeated themselves."),
     Metric("turns_to_goal", "Turns to reach the goal", "turns", "lower", None, None, "mean", False,
            "Caller turns until the test's action succeeded (the outcome's tool answered ok)."),
     Metric("escalated", "Handed to a person", "%", "lower", None, None, "share", False,
@@ -171,6 +181,50 @@ def wer(ref: str, hyp: str, cut: bool = False) -> tuple[int, int]:
     return best if cut else (prev[-1], len(r))
 
 
+SAY_AGAIN = re.compile(r"\b(say (that|it) again|repeat|pardon|come again|didn'?t (catch|hear|get) (that|it|you)|"
+                       r"what did you say|sorry\?|what\?|one more time)", re.I)
+REPEAT_SIMILAR = 0.8          # two turns this alike (word by word) say the same thing
+REPEAT_MIN_WORDS = 5          # shorter turns ("Okay.", "Anything else?") repeat naturally
+REPEAT_NEW_WORDS = 4          # a turn that adds this many new words says something new ("Sorry, that time
+                              # isn't free." before the same list of times)
+
+
+def _alike(a: list[str], b: list[str]) -> bool:
+    return SequenceMatcher(None, a, b, autojunk=False).ratio() >= REPEAT_SIMILAR
+
+
+def repeated_turns(ev: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Agent turns that say nearly the same thing as an earlier, finished turn of the call: an agent stuck
+    asking the same question again. Not counted: short turns, a repeat the caller asked for ("say that
+    again"), a turn that adds new words to the old one, a repeat after the caller went quiet, and a repeat after the caller said the same thing again
+    themselves (a caller who repeats questions gets the same answer, rightly)."""
+    said: list[tuple[int, list[str]]] = []          # (seq, words) of the agent's finished turns
+    asked: list[list[str]] = []                     # the caller's earlier lines
+    out, last_caller, quiet = [], None, False
+    for e in ev:
+        d = e["data"]
+        if e["type"] == "caller_turn":
+            words = normalise(d.get("text", ""))
+            last_caller = (d.get("text", ""), len(words) >= 3 and any(_alike(words, w) for w in asked))
+            asked.append(words)
+            quiet = False
+        elif e["type"] == "caller_sound" and d.get("kind") == "silence":
+            quiet = True
+        elif e["type"] == "agent_turn" and not d.get("silent"):
+            text = d.get("platform_transcript") or d.get("heard_text") or ""
+            words = normalise(text)
+            excused = quiet or (last_caller is not None and (SAY_AGAIN.search(last_caller[0]) or last_caller[1]))
+            if len(words) >= REPEAT_MIN_WORDS and not excused:
+                first = next((seq for seq, w in said if _alike(words, w)
+                              and len(set(words) - set(w)) < REPEAT_NEW_WORDS), None)
+                if first is not None:
+                    out.append({"seq": e.get("seq"), "first_seq": first, "text": text[:160]})
+            if not d.get("interrupted"):            # a turn cut off part way may rightly be said again
+                said.append((e.get("seq"), words))
+            last_caller, quiet = None, False
+    return out
+
+
 def _value(v: float | None, n: int | None = None, **extra: Any) -> dict[str, Any]:
     out: dict[str, Any] = {"value": None if v is None else (round(v, 1) if isinstance(v, float) else v)}
     if n is not None:
@@ -198,6 +252,9 @@ def call_quality(events: Iterable[Any], mode: str, scenario: Mapping[str, Any] |
         at = reached[0]["turn"] if reached and reached[0].get("turn") else None
         turns = len({c["turn"] for c in caller if at is not None and c.get("turn") and c["turn"] <= at})
         out["turns_to_goal"] = _value(turns if at is not None else None, reached=bool(reached))
+    reps = repeated_turns(ev)
+    if sum(1 for e in agent if not e["data"].get("silent")) >= 2:
+        out["repeated_question"] = _value(bool(reps), len(reps), each=reps[:5] or None)
     if mode != "voice":
         return out
 
@@ -235,19 +292,39 @@ def call_quality(events: Iterable[Any], mode: str, scenario: Mapping[str, Any] |
             if last_caller["data"].get("barge_in"):
                 cut_answers.add(e["seq"])
             last_caller = None
-    over = [r for r in rows if r["ms"] is not None and r["ms"] < 0 and r["seq"] not in cut_answers]
+    # Cut off in a pause: the caller stopped to think mid-sentence and the agent started after the first half
+    # ended but before the caller had finished. Counted on its own, not as talking over.
+    paused, jumped = 0, set()
+    for i, e in enumerate(ev):
+        pz = e["data"].get("pause") if e["type"] == "caller_turn" else None
+        if not pz:
+            continue
+        paused += 1
+        nxt = next((a for a in ev[i + 1:] if a["type"] == "agent_turn"), None)
+        s = _span(nxt["data"]) if nxt else None
+        c_end = (_span(e["data"]) or (0, 0))[1]
+        if s and pz["start_ms"] <= s[0] < c_end:
+            jumped.add(nxt["seq"])
+    if paused:
+        out["paused_cut_off"] = _value(round(100 * len(jumped) / paused, 1), paused, hits=len(jumped))
+    over = [r for r in rows if r["ms"] is not None and r["ms"] < 0 and r["seq"] not in cut_answers
+            and r["seq"] not in jumped]
     out["talked_over"] = _value(len(over) > 0, len(over))
 
-    stops = [e["data"]["stopped_after_ms"] for e in agent if e["data"].get("interrupted")
-             and e["data"].get("stopped_after_ms") is not None]
+    cut = [e for e in agent if e["data"].get("interrupted") and e["data"].get("stopped_after_ms") is not None]
+    stops = [e["data"]["stopped_after_ms"] for e in cut]
     if stops:
-        out["barge_in_stop_ms"] = _value(max(stops), len(stops), each=stops)
+        out["barge_in_stop_ms"] = _value(max(stops), len(stops), each=stops, seqs=[e.get("seq") for e in cut])
 
     sounds = [e for e in ev if e["type"] == "caller_sound"]
     bcs = [s for s in sounds if s["data"].get("kind") == "backchannel"]
     if bcs:
         kept = sum(bool(s["data"].get("agent_kept_talking")) for s in bcs)
         out["backchannel_kept"] = _value(round(100 * kept / len(bcs), 1), len(bcs), kept=kept)
+    bangs = [s for s in sounds if s["data"].get("kind") == "noise"]
+    if bangs:
+        kept = sum(bool(s["data"].get("agent_kept_talking")) for s in bangs)
+        out["noise_kept"] = _value(round(100 * kept / len(bangs), 1), len(bangs), kept=kept)
     quiet = [s for s in sounds if s["data"].get("kind") == "silence"]
     if quiet:
         d = quiet[0]["data"]
@@ -262,7 +339,7 @@ def call_quality(events: Iterable[Any], mode: str, scenario: Mapping[str, Any] |
     if agent_ms >= 3000 and words:
         out["agent_wpm"] = _value(round(words / (agent_ms / 60000)))
     errs = refs = 0
-    stopped_on = {s["data"].get("agent_turn") for s in bcs if not s["data"].get("agent_kept_talking")}
+    stopped_on = {s["data"].get("agent_turn") for s in bcs + bangs if not s["data"].get("agent_kept_talking")}
     for e in agent:
         own = e["data"].get("platform_transcript")
         if own:
@@ -306,7 +383,7 @@ def _quality(v: Mapping[str, Any]) -> Mapping[str, Any]:
     return (v.get("metrics") or {}).get("quality") or {}
 
 
-def run_quality(verdicts: Sequence[Mapping[str, Any]], profile: Mapping[str, Any]) -> list[dict[str, Any]]:
+def run_quality(verdicts: Sequence[Mapping[str, Any]], profile: Mapping[str, Any], one_rule: bool = True) -> list[dict[str, Any]]:
     """One row per metric seen in the run: its run value, band, and whether it blocks."""
     cfg = settings(profile)
     calls = [v for v in verdicts if v.get("status") != "ERROR"]
@@ -325,11 +402,16 @@ def run_quality(verdicts: Sequence[Mapping[str, Any]], profile: Mapping[str, Any
             each = [x for _, q in vals for x in q.get("each", [q["value"]]) if x is not None]
             value = percentile(each, 90)
             detail["cut_ins"] = len(each)
-        elif m.id == "backchannel_kept":
+        elif m.id in ("backchannel_kept", "noise_kept"):
             n = sum(q.get("n", 0) for _, q in vals)
             kept = sum(q.get("kept", 0) for _, q in vals)
             value = round(100 * kept / n, 1) if n else None
-            detail["backchannels"] = n
+            detail["backchannels" if m.id == "backchannel_kept" else "sounds"] = n
+        elif m.id == "paused_cut_off":
+            n = sum(q.get("n", 0) for _, q in vals)
+            hits = sum(q.get("hits", 0) for _, q in vals)
+            value = round(100 * hits / n, 1) if n else None
+            detail.update(pauses=n, hits=hits)
         elif m.id in ("heard_wer", "caller_wer"):
             refs = sum(q.get("n", 0) for _, q in vals)
             value = round(100 * sum(q.get("errors", 0) for _, q in vals) / refs, 1) if refs else None
@@ -356,11 +438,20 @@ def run_quality(verdicts: Sequence[Mapping[str, Any]], profile: Mapping[str, Any
         # Answer-time percentiles describe a spread of many answers: of too few answers, a p90 or p99 is just
         # one of the slowest few, so it is shown, never banded (so never blocks). The other p90 metrics read
         # each call's worst moment (a 9 s silence), which is a real problem even in one call: they keep bands.
+        # In a test run there is one answer-time rule, the p50 / p95 limits in Pass rules (decision.latency):
+        # p90 and p99 are shown next to it, never banded, so the page can't say "too slow" twice, or
+        # "fine" in one place and "too slow" in another. (Real-call monitoring still bands them.)
         samples = detail.get("turns", 0)
-        if m.id in ("response_p90_ms", "response_p99_ms") and value is not None \
-                and not stats.enough(90 if m.run == "p90" else 99, samples):
-            detail = {**detail, "too_few": True, "needs": stats.need_for(90 if m.run == "p90" else 99),
-                      "note": f"too few to judge ({samples} of {stats.need_for(90 if m.run == 'p90' else 99)} needed)"}
+        if m.id in ("response_p90_ms", "response_p99_ms") and value is not None:
+            pct = 90 if m.run == "p90" else 99
+            if not stats.enough(pct, samples):
+                detail = {**detail, "too_few": True, "needs": stats.need_for(pct),
+                          "note": f"too few to judge ({samples} of {stats.need_for(pct)} needed)"}
+            elif one_rule:
+                detail = {**detail, "note": "shown only: the answer-time limit is the p50 / p95 rule in Pass rules"}
+            else:                            # real calls: no p50 / p95 gate, so p90 / p99 keep their bands
+                rows.append(_row(m, cfg, value, len(vals), detail))
+                continue
             rows.append(_row(m, cfg, value, len(vals), detail, unbanded=True))
             continue
         rows.append(_row(m, cfg, value, len(vals), detail))
@@ -411,6 +502,15 @@ def by_condition(verdicts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         refs = sum(u.get("n") or 0 for u in und)
         errs = sum(u.get("errors") or 0 for u in und)
         labels = sorted({v["conditions"].get("label", "clean line") for v in vs})
+        types: dict[str, dict[str, int]] = {}
+        for v in vs:
+            hard = set((v.get("speech") or {}).get("too_hard") or [])
+            for r in (v.get("speech") or {}).get("details") or []:
+                if r["fact"] not in hard:
+                    t = types.setdefault(r["type"], {"right": 0, "checked": 0})
+                    t["checked"] += 1
+                    t["right"] += bool(r["right"])
+        rbs = [(v.get("speech") or {}).get("read_back") for v in vs if (v.get("speech") or {}).get("read_back")]
         rows.append({"key": key, "label": (vs[0]["conditions"].get("title") or key) if sweep else key,
                      "preset": vs[0]["conditions"].get("preset") if sweep else None,
                      "lines": labels if sweep else [],
@@ -423,8 +523,58 @@ def by_condition(verdicts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                      "failed_tests": sorted({v["scenario_id"] for v in vs if v["status"] == "FAIL"}),
                      "p50_ms": percentile(timed, 50), "p90_ms": percentile(timed, 90),
                      "talked_over_pct": round(100 * sum(over) / len(over), 1) if over else None,
+                     "by_type": types,
+                     "read_back_before_save": sum(bool(r["ok"]) for r in rbs), "saves_checked": len(rbs),
+                     "too_hard_calls": sum(bool((v.get("speech") or {}).get("too_hard")) for v in vs),
+                     "ladder": vs[0]["conditions"].get("ladder"),
                      "behaviours": sorted({b for v in vs for b in v["conditions"].get("behaviours", [])})})
+    _vs_clean(rows)
     return rows
+
+
+def _vs_clean(rows: list[dict[str, Any]]) -> None:
+    """Honest drops: a condition is "worse than the clean line" only when the gap in pass rate is bigger than
+    chance (Fisher's exact test, p < 0.05). Otherwise it reads "no clear difference with this many calls"."""
+    clean = next((r for r in rows if r["key"] in ("as_written", "clean line")), None)
+    for r in rows:
+        if clean is None or r is clean or r["pass_rate"] is None or clean["pass_rate"] is None:
+            r["vs_clean"] = None
+            continue
+        p = stats.fisher_exact(clean["passed"], clean["failed"], r["passed"], r["failed"])
+        lower = r["pass_rate"] < clean["pass_rate"]
+        r["vs_clean"] = {"p": round(p, 4), "worse": lower and p < 0.05, "lower": lower,
+                         "text": ("worse than the clean line" if lower and p < 0.05 else
+                                  "no clear difference with this many calls" if lower else "as good as the clean line")}
+
+
+def ladder(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """The breaking-point ladder: per step (noise in dB, packet loss in %), how the probe calls did, and the
+    hardest step it still handled with every easier step handled too ("works down to 5 dB")."""
+    out: dict[str, Any] = {}
+    for kind, hardest_first in (("noise", False), ("loss", True)):
+        steps = sorted((r for r in rows if (r.get("ladder") or {}).get("kind") == kind),
+                       key=lambda r: r["ladder"]["level"], reverse=not hardest_first)
+        if not steps:
+            continue
+        # easiest first: noise from 20 dB down, loss from 1% up
+        levels, works = [], None
+        broken = False
+        for r in steps:
+            right, checked = sum(t["right"] for t in r["by_type"].values()), sum(t["checked"] for t in r["by_type"].values())
+            ok = r["pass_rate"] is not None and r["pass_rate"] >= 1 and right == checked
+            if ok and not broken:
+                works = r["ladder"]["level"]
+            broken = broken or not ok
+            levels.append({"level": r["ladder"]["level"], "calls": r["calls"], "passed": r["passed"], "failed": r["failed"],
+                           "pass_rate": r["pass_rate"], "details_right": right, "details_checked": checked, "ok": ok,
+                           "failed_calls": r["failed_calls"][:3]})
+        out[kind] = {"unit": "dB" if kind == "noise" else "%", "levels": levels, "works_to": works,
+                     "text": (("no step passed" if works is None else
+                               f"works down to {works:g} dB" + (" (the hardest step tried)" if not broken else ""))
+                              if kind == "noise" else
+                              ("no step passed" if works is None else
+                               f"works up to {works:g}% packets lost" + (" (the hardest step tried)" if not broken else "")))}
+    return out or None
 
 
 def metric_list(profile: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:

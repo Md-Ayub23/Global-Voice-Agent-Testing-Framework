@@ -43,7 +43,8 @@ def test_a_drill_breaks_the_order_tool_once_and_keeps_the_failure_safe_checks():
     assert d["setup"]["faults"] == [{"tool": "lookup", "type": "slow", "delay_ms": 500},
                                     {"tool": "place_order", "on_call": 1, "type": "rate_limited", "retry_after_s": 2}]
     assert d["outcome"]["expected"] == "recover_or_honest" and d["outcome"]["record"]["expect_count"] == 1
-    assert [c["id"] for c in d["checks"]] == ["no-leak"]          # happy-path checks are left out
+    # Happy-path checks are left out; a drill adds "stops retrying" and the way-forward judge question.
+    assert [c["id"] for c in d["checks"]] == ["no-leak", "stops-retrying", "way-forward"]
     assert SIM["outcome"]["expected"] == "success" and len(SIM["checks"]) == 3   # the original is untouched
     lost = make(SIM, "saved_lost")
     assert lost["outcome"]["expected"] == "success" and lost["setup"]["faults"][-1]["forward"] is True
@@ -137,7 +138,7 @@ def test_failure_drills_end_to_end_on_the_clinic_agent(tmp_path):
     assert "Saved, but the answer was lost" in row["detail"]
     top = report["findings"][0]
     assert "saved" in top["fix"] and "request id" in top["fix"]
-    assert any(line.startswith("With its booking or order tool failing on purpose (5 kinds of failure)")
+    assert any(line.startswith("With its tools failing on purpose (5 kinds of failure)")
                for line in report["summary"])
     assert "1 test case" in report["summary"][0]                 # drills count as their test case
 

@@ -79,7 +79,7 @@ def pseudo_verdicts(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def quality(rows: Sequence[Mapping[str, Any]], profile: Mapping[str, Any]) -> list[dict[str, Any]]:
-    return qm.run_quality(pseudo_verdicts(rows), profile)
+    return qm.run_quality(pseudo_verdicts(rows), profile, one_rule=False)
 
 
 def by_version(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

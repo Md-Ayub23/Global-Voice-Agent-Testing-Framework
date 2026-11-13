@@ -47,7 +47,7 @@ def test_conditions_join_persona_test_and_run_preset():
     # The preset's line and noise win over the test's; it turns behaviours on, never off.
     assert (hard.noise, hard.snr_db, hard.phone, hard.packet_loss_pct) == ("street", 8, True, 3)
     assert hard.behaviour.interrupts and hard.behaviour.backchannels and hard.behaviour.pauses_mid_sentence
-    assert hard.summary()["behaviours"] == ["interrupts", "backchannels", "pauses_mid_sentence"]
+    assert hard.summary()["behaviours"] == ["interrupts", "backchannels", "noises", "pauses_mid_sentence"]
     with pytest.raises(ValueError):
         resolve(PERSONA, SCENARIO, preset="tornado")
 
@@ -261,7 +261,7 @@ def test_bands_per_call():
 
 def test_text_calls_get_only_text_metrics():
     q = metrics.call_quality([e for e in TIMELINE if e["type"] != "caller_sound"], "text", GOAL)
-    assert set(q) == {"duration_s", "escalated", "turns_to_goal"}
+    assert set(q) == {"duration_s", "escalated", "turns_to_goal", "repeated_question"}
 
 
 def test_word_error_rate():

@@ -79,7 +79,7 @@ export function QualityTiles({ rows, sub = TILES_SUB }: { rows: QualityRow[]; su
 }
 
 const BEHAVIOUR: Record<string, string> = {
-  interrupts: "cuts in", backchannels: "mm-hm", pauses_mid_sentence: "pauses", fillers: "um / uh", goes_quiet: "goes quiet",
+  interrupts: "cuts in", backchannels: "mm-hm", noises: "cough / bang", pauses_mid_sentence: "pauses", fillers: "um / uh", goes_quiet: "goes quiet",
 };
 
 export function ConditionsTable({ rows }: { rows: ConditionRow[] }) {

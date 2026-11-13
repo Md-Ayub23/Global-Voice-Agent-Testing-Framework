@@ -53,7 +53,7 @@ def snap(**over):
 
 def test_compare_finds_regressions_and_fixes_and_only_new_failures_block_by_default():
     cur = snap(run_id="r-2")
-    cur["tests"]["move"].update(passed=2, failed=1)       # passed 3/3 before: regression
+    cur["tests"]["move"].update(passed=6, failed=2)       # passed 3/3 before, failed 2 of 8 after its reruns: regression
     cur["tests"]["cancel"].update(passed=3, failed=0)     # failed before, clean now: fixed
     cur["tests"]["new"] = {"title": "New", "criticality": "normal", "k": 3, "passed": 3, "failed": 0, "unverified": 0}
     del cur["tests"]["book"]
@@ -69,7 +69,8 @@ def test_compare_finds_regressions_and_fixes_and_only_new_failures_block_by_defa
     assert ("latency", "p50_ms") not in by                       # +10 ms is noise
     assert by[("metric", "ttfw_ms")]["band_after"] == "warn" and by[("judge", "tone")]["direction"] == "worse"
     assert c["blocking"] == 1 and c["changes"][0]["id"] == "move" and c["like_for_like"]
-    assert c["counts"] == {"regression": 1, "worse": 3, "better": 1, "new": 1, "removed": 1, "same": 0}
+    assert c["counts"] == {"regression": 1, "worse": 3, "suspected": 0, "flaky": 0, "better": 1, "new": 1, "removed": 1,
+                           "same": 0, "changed": 0}
 
 
 def test_owner_can_make_latency_block_and_limits_are_theirs():
@@ -119,7 +120,7 @@ def go_decision():
 
 def test_a_blocking_regression_turns_go_into_no_go_with_refs():
     cur = snap(run_id="r-2")
-    cur["tests"]["move"].update(passed=2, failed=1)
+    cur["tests"]["move"].update(passed=1, failed=2)     # two failures: confirmed without reruns
     cur["latency"] = {"p50_ms": 600, "p95_ms": 1500, "turns": 30}
     d = apply_regression(go_decision(), compare(snap(), cur))
     assert d["decision"] == "NO_GO" and d["exit_code"] == 1
@@ -175,7 +176,8 @@ def test_baseline_regression_gate_and_ci_reports_end_to_end(clinic, tmp_path, ca
     assert comparison["changes"][0]["id"] == "clinic.book-checkup.tool-timeout"
     assert read_json(bad / "baseline.json")["run_id"] == good.name and read_json(bad / "run.json")["trigger"] == "ci"
     tree = ET.parse(junit).getroot()
-    assert tree.get("failures") == "3" and tree.find(".//testcase[@name='vs baseline']/failure") is not None
+    # 3 failures before the confirm step; the tool-timeout test failed once and its 5 reruns failed too.
+    assert tree.get("failures") == "8" and tree.find(".//testcase[@name='vs baseline']/failure") is not None
     assert "NO-GO" in md.read_text(encoding="utf-8") and "Vs baseline" in md.read_text(encoding="utf-8")
     assert "VS BASELINE" in capsys.readouterr().out
 
@@ -381,7 +383,8 @@ def test_dashboard_baseline_compare_ci_and_ops(web, monkeypatch):
     assert status == 200 and out["baseline"]["run_id"] == good and out["baseline"]["note"] == "release 1"
     assert call(port, "GET", "/api/project/clinic/baseline")[1]["baseline"]["run_id"] == good
     status, cmp = call(port, "GET", f"/api/compare?a={good}&b={bad}")
-    assert status == 200 and cmp["counts"]["regression"] == 1 and cmp["same_agent"] and cmp["runs"]["b"]["run_id"] == bad
+    # One failure on a run with no reruns (the baseline was set after it): suspected, never confirmed.
+    assert status == 200 and cmp["counts"]["suspected"] == 1 and cmp["same_agent"] and cmp["runs"]["b"]["run_id"] == bad
     status, ci = call(port, "GET", "/api/project/clinic/ci?provider=gitlab&offline=1")
     assert status == 200 and ci["path"] == ".gitlab-ci.yml" and "python -m vatf run examples/clinic" in ci["text"]
     status, ops = call(port, "GET", "/api/project/clinic/ops")

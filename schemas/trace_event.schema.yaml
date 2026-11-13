@@ -32,6 +32,7 @@ properties:
       - platform_event
       - validator_result
       - stt_text
+      - caller_heard
       - harness_event
       - call_ended
   turn: {description: "Conversation turn number this event belongs to, if any.", type: integer, minimum: 1}
@@ -55,16 +56,22 @@ allOf:
             text: {description: "What the simulated caller said (its own words).", type: string}
             audio: {$ref: "#/$defs/audio_span"}
             barge_in: {type: boolean}
+            background: {description: "Words another voice said behind the caller on this line (a safety test).", type: string}
             recording: {description: "Voice: the line was played from this recording of a real caller (scenario turns[].audio).", type: string}
+            pause:
+              description: "Voice: the caller stopped to think in the middle of this line, from start_ms to end_ms of the recording."
+              type: object
+              properties: {start_ms: {type: integer}, end_ms: {type: integer}}
   - if: {properties: {type: {const: caller_sound}}}
     then:
       properties:
         data:
           required: [kind]
           properties:
-            kind: {description: "backchannel (a short mm-hm over the agent) or silence (the caller says nothing).", enum: [backchannel, silence]}
+            kind: {description: "backchannel (a short mm-hm over the agent), noise (a cough, a door bang or a clatter over the agent) or silence (the caller says nothing).", enum: [backchannel, noise, silence]}
             text: {type: string}
-            agent_kept_talking: {description: "backchannel: the agent talked on through it, as it should.", type: boolean}
+            sound: {description: "noise: which sound (cough, door, clatter).", type: string}
+            agent_kept_talking: {description: "backchannel and noise: the agent talked on through it, as it should.", type: boolean}
             agent_turn: {description: "backchannel: seq of the agent turn it was said over.", type: integer}
             quiet_ms: {type: integer}
             agent_spoke_after_ms: {description: "silence: when the agent spoke again (null: it never did).", type: [integer, "null"]}
@@ -93,6 +100,7 @@ allOf:
               description: The platform's own transcript, kept for comparison only. Never shown to the caller.
               type: string
             agent_name: {description: "For multi-agent platforms, which sub-agent spoke.", type: string}
+            rang_back: {description: "Resilience dropped-call drill: the greeting of the call the caller rang back on.", type: boolean}
   - if: {properties: {type: {const: tool_request}}}
     then:
       properties:
@@ -164,6 +172,14 @@ allOf:
           properties:
             on_script: {description: "false means the simulated caller broke its goal or facts; the call is a harness ERROR.", type: boolean}
             problems: {type: array, items: {type: string}}
+  - if: {properties: {type: {const: caller_heard}}}
+    then:
+      properties:
+        data:
+          required: [caller_turn, text]
+          properties:
+            caller_turn: {description: "seq of the caller_turn whose audio (as the agent received it) Vocto's careful listener transcribed: the fair-test listen.", type: integer}
+            text: {type: string}
   - if: {properties: {type: {const: stt_text}}}
     then:
       properties:

@@ -6,6 +6,7 @@ import { useToast } from "../components/feedback";
 import { CoverageCard, VariationsCard } from "../components/functional";
 import { Help } from "../components/form";
 import { Icon } from "../components/Icon";
+import { RefusalsCard } from "../components/resilience";
 import { Button, Card, EmptyState, Notice, Skeleton, Table, rowLink } from "../components/ui";
 import { qs } from "../lib/api";
 import { useApp, useLoad } from "../lib/app";
@@ -134,6 +135,7 @@ export function TypeCases({ project, type, edit }: { project: Project; type: Cas
       {type === "resilience" && drillable.length > 0 && (
         <Help><Icon name="bolt" size={13} className="inline -mt-0.5 mr-1" />Can be drilled: {drillable.map((s) => s.title).join(" · ")}. Pick the failures on Run.</Help>
       )}
+      {type === "resilience" && drillable.length > 0 && <RefusalsCard projectKey={project.key} project={project.path} file={main.file || "profile.yaml"} />}
     </div>
   );
 }

@@ -15,6 +15,9 @@ export const DIRECTION: Record<Direction, { label: string; tone: ChipTone; icon:
   new: { label: "New test", tone: "accent", icon: "plus" },
   removed: { label: "Not run", tone: "default", icon: "minus" },
   same: { label: "Still failing", tone: "default", icon: "minus" },
+  suspected: { label: "Suspected", tone: "warn", icon: "info" },
+  flaky: { label: "Flaky", tone: "warn", icon: "alert" },
+  changed: { label: "Test edited", tone: "default", icon: "info" },
 };
 const KIND: Record<Change["kind"], string> = {
   test: "Test", latency: "Response time", score: "Score", metric: "Call quality", judge: "AI judge", safety: "Safety", load: "Load test", cost: "Running cost",
@@ -42,6 +45,9 @@ export function CompareCounts({ cmp, ab }: { cmp: Comparison; ab?: boolean }) {
   ] : [
     ["New failures", n.regression, n.regression ? "text-bad" : ""], ["Worse", n.worse, n.worse ? "text-warn" : ""],
     ["Better", n.better, n.better ? "text-good" : ""], ["New tests", n.new, ""], ["Not run", n.removed, ""],
+    ...(n.suspected ? [["Suspected", n.suspected, "text-warn"] as [string, number, string]] : []),
+    ...(n.flaky ? [["Flaky", n.flaky, "text-warn"] as [string, number, string]] : []),
+    ...(n.changed ? [["Tests edited", n.changed, ""] as [string, number, string]] : []),
   ];
   return (
     <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))]" id="compare-counts">
@@ -66,7 +72,26 @@ export function LikeForLike({ cmp }: { cmp: Comparison }) {
   );
 }
 
-export function ChangesList({ cmp, callHref, showSame, ab }: { cmp: Comparison; callHref?: (scenarioId: string) => string | undefined; showSame?: boolean; ab?: boolean }) {
+// "Keep this as a regression test": tags a fixed test case `regression` (it then stays in every health check).
+export function KeepTestButton({ runId, scenarioId }: { runId: string; scenarioId: string }) {
+  const toast = useToast();
+  const [state, setState] = useState<"idle" | "busy" | "kept">("idle");
+  if (state === "kept") return <Chip tone="good" icon="tag">Kept as a regression test</Chip>;
+  const go = async () => {
+    setState("busy");
+    try {
+      const r = await api.post<{ kept: boolean; file: string; already: boolean }>(`/api/runs/${runId}/keep-test`, { scenario_id: scenarioId });
+      toast(r.already ? `Already kept (${r.file})` : `Tagged “regression” in ${r.file}: it now runs in every health check`);
+      setState("kept");
+    } catch (e) {
+      toast((e as Error).message, "bad");
+      setState("idle");
+    }
+  };
+  return <Button size="sm" icon="tag" busy={state === "busy"} onClick={() => void go()} id={`keep-${scenarioId}`}>Keep as a regression test</Button>;
+}
+
+export function ChangesList({ cmp, callHref, showSame, ab, keepRunId }: { cmp: Comparison; callHref?: (scenarioId: string) => string | undefined; showSame?: boolean; ab?: boolean; keepRunId?: string }) {
   const rows = cmp.changes.filter((c) => showSame || ab || c.direction !== "same");
   if (!rows.length) {
     return ab
@@ -86,6 +111,9 @@ export function ChangesList({ cmp, callHref, showSame, ab }: { cmp: Comparison; 
               <div className="text-[13px] font-medium text-muted">{KIND[c.kind]}</div>
               <b>{href ? <a href={href}>{c.title}</a> : c.title}</b>
               <div className="text-[13px] text-ink-2">{c.message}</div>
+              {keepRunId && c.kind === "test" && c.direction === "better" && !c.id.startsWith("safety.") && (
+                <div className="mt-1.5"><KeepTestButton runId={keepRunId} scenarioId={c.id} /></div>
+              )}
             </td>
             <td className="tabular-nums whitespace-nowrap">{c.band_before ? <>{value(c.before, c)} <span className="text-muted">({c.band_before})</span></> : value(c.before, c)}</td>
             <td className="tabular-nums whitespace-nowrap">{c.band_after ? <>{value(c.after, c)} <span className="text-muted">({c.band_after})</span></> : value(c.after, c)}</td>

@@ -7,8 +7,14 @@ export const SHAPES: { value: LoadShape; label: string; about: string }[] = [
   { value: "spike", label: "Spike", about: "Normal traffic, then a sudden jump to the target, then back down: checks it copes and recovers." },
   { value: "soak", label: "Soak", about: "Hold the target for a long time, read in windows: finds slow leaks (answers getting slower over time)." },
   { value: "steady", label: "Steady", about: "Hold the target for a while: a plain check at the busiest time you expect." },
+  { value: "find_limit", label: "Find the limit", about: "Step up like a ramp and stop at the first level that breaks a limit: finds where the agent breaks and your headroom over your peak." },
 ];
-export const SHAPE_LABEL: Record<LoadShape, string> = { ramp: "Ramp", spike: "Spike", soak: "Soak", steady: "Steady" };
+export const SHAPE_LABEL: Record<LoadShape, string> = { ramp: "Ramp", spike: "Spike", soak: "Soak", steady: "Steady", find_limit: "Find the limit" };
+
+// Little's law, as src/vatf/load.py: calls at once = calls per minute x minutes per call, rounded up.
+export function peakFromHour(callsPerHour: number, callMinutes: number): number {
+  return Math.max(1, Math.ceil((callsPerHour / 60) * callMinutes - 1e-9));
+}
 
 const MAX_CALLS_AT_ONCE = 200;
 const MAX_TOTAL_MINUTES = 24 * 60;
@@ -46,6 +52,7 @@ export function problems(s: LoadSettings): string[] {
     if (!nonNeg(s[k])) out.push(`${k.replace(/_/g, " ")} must be a number of 0 or more`);
   }
   if (s.limits.p95_ms != null && !(s.limits.p95_ms > 0)) out.push("the p95 limit must be a positive number of milliseconds, or empty");
+  if (s.peak_calls_per_hour && !s.call_minutes) out.push("with peak calls per hour, also give the average call length");
   return out;
 }
 
@@ -61,7 +68,7 @@ export function stages(s: LoadSettings): { stages: LoadStage[]; error: string | 
     t += secs;
   };
   const target = s.calls_at_once;
-  if (s.shape === "ramp") {
+  if (s.shape === "ramp" || s.shape === "find_limit") {
     const lv = levels(s.start_at, target, s.steps);
     lv.forEach((level, i) => add(`Step ${i + 1} of ${lv.length}`, "step", level, s.step_minutes));
   } else if (s.shape === "spike") {

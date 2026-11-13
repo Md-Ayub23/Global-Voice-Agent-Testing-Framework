@@ -536,7 +536,8 @@ def test_judges_and_labels_api(tmp_path, monkeypatch):
     root = tmp_path / "root"
     shutil.copytree(ROOT / "examples" / "clinic", root / "examples" / "clinic",
                     ignore=shutil.ignore_patterns("runs", "labels.json"))
-    (root / "zoo").symlink_to(ROOT / "zoo")
+    # A copy, not a symlink: Windows only lets administrators make symlinks.
+    shutil.copytree(ROOT / "zoo", root / "zoo", ignore=shutil.ignore_patterns("__pycache__"))
     monkeypatch.chdir(root)          # as the dashboard runs it: project paths relative to the root
     proj = load_project("examples/clinic").with_agent_options({"brain": "rules"})
     proj.profile.setdefault("limits", {})["follow_up_turns"] = 0   # the scripted judge answers judges only

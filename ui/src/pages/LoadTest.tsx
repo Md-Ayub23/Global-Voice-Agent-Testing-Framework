@@ -9,14 +9,15 @@ import { Badge, Button, Card, CardHead, Chip, Choice, EmptyState, Field, Notice,
 import { api, qs } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { fmtDate, fmtMs } from "../lib/format";
-import { SHAPES, SHAPE_LABEL, fmtSeconds, roughCalls, stages as planStages } from "../lib/load";
+import { SHAPES, SHAPE_LABEL, fmtSeconds, peakFromHour, roughCalls, stages as planStages } from "../lib/load";
 import { channelLabel, projectHref } from "../lib/links";
 import { navigate } from "../lib/router";
 import { decisionTitle } from "../lib/status";
 import type { Job, LoadLimits, LoadPage, LoadSettings, Project } from "../lib/types";
 import { asObj } from "./setup/common";
 
-type NumKey = "calls_at_once" | "start_at" | "steps" | "step_minutes" | "minutes" | "before_minutes" | "after_minutes" | "window_minutes" | "pause_seconds" | "max_calls";
+type NumKey = "calls_at_once" | "start_at" | "steps" | "step_minutes" | "minutes" | "before_minutes" | "after_minutes" | "window_minutes" | "pause_seconds" | "max_calls"
+  | "peak_calls_per_hour" | "call_minutes" | "expected_peak";
 const SIZE: Record<string, [NumKey, string, ReactNode, number?][]> = {
   ramp: [
     ["start_at", "Start at (calls at once)", "The first level."],
@@ -40,6 +41,12 @@ const SIZE: Record<string, [NumKey, string, ReactNode, number?][]> = {
     ["calls_at_once", "Calls at once", "Held the whole time."],
     ["minutes", "Minutes", "", 0.5],
   ],
+  find_limit: [
+    ["start_at", "Start at (calls at once)", "The first level."],
+    ["calls_at_once", "Try up to (calls at once)", "The most it tries. It stops at the first level that breaks a limit."],
+    ["steps", "Steps", "Levels from the start up to the most, spread evenly."],
+    ["step_minutes", "Minutes per step", "Long enough for at least 10 calls per level.", 0.5],
+  ],
 };
 
 // The form's values over the defaults, the way src/vatf/load.py settings() reads them.
@@ -50,7 +57,14 @@ function effective(own: Obj, defaults: LoadPage["defaults"]): LoadSettings {
     const d = lim[k];
     lim[k] = d && typeof d === "object" ? { ...(d as Obj), ...asObj(v) } : v;
   }
-  return { ...defaults, ...(rest as Partial<LoadSettings>), limits: lim as unknown as LoadLimits } as LoadSettings;
+  const out = { ...defaults, ...(rest as Partial<LoadSettings>), limits: lim as unknown as LoadLimits } as LoadSettings;
+  // Calls per hour, as the server reads them: the expected peak, and the target unless one is typed.
+  if (out.peak_calls_per_hour && out.call_minutes) {
+    out.expected_peak = peakFromHour(out.peak_calls_per_hour, out.call_minutes);
+    if (out.shape !== "find_limit" && own.calls_at_once == null) out.calls_at_once = Math.min(200, out.expected_peak);
+  }
+  if (out.shape === "find_limit" && out.expected_peak && own.calls_at_once == null) out.calls_at_once = Math.min(200, Math.max(out.calls_at_once, 2 * out.expected_peak));
+  return out;
 }
 
 // `embedded`: shown as the Run tab of Test modes › Load & capacity, under that page's own header.
@@ -98,7 +112,11 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
   const plan = useMemo(() => planStages(s), [s]);
   const total = plan.stages.length ? plan.stages[plan.stages.length - 1].end_s : 0;
   const peak = Math.max(0, ...plan.stages.map((x) => x.level));
-  const callSecs = Math.min(page.agent.max_call_seconds, voice ? 40 : 15);
+  const callSecs = s.call_minutes ? s.call_minutes * 60 : Math.min(page.agent.max_call_seconds, voice ? 40 : 15);
+  const [phoneOk, setPhoneOk] = useState(false);
+  const phone = page.plan?.phone;
+  const shortStages = s.call_minutes ? plan.stages.filter((x) => (x.level * x.seconds) / (s.call_minutes! * 60 + s.pause_seconds) < s.limits.min_calls) : [];
+  const factNames = [...new Set(page.tests.flatMap((t) => t.facts || []))].sort();
 
   const set = (k: string, v: unknown) => {
     const next = { ...draft } as Obj;
@@ -147,7 +165,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
     setStarting(true);
     try {
       const job = await api.post<Job>("/api/jobs", { command: "load", project: project.path, profile: page.file,
-        offline, start_agent: !!s.start_agent && !!page.agent.agent_process, ...(voice ? { speech } : {}) });
+        offline, start_agent: !!s.start_agent && !!page.agent.agent_process, ...(voice ? { speech } : {}), ...(phone ? { confirm_phone: phoneOk } : {}) });
       setActiveJob(job);
       navigate(projectHref(project.key, `/live/${job.id}`));
     } catch (e) { toast((e as Error).message, "bad"); setStarting(false); }
@@ -185,12 +203,36 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
           </div>
         </Card>
 
+        <Card id="load-busiest">
+          <CardHead level={2} title="Your busiest time" sub="Businesses know their busiest hour, not “calls at once”. Vocto works it out (calls per minute × minutes per call) and uses it as the target, and the report says how much headroom you have." />
+          <Grid>
+            <Field label="Calls in your busiest hour" hint="Empty: type the calls at once below instead.">
+              <Num id="load-peak_calls_per_hour" value={num("peak_calls_per_hour")} placeholder="e.g. 120" min={1} onChange={(v) => set("peak_calls_per_hour", v)} />
+            </Field>
+            <Field label="Average call length (minutes)" hint="Also warns when a stage is too short to judge.">
+              <Num id="load-call_minutes" value={num("call_minutes")} placeholder="e.g. 4" min={0.1} step={0.5} onChange={(v) => set("call_minutes", v)} />
+            </Field>
+            {!s.peak_calls_per_hour && (
+              <Field label="Or: calls at once at your busiest time" hint="For the headroom sentence.">
+                <Num id="load-expected_peak" value={num("expected_peak")} placeholder={s.shape === "find_limit" ? "none" : `${s.calls_at_once} (the target)`} min={1} onChange={(v) => set("expected_peak", v)} />
+              </Field>
+            )}
+          </Grid>
+          {s.peak_calls_per_hour && s.call_minutes ? (
+            <div className="text-[13px] text-ink-2 mt-2" id="load-peak-text">
+              {s.peak_calls_per_hour} calls an hour of {s.call_minutes} min each = <b>{s.expected_peak} call{s.expected_peak === 1 ? "" : "s"} at once</b> at your busiest time
+              {s.shape === "find_limit" ? `; find the limit tries up to ${s.calls_at_once}.` : num("calls_at_once") == null ? ", used as the target." : `; your own target of ${s.calls_at_once} is kept.`}
+            </div>
+          ) : null}
+        </Card>
+
         <Card>
           <CardHead level={2} title="2 · Size and length" sub="Each simulated caller makes one test call after another. An empty field uses the default shown in grey." />
           <Grid>
             {SIZE[s.shape].map(([k, label, hint, step]) => (
               <Field key={k} label={label} hint={hint}>
-                <Num id={`load-${k}`} value={num(k)} placeholder={ph(k)} step={step ?? 1} min={k.endsWith("minutes") ? 0 : 1} onChange={(v) => set(k, v)} />
+                <Num id={`load-${k}`} value={num(k)} placeholder={k === "calls_at_once" && s.calls_at_once !== page.defaults.calls_at_once ? `${s.calls_at_once} (from your busiest time)` : ph(k)}
+                  step={step ?? 1} min={k.endsWith("minutes") ? 0 : 1} onChange={(v) => set(k, v)} />
               </Field>
             ))}
             <Field label="Pause between a caller's calls (seconds)" hint="0: the next call starts as soon as one ends.">
@@ -217,6 +259,7 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
             </div>
             <div className="flex flex-wrap gap-x-8 gap-y-3 mt-1">
               <label><Switch id="load-judges" checked={!!s.judges} onChange={(v) => set("judges", v || undefined)} label="AI judges on every call" /></label>
+              {voice && <label><Switch id="load-light" checked={s.light !== false} onChange={(v) => set("light", v ? undefined : false)} label="Light callers" /></label>}
               <label className={page.agent.agent_process ? "" : "opacity-55"}>
                 <Switch id="load-start-agent" checked={!!s.start_agent && page.agent.agent_process} label="Start the agent for me"
                   onChange={(v) => page.agent.agent_process && set("start_agent", v || undefined)} />
@@ -225,6 +268,8 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
             <div className="text-muted text-[13px]">
               {s.judges ? "The judges read every load call (money). Only trusted items count. " : "Judges are off: load calls are checked by the hard checks (tools, database, words said). "}
               {page.agent.agent_process ? "Vocto can start the agent before the first call and stop it after the last." : "Starting the agent needs Set up › Connection › “How to start the agent”."}
+              {voice && (s.light !== false ? " Light callers: each caller line is made once and reused, and the careful second listen is skipped, so this computer can push more calls; answer times still come from the audio."
+                : " Full callers: every line is spoken fresh and every call gets the careful second listen (heavier on this computer).")}
             </div>
           </Block>
           {voice && (
@@ -255,6 +300,22 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                 ))}
               </div>
             ) : <Notice tone="warn">This channel has no tests yet. Add some in Set up › Test cases.</Notice>}
+            {factNames.length > 0 && (
+              <div className="grid gap-1.5" id="load-unique">
+                <div className="font-semibold text-[13px]">A value of its own on every call</div>
+                <div className="flex flex-wrap gap-2">
+                  {factNames.map((f) => {
+                    const on = (s.unique_facts || []).includes(f);
+                    return <Choice key={f} on={on} data-fact={f} onClick={() => { const cur = s.unique_facts || []; set("unique_facts", on ? cur.filter((x) => x !== f) : [...cur, f]); }}>
+                      <span className="text-[13px] font-mono">{f}</span></Choice>;
+                  })}
+                </div>
+                <div className="text-muted text-[13px]">
+                  Every load call is checked for leaks: one caller's details (name, phone, date of birth, reference) turning up in another call blocks the result.
+                  Picked details get a made-up value per call, so calls of the same test can be told apart too. Only pick details your system doesn't need to find the caller.
+                </div>
+              </div>
+            )}
             <div className="text-muted text-[13px]">
               The test data (database rows) is loaded once, before the first call: many calls share one copy of it, as callers share a real system.
               A booking test may then find its slot already taken; that lowers the pass rate but never counts as a broken rule.
@@ -275,8 +336,11 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
             <Field label="Vocto's own lag, at most (ms)" hint="If this computer falls behind, a stage gives “not enough evidence” instead of blaming the agent.">
               <Num id="load-max_lag_ms" value={ownLimits.max_lag_ms as number} placeholder={`${page.defaults.limits.max_lag_ms} (default)`} min={1} onChange={(v) => setLimit("max_lag_ms", v)} />
             </Field>
-            <Field label="Finished calls a stage needs" hint="Fewer: the stage gives “not enough evidence”.">
+            <Field label="Finished calls a stage needs" hint="Fewer: the stage shows “too few to judge”.">
               <Num id="load-min_calls" value={ownLimits.min_calls as number} placeholder={`${page.defaults.limits.min_calls} (default)`} min={1} onChange={(v) => setLimit("min_calls", v)} />
+            </Field>
+            <Field label="Timed answers a stage's p95 needs" hint="Fewer: its p95 is shown but can't break the limit.">
+              <Num id="load-min_answers" value={ownLimits.min_answers as number} placeholder={`${page.defaults.limits.min_answers} (default)`} min={1} onChange={(v) => setLimit("min_answers", v)} />
             </Field>
           </Grid>
           <div className="mt-4" id="load-trends">
@@ -327,9 +391,16 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
                 <div><dt className="text-muted text-[13px]">Calls, roughly</dt><dd className="font-semibold">~{roughCalls(plan.stages, callSecs, s.pause_seconds, s.max_calls)}{" "}
                   <span className="text-muted font-normal text-[13px]">(cap {s.max_calls})</span></dd></div>
                 <div><dt className="text-muted text-[13px]">Tests used</dt><dd className="font-semibold">{using.length}</dd></div>
+                {s.expected_peak ? <div><dt className="text-muted text-[13px]">Your peak</dt><dd className="font-semibold" id="plan-expected">{s.expected_peak} at once</dd></div> : null}
                 {voice && <div className="col-span-2"><dt className="text-muted text-[13px]">p95 limit per stage</dt>
                   <dd className="font-semibold">{fmtMs((ownLimits.p95_ms as number) ?? page.voice_p95_ms)}</dd></div>}
               </dl>
+              {shortStages.length > 0 && (
+                <Notice tone="warn" icon="info" className="mt-3">
+                  {shortStages.length} stage{shortStages.length === 1 ? "" : "s"} will finish fewer than {s.limits.min_calls} calls and show as “too few to judge”. Make the steps longer
+                  (at {s.call_minutes} min a call, {s.limits.min_calls} calls at 1 at once take {fmtSeconds(s.limits.min_calls * (s.call_minutes! * 60 + s.pause_seconds))}).
+                </Notice>
+              )}
               <div className="mt-3 grid gap-1">
                 {plan.stages.map((x) => (
                   <div key={x.index} className="flex items-center gap-2 text-[13px]">
@@ -364,9 +435,15 @@ function LoadForm({ page, project, reload }: { page: LoadPage; project: Project;
               {" "}If nothing answers there, the test stops at once.
             </Notice>
           )}
+          {phone && !dirty && (
+            <Notice tone="warn" icon="phone" className="mb-3">
+              <div id="load-phone">{phone.text}{phone.cost != null ? <> Estimated cost at your prices: <b>{phone.cost} {phone.currency}</b>.</> : " Set your prices in Set up › Connection › Running costs to see an estimate."}</div>
+              <label className="block mt-2"><Switch id="load-phone-ok" checked={phoneOk} onChange={setPhoneOk} label="I understand the cost and my account allows this many calls at once" /></label>
+            </Notice>
+          )}
           {running && <Notice className="mb-3" icon="activity">A run is in progress. <a href={projectHref(project.key, "/live")}>Watch it</a>; start this when it ends.</Notice>}
           <Button id="start-load" variant="primary" icon="play" className="w-full justify-center" busy={starting}
-            disabled={starting || running || dirty || !!plan.error || !!page.error || !using.length || !!noKey}
+            disabled={starting || running || dirty || !!plan.error || !!page.error || !using.length || !!noKey || (!!phone && !phoneOk)}
             onClick={() => void start()}>Start load test</Button>
           <div className="text-muted text-[13px] mt-2">
             {dirty ? "Save your changes first." : page.error ? page.error : `About ${fmtSeconds(total)}. Calls already finished stay saved if you stop it.`}

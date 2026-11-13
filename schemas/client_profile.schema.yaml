@@ -222,6 +222,17 @@ properties:
           what it heard the caller say, e.g. "User said: (?P<text>.+)". The named group "text" (or the
           first group) is the heard text; it is compared with the caller's words (metric caller_wer).
         type: string
+      timing:
+        description: >
+          Voice, optional: where the agent's answer time goes, when its logs say so. One regular expression per
+          stage, each with a named group "ms" for the milliseconds, e.g. llm: "llm_latency=(?P<ms>\\d+)".
+          Vocto shows each stage's typical and slowest time in the Timing report. Logs that don't report it are skipped.
+        type: object
+        additionalProperties: false
+        properties:
+          stt: {description: "Speech recognition time.", type: string}
+          llm: {description: "AI model time (to the first words of its reply).", type: string}
+          tts: {description: "Voice time (to the first sound).", type: string}
     allOf:
       - if: {properties: {source: {const: file}}, required: [source]}
         then: {required: [path]}
@@ -352,7 +363,7 @@ properties:
       packs:
         description: Which packs to run. Default all.
         type: array
-        items: {enum: [off-topic, secrets, injection, made-up, others-data, harmful, abuse, policy, actions, messy, own]}
+        items: {enum: [off-topic, secrets, injection, made-up, others-data, harmful, abuse, policy, actions, messy, voice, own]}
       intensity:
         description: quick (about 12 calls), standard (about 30, 2 repeats), thorough (all, 3 repeats, adaptive attackers).
         enum: [quick, standard, thorough]
@@ -382,13 +393,62 @@ properties:
           required: [lines]
           properties:
             pack:
-              enum: [off-topic, secrets, injection, made-up, others-data, harmful, abuse, policy, actions, messy, own]
+              enum: [off-topic, secrets, injection, made-up, others-data, harmful, abuse, policy, actions, messy, voice, own]
               default: own
             title: {description: "Short name shown in reports.", type: string}
             lines: {description: "What the caller says, one line per turn. A question with no lines is left out.", type: array, maxItems: 10, items: {type: string}}
             never_say: {description: "Words or phrases the agent must never say on this call (hard checks). Blank ones are ignored.", type: array, items: {type: string}}
             safe_answer: {description: "What a safe answer looks like; the AI judges check it.", type: string}
             blocks: {description: "A never_say hit or a failed safe answer blocks the release.", type: boolean, default: false}
+            language: {description: "The language the caller speaks (e.g. ta for Tamil). Default the agent's.", type: string}
+            from: {description: "Where the question came from (e.g. ai-writer), for your records.", type: string}
+      review:
+        description: >
+          An unsafe or split answer from the AI judges on an attack call holds the release (Not enough evidence)
+          until a person labels it; a confirmed unsafe answer is a NO-GO. Hard-check failures block at once either way.
+        type: boolean
+        default: true
+      identity:
+        description: >
+          The identity check every attack call is held to: verify (the tool that checks the caller) must succeed
+          before any guarded tool is called. Default: a tool whose name says it verifies the caller, guarding
+          every other tool that changes data or takes personal details.
+        type: object
+        additionalProperties: false
+        properties:
+          enabled: {type: boolean, default: true}
+          verify: {type: string}
+          guarded: {type: array, items: {type: string}}
+      poison:
+        description: >
+          The hidden-instruction test (Prompt tricks): which lookup tools' answers carry it (default every read tool)
+          and the caller lines that make the agent look something up.
+        type: object
+        additionalProperties: false
+        properties:
+          tools: {type: array, items: {type: string}}
+          lines: {type: array, maxItems: 6, items: {type: string}}
+
+  resilience:
+    description: >
+      Resilience failure drills (src/vatf/drills.py). refusals: how this agent's own tools say no, used by the
+      business refusal drills (already taken, payment declined, out of stock) instead of Vocto's plain wording.
+      Often written by AI on the Resilience page to sound like the real API; you check them before saving.
+    type: object
+    additionalProperties: false
+    properties:
+      refusals:
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          required: [kind, body]
+          properties:
+            tool: {description: "The tool that answers this way (* or left out: every booking or order tool).", type: string}
+            kind: {enum: [slot_taken, payment_declined, out_of_stock]}
+            status: {description: "HTTP status (default 409, or 402 for payment_declined).", type: integer, minimum: 400, maximum: 599}
+            body: {description: "The tool's answer, as the agent receives it (an object or text)."}
+            from: {description: "Who wrote it: ai-writer when Claude drafted it.", type: string}
 
   thresholds:
     description: Release gate settings (L8). Every field has a framework default.
@@ -437,7 +497,7 @@ properties:
       Phase 5 call quality metrics (src/vatf/metrics.py): this agent's good and warn values, and whether a
       run value in the bad band blocks the release. Unset fields keep the framework's defaults.
     type: object
-    propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, turns_to_goal, escalated, duration_s]}
+    propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, noise_kept, paused_cut_off, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, repeated_question, turns_to_goal, escalated, duration_s]}
     additionalProperties:
       type: object
       additionalProperties: false
@@ -506,6 +566,19 @@ properties:
         properties:
           blocks: {type: boolean, default: false}
           increase_pct: {type: number, minimum: 0, default: 10}
+      confirm:
+        description: "A test that passed every repeat in the baseline and fails once now is run reruns more times; it blocks only if at least min_failures of all its calls failed (else it shows as suspected)."
+        type: object
+        additionalProperties: false
+        properties:
+          reruns: {type: integer, minimum: 0, maximum: 20, default: 5}
+          min_failures: {type: integer, minimum: 1, default: 2}
+      baseline:
+        description: "What a run is compared with: rolling 0 = the saved baseline run; 3 = the last 3 good runs made the same way, pooled."
+        type: object
+        additionalProperties: false
+        properties:
+          rolling: {type: integer, minimum: 0, maximum: 10, default: 0}
 
   alerts:
     description: >
@@ -565,8 +638,8 @@ properties:
     additionalProperties: false
     properties:
       shape:
-        description: "ramp: 1 call up to calls_at_once in steps; spike: normal, everyone at once, normal again; soak: hold calls_at_once for a long time; steady: hold calls_at_once."
-        enum: [ramp, spike, soak, steady]
+        description: "ramp: 1 call up to calls_at_once in steps; spike: normal, everyone at once, normal again; soak: hold calls_at_once for a long time; steady: hold calls_at_once; find_limit: step up like ramp and stop at the first level that breaks a limit."
+        enum: [ramp, spike, soak, steady, find_limit]
         default: ramp
       calls_at_once: {description: "The target: the most calls at the same time (the busiest time you expect).", type: integer, minimum: 1, maximum: 200, default: 5}
       start_at: {description: "Ramp: the first level. Spike: the normal traffic before and after the spike.", type: integer, minimum: 1, default: 1}
@@ -578,6 +651,11 @@ properties:
       window_minutes: {description: "Soak: the hold is read in windows this long, to see drift.", type: number, minimum: 0, default: 5}
       pause_seconds: {description: "Each simulated caller waits this long before its next call.", type: number, minimum: 0, default: 0}
       max_calls: {description: "A load test never starts more calls than this.", type: integer, minimum: 1, default: 200}
+      peak_calls_per_hour: {description: "Calls in your busiest hour. With call_minutes it sets calls_at_once (Little's law: calls per minute x minutes per call).", type: [number, "null"], exclusiveMinimum: 0}
+      call_minutes: {description: "How long an average call lasts, in minutes (also used to warn when a stage is too short to judge).", type: [number, "null"], exclusiveMinimum: 0}
+      expected_peak: {description: "Calls at once at your busiest time, for the headroom sentence (set from peak_calls_per_hour when that is given).", type: [integer, "null"], minimum: 1}
+      light: {description: "Voice: light load callers (each caller line synthesised once and reused, no careful second listen), so one computer can push further.", type: boolean, default: true}
+      unique_facts: {description: "Caller facts given a value of their own on every load call (e.g. full_name, phone), so a detail found in another call is a leak. Only facts the agent's backend doesn't need to find.", type: array, items: {type: string}}
       scenarios: {description: "Test ids, taken in turn. Empty = the tests in this mode without planted tool faults or safety attacks.", type: array, items: {type: string}}
       caller: {description: "free: scripted lines and the rule-based caller (no AI cost); claude: Claude plays the callers.", enum: [free, claude], default: free}
       judges: {description: "Run the AI judges on every load call (costs money).", type: boolean, default: false}
@@ -620,7 +698,8 @@ properties:
               pct: {type: number, minimum: 0, default: 25}
               ms: {type: number, minimum: 0, default: 200}
           max_lag_ms: {description: "Vocto's own computer: event-loop lag p95 above this makes a stage untrustworthy (not enough evidence, never NO-GO).", type: number, minimum: 1, default: 100}
-          min_calls: {description: "A stage needs this many finished calls to decide anything.", type: integer, minimum: 1, default: 3}
+          min_calls: {description: "A stage needs this many finished calls to decide anything; below it the stage shows as too few to judge.", type: integer, minimum: 1, default: 10}
+          min_answers: {description: "A stage's answer-time p95 can break the limit only over at least this many timed answers.", type: integer, minimum: 1, default: 20}
 
   monitor:
     description: >

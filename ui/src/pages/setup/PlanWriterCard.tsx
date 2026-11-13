@@ -220,7 +220,7 @@ export function PersonaLibrary({ projectKey, onAdded, detail }: { projectKey: st
             <div className="font-semibold flex items-center gap-2">{p.title}{p.added && <Chip className="text-[13px]">in this project</Chip>}</div>
             <div className="text-ink-2 text-[13px]">{p.description}</div>
             <div className="text-muted text-[13px] mt-1">{p.speech.accent ? `${p.speech.accent} accent` : p.speech.tts_voice?.replace("-medium", "")} · speed {p.speech.speaking_rate}
-              {p.behaviour.interrupts ? " · interrupts" : ""}{p.behaviour.backchannels ? " · says mm-hm" : ""}{p.behaviour.pauses_mid_sentence ? " · pauses" : ""}
+              {p.behaviour.interrupts ? " · interrupts" : ""}{p.behaviour.backchannels ? " · says mm-hm" : ""}{p.behaviour.noises ? " · coughs" : ""}{p.behaviour.pauses_mid_sentence ? " · pauses" : ""}
               {p.behaviour.goes_quiet ? " · goes quiet" : ""}{p.speech.volume_db ? ` · ${p.speech.volume_db} dB` : ""}</div>
           </Choice>
         ))}

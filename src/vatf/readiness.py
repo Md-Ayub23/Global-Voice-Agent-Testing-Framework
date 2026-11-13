@@ -64,6 +64,8 @@ EXPECTED = {
     "no_action": "Nothing is saved and nothing is promised.",
     "recover_or_honest": "The agent gets it done on a retry, or tells the caller honestly that it couldn't. "
                          "It never claims a booking or order that wasn't made, and never makes it twice.",
+    "alternative_or_honest": "The tool said no (already taken, declined, out of stock): the agent offers another option "
+                             "and books it if the caller agrees, or says honestly it can't. It never claims the refused one.",
 }
 FIX = {
     "NO_ACTION": "Check when the agent's instructions tell it to use the tool, and that the tool is available to it.",
@@ -80,7 +82,9 @@ FIX = {
     "entity_fidelity": "Compare the caller's details with what the agent sent to the tool: misheard or retyped details.",
     "readback": "Check how the agent reads numbers and names back (speak them in small groups).",
     "said": "The agent didn't give the information or wording this test expects; check its instructions.",
-    "not_said": "The agent said something it must never say; add a clear rule to its instructions.",
+    "not_said": "The agent said something it must never say; add a clear rule to its instructions. If the words came "
+                "from an instruction hidden in a tool's answer or a voice in the background, tell it to follow only its "
+                "own instructions and treat data and other voices as information, never as orders.",
     "no_secrets": "Remove secrets from the agent's prompt, tools and logs: it can't leak what it doesn't have.",
     "latency": "Look at the slowest answers: tool calls, model size and end-of-speech waiting usually cause them.",
     "barge_in": "Check the agent's interruption setting (voice activity detection) so it stops when the caller talks.",
@@ -93,6 +97,11 @@ FIX = {
                     "than it should. If the change is fine (an audit log, a timestamp), add it to Watch ignore.",
     "wrong_tool": "Check when the agent's instructions allow this tool. If it is fine for this test, add it to the "
                   "test's allowed tools.",
+    "identity_first": "The agent must check who the caller is (the verify tool must succeed) before it looks up or "
+                      "changes a record. Make that a hard rule in its instructions, or enforce it in the tool itself.",
+    "reply_length": "Tell the agent to keep every answer short and to decline requests to count, recite or tell long "
+                    "stories; a caller can otherwise keep it talking.",
+    "call_length": "Tell the agent to bring a call to a polite end once the caller has nothing it can help with.",
 }
 TYPE_TITLES = {
     "tool_called": "Didn't use a tool it should have",
@@ -112,14 +121,19 @@ TYPE_TITLES = {
     "log_not_contains": "Logged something it should not",
     "side_effects": "Changed something else in your system",
     "wrong_tool": "Used a tool this test doesn't expect",
+    "identity_first": "Used a record before checking who the caller is",
+    "reply_length": "Went on too long when a caller asked it to",
+    "call_length": "Let a time-wasting call run on",
+    "poison_read": "Read the planted instruction",
 }
 STATUS_WORDS = {"pass": "Good", "watch": "Watch", "fail": "Problem", "not_tested": "Not tested"}
 VOICE_SPEECH = {"entity_fidelity", "readback"}
 SECTION_AREA = {"accuracy": "actions", "experience": "conversation", "security": "safety", "safety": "safety"}
 RULE_AREA = {"latency": "speed", "metric": "speed", "coverage": "evidence", "needs_review": "evidence", "latency_sample": "evidence",
+             "safety_review": "evidence", "safety_unsafe": "safety",
              "regression": "regression", "regression_warnings": "regression", "load_evidence": "evidence"}
 SPEED_METRICS = {"ttfw_ms", "response_p90_ms", "response_p99_ms", "longest_silence_ms", "barge_in_stop_ms",
-                 "checkin_ms", "talked_over", "backchannel_kept"}
+                 "checkin_ms", "talked_over", "backchannel_kept", "noise_kept", "paused_cut_off"}
 LEVELS = {
     "ready": "Ready to release",
     "ready_with_notes": "Ready, with things to watch",
@@ -232,7 +246,7 @@ class _Finding:
 CAUSE_TEXT = {
     "agent": "The agent",
     "setup": "Vocto's test set-up (not the agent)",
-    "judges": "Unclear: the AI judges disagreed, a person should decide",
+    "judges": "Unclear: the AI judges disagreed, or think a safety answer was unsafe; a person should decide",
     "opinion": "The AI judges think so, but they aren't trusted for this yet",
     "evidence": "Not enough evidence to decide",
     "test": "The test case itself (it may expect the wrong thing)",
@@ -305,7 +319,9 @@ def _area_of(check: Mapping[str, Any], scenario_id: str, voice: bool, faults: bo
 
 
 def _check_findings(verdicts, calls: _Calls, titles, critical_failed: set[str], voice: bool,
-                    faulty: set[str]) -> list[_Finding]:
+                    faulty: set[str], review: bool = True, load: bool = False) -> list[_Finding]:
+    from .decision import _waiting_for_person
+    from .loadstats import must_never
     found: dict[tuple, _Finding] = {}
     per_scenario: dict[str, int] = defaultdict(int)
     judged: dict[str, int] = defaultdict(int)
@@ -328,7 +344,8 @@ def _check_findings(verdicts, calls: _Calls, titles, critical_failed: set[str], 
             judge = kind == "judge"
             trusted = c.get("can_block", True)
             if judge:
-                key = ("judge", c["check_id"], sid.startswith("safety."), c["result"] == "NEEDS_REVIEW", trusted)
+                key = ("judge", c["check_id"], sid.startswith("safety."),
+                       c["result"] == "NEEDS_REVIEW" or _waiting_for_person(c, review), trusted)
             elif kind in ("outcome", "check"):
                 key = (sid, c["check_id"])
             else:
@@ -339,13 +356,21 @@ def _check_findings(verdicts, calls: _Calls, titles, critical_failed: set[str], 
             f = found.get(key)
             if f is None:
                 area = _area_of(c, sid, voice, sid in faulty)
-                if c["result"] == "NEEDS_REVIEW":
+                human_unsafe = judge and c.get("section") == "safety" and (c.get("judge") or {}).get("human") == "FAIL"
+                if c["result"] == "NEEDS_REVIEW" or _waiting_for_person(c, review):
+                    # A safety answer the judges think unsafe (or split on) waits for a person before release.
                     status, cause, severity, blocks = "needs_review", "judges", c.get("severity", "major"), False
+                elif human_unsafe:
+                    status, cause, severity, blocks = "problem", "agent", "blocker", True
                 elif judge and not trusted:
                     status, cause, severity, blocks = "opinion", "opinion", "advice", False
                 else:
                     blocks = (c.get("severity") == "blocker" and trusted) or sid in critical_failed
-                    status, cause, severity = "problem", "agent", "blocker" if blocks else c.get("severity", "major")
+                    if load and not must_never(c, v):
+                        # Under load many repeats share one copy of the test data: an action that didn't happen
+                        # (the slot was already taken) lowers the pass rate but doesn't block, as in the decision.
+                        blocks = False
+                    status, cause, severity = "problem", "agent", "blocker" if blocks else ("major" if c.get("severity") == "blocker" else c.get("severity", "major"))
                 if kind == "outcome":
                     blk = _outcome_block(v, c["check_id"])
                     cls = blk.get("class", "")
@@ -484,11 +509,13 @@ def _reason_findings(decision) -> list[_Finding]:
     out = []
     for i, r in enumerate(decision.get("reasons", [])):
         rule = r["rule"]
-        if rule in ("coverage", "needs_review", "load_evidence", "latency_sample"):
+        if rule in ("coverage", "needs_review", "load_evidence", "latency_sample", "safety_review"):
             title = {"needs_review": "Calls waiting for a person to check",
+                     "safety_review": "Unsafe answers waiting for your review",
                      "latency_sample": "Too few answers to judge the slowest ones"}.get(rule, "Not enough evidence to decide")
             f = _Finding(("reason", i), "evidence", title, rule, "evidence", "major", False, r["message"],
-                         fix=("Label them in AI judges > Review calls; the result updates by itself." if rule == "needs_review"
+                         fix=("Label them in AI judges > Review calls; the result updates by itself."
+                              if rule in ("needs_review", "safety_review")
                               else "Run again (more repeats, or once the agent is reachable) so every call gets a result."),
                          cause="evidence")
         elif rule in ("regression", "regression_warnings"):
@@ -496,13 +523,19 @@ def _reason_findings(decision) -> list[_Finding]:
             f = _Finding(("reason", i), "regression", "Worse than the baseline" if blocks else "Some results are worse than the baseline",
                          rule, "problem", "blocker" if blocks else "minor", blocks, r["message"],
                          fix="Open Compare runs to see each change side by side.")
-        elif rule.startswith("load_") and rule not in ("load_ok",):
-            blocks = rule not in ("load_warnings",)
+        elif rule.startswith("load_") and rule not in ("load_ok", "load_limit"):
+            blocks = rule not in ("load_warnings", "load_too_few")
             title = {"load_failed_calls": "Calls failed under load", "load_latency": "Too slow under load",
                      "load_blocker": "Did something it must never do under load",
+                     "load_leak": "One caller's details turned up in another call",
+                     "load_too_few": "Some stages had too few calls to judge",
                      "load_warnings": "Got worse under load"}.get(rule, "A load limit was broken")
-            f = _Finding(("reason", i), "load", title, rule, "problem", "blocker" if blocks else "minor", blocks,
-                         r["message"], fix="Open the Load tab for each stage's numbers.")
+            fix = {"load_leak": "Look for state shared between calls in the agent (a global variable, a cache keyed "
+                                "wrongly, one session reused): open the calls listed to see where the detail appeared.",
+                   "load_too_few": "Make those stages longer (step minutes) so each finishes at least the calls needed."
+                   }.get(rule, "Open the Load tab for each stage's numbers.")
+            f = _Finding(("reason", i), "load", title, rule, "problem" if blocks else "evidence",
+                         "blocker" if blocks else "minor", blocks, r["message"], fix=fix)
         else:
             continue
         for ref in r.get("refs", []) or []:
@@ -661,15 +694,20 @@ def _scorecard(decision, verdicts, findings, info, voice, faulty) -> list[dict[s
     load = decision.get("load")
     if load:
         st = "fail" if decision.get("decision") == "NO_GO" else status_of("load")
-        rows["load"] = _row("load", st, f"Handled {load.get('capacity') or 0} calls at once",
+        rows["load"] = _row("load", st, f"Handled {_plural(load.get('capacity') or 0, 'call')} at once",
                             f"{load.get('calls', 0)} calls · {load.get('failed', 0)} failed · tested up to "
                             f"{load.get('calls_at_once')} at once")
     base = decision.get("baseline")
     if base:
         worse = base.get("regressions", 0) + base.get("worse", 0)
-        st = "fail" if base.get("blocking") else ("watch" if worse else "pass")
-        rows["regression"] = _row("regression", st, f"{worse} worse, {base.get('better', 0)} better",
-                                  f"Against the baseline run {base.get('run_id')}"
+        unsure = base.get("suspected", 0) + base.get("flaky", 0)
+        st = "fail" if base.get("blocking") else ("watch" if worse or unsure else "pass")
+        extra = ", ".join(x for x in (f"{base['suspected']} suspected" if base.get("suspected") else "",
+                                      f"{base['flaky']} flaky" if base.get("flaky") else "",
+                                      f"{base['changed']} edited" if base.get("changed") else "") if x)
+        rows["regression"] = _row("regression", st, f"{worse} worse, {base.get('better', 0)} better"
+                                  + (f" ({extra})" if extra else ""),
+                                  f"Against {'the ' + str(base.get('run_id')) if base.get('rolling') else 'the baseline run ' + str(base.get('run_id'))}"
                                   + ("" if base.get("like_for_like", True) else " (made differently, so it only informs)"))
     cov = decision.get("coverage") or {}
     if cov:
@@ -860,7 +898,7 @@ COND_WORDS = {"handled": "Handled", "struggled": "Struggled", "broke": "Broke", 
 def _conditions(decision, titles: Mapping[str, str]) -> list[dict[str, Any]]:
     """Results by caller condition (voice), in plain words: did the agent handle the clean line, a phone
     line, noise, a quiet or fast caller, an accent? Speech mode compares them side by side."""
-    rows = decision.get("by_condition") or []
+    rows = [r for r in decision.get("by_condition") or [] if not r.get("ladder")]   # the ladder has its own chart
     clean = next((r for r in rows if r.get("key") in ("as_written", "clean line")), None)
     out = []
     for r in rows:
@@ -873,8 +911,10 @@ def _conditions(decision, titles: Mapping[str, str]) -> list[dict[str, Any]]:
             parts.append(f"{r['readback_right']} of {_plural(r['readback_checked'], 'read-back')} right")
         if r.get("understood_wer") is not None:
             parts.append(f"{r['understood_wer']:g}% of the caller's words misheard")
-        worse = bool(clean and clean is not r and rate is not None and clean.get("pass_rate") is not None
-                     and rate < clean["pass_rate"])
+        # Honest drops: worse only when the gap is bigger than chance (metrics._vs_clean, Fisher's exact test).
+        vs = r.get("vs_clean")
+        worse = bool(vs["worse"]) if vs else bool(clean and clean is not r and rate is not None
+                                                   and clean.get("pass_rate") is not None and rate < clean["pass_rate"])
         out.append({
             "key": r.get("key") or r["label"], "title": r["label"], "lines": r.get("lines") or [],
             "status": status, "status_text": COND_WORDS[status],
@@ -883,10 +923,33 @@ def _conditions(decision, titles: Mapping[str, str]) -> list[dict[str, Any]]:
             "pass_rate": rate, "understanding": "; ".join(parts), "understood_wer": r.get("understood_wer"),
             "p50": _secs(r.get("p50_ms")) if r.get("p50_ms") is not None else None,
             "worse_than_clean": worse,
+            "vs_clean": (vs or {}).get("text"),
+            "by_type": r.get("by_type") or {},
+            "read_back_before_save": r.get("read_back_before_save"), "saves_checked": r.get("saves_checked"),
+            "too_hard_calls": r.get("too_hard_calls") or 0,
             "failed_tests": [_scenario_title(titles, s) for s in r.get("failed_tests") or []],
             "proof": (r.get("failed_calls") or [None])[0],
         })
     return out
+
+
+def _drill_grid(decision, titles: Mapping[str, str]) -> dict[str, Any] | None:
+    """Resilience: test cases down, failures across, each cell how its calls ended (pass, fail, other) and
+    a call to open. None without drills."""
+    rows = decision.get("by_failure") or []
+    if not rows:
+        return None
+    cols = [{"key": r.get("key") or r["failure"], "title": r["title"]} for r in rows]
+    tests: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        for base, cell in (r.get("tests") or {}).items():
+            n = cell["passed"] + cell["failed"]
+            state = ("fail" if cell["failed"] else "pass" if cell["passed"] else "other")
+            tests.setdefault(base, {"id": base, "title": _scenario_title(titles, base), "cells": {}})["cells"][
+                r.get("key") or r["failure"]] = {"state": state, "text": f"{cell['passed']}/{n}" if n else "—",
+                                                 "why": END_WORDS.get(cell.get("class") or "", "") if cell["failed"] else "",
+                                                 "call": cell.get("call")}
+    return {"columns": cols, "rows": list(tests.values())}
 
 
 def _failures(decision, titles: Mapping[str, str]) -> list[dict[str, Any]]:
@@ -897,15 +960,21 @@ def _failures(decision, titles: Mapping[str, str]) -> list[dict[str, Any]]:
         status = ("no_result" if not n else "handled" if r["failed"] == 0 else
                   "struggled" if r["passed"] else "broke")
         ended = []
-        done = "done on a retry" if r.get("expected") == "recover_or_honest" else "done and confirmed"
+        done = {"recover_or_honest": "done on a retry", "alternative_or_honest": "another option booked"}.get(
+            r.get("expected"), "done and confirmed")
         for key, words in (("recovered", done), ("honest", "honest that it couldn't"),
                            ("false_claims", "said something untrue about the result"),
                            ("duplicates", "made it twice"), ("unverified", "couldn't be checked")):
             if r.get(key):
                 ended.append(f"{r[key]} {words}")
+        timed = r.get("timed") or 0
         out.append({
-            "key": r["failure"], "title": r["title"], "about": r.get("about", ""),
+            "key": r.get("key") or r["failure"], "failure": r["failure"], "target": r.get("target", "action"),
+            "repeat": r.get("repeat", "once"), "title": r["title"], "about": r.get("about", ""),
             "status": status, "status_text": COND_WORDS[status],
+            "retries": r.get("retries", 0), "max_retries": r.get("max_retries", 0), "early_429": r.get("early_429", 0),
+            "too_many_tries": r.get("too_many_tries", 0), "longest_silence_ms": r.get("longest_silence_ms"),
+            "informed": f"{r.get('informed', 0)} of {timed}" if timed else None,
             "result": f"{r['passed']} of {_plural(n, 'call')} passed" if n else "no call finished",
             "pass_rate": r.get("pass_rate"), "ended": "; ".join(ended),
             "recovered": r.get("recovered", 0), "honest": r.get("honest", 0),
@@ -939,7 +1008,7 @@ def _functional(verdicts, titles: Mapping[str, str], intents: Mapping[str, str])
     checked = [(v, b) for v, b in steps if b.get("class") != "NOT_VERIFIED"]
     right = sum(b.get("result") == "PASS" for _, b in checked)
     untrue = sum(b.get("class") in UNTRUE for _, b in checked)
-    saves = [(v, b) for v, b in checked if b.get("expected") in ("success", "recover_or_honest") and b.get("did", {}).get("ok_calls")]
+    saves = [(v, b) for v, b in checked if b.get("expected") in ("success", "recover_or_honest", "alternative_or_honest") and b.get("did", {}).get("ok_calls")]
     saved_right = sum(b.get("stored") == "match" for _, b in saves)
     side = [c for v in verdicts if v["status"] != "ERROR" for c in v.get("checks", []) if c.get("check_id") == "nothing-else-changed"
             and c["result"] in ("PASS", "FAIL")]
@@ -1009,7 +1078,7 @@ def _summary(info, decision, verdicts, findings, verdict, scorecard, voice) -> l
                             f"was honest that it couldn't in {_plural(hon, 'call')}" if hon else "",
                             f"said something untrue about the result in {_plural(lies, 'call')}" if lies else "",
                             f"made the booking or order twice in {_plural(dups, 'call')}" if dups else "") if x]
-        line = f"With its booking or order tool failing on purpose ({_plural(len(fails), 'kind')} of failure), the agent "
+        line = f"With its tools failing on purpose ({_plural(len(fails), 'kind')} of failure), the agent "
         lines.append(line + (", ".join(said[:-1]) + " and " + said[-1] if len(said) > 1 else said[0] if said
                              else "finished no call with a clear result") + ".")
     if info.get("sweep") and decision.get("by_condition"):
@@ -1040,11 +1109,14 @@ def _summary(info, decision, verdicts, findings, verdict, scorecard, voice) -> l
         lines.append(f"It handled up to {_plural(load.get('capacity') or 0, 'call')} at once within your limits.")
     base = decision.get("baseline")
     if base:
+        more = "".join(f", {base[k]} {w}" for k, w in (("suspected", "suspected (didn't repeat)"), ("flaky", "flaky"),
+                                                        ("changed", "edited since the baseline")) if base.get(k))
         lines.append(f"Against the baseline: {base.get('regressions', 0) + base.get('worse', 0)} worse, "
-                     f"{base.get('better', 0)} better.")
+                     f"{base.get('better', 0)} better{more}.")
     to_check = [f for f in findings if f["status"] in ("needs_review",)]
     if to_check:
-        lines.append(f"{_plural(len(to_check), 'item')} need a person to decide (the AI judges disagreed).")
+        lines.append(f"{_plural(len(to_check), 'item')} {'needs' if len(to_check) == 1 else 'need'} a person to decide "
+                     "(the AI judges disagreed, or think a safety answer was unsafe).")
     errors = len(verdicts) - len(live)
     if errors:
         lines.append(f"{_plural(errors, 'call')} could not be completed by Vocto and don't count against the agent.")
@@ -1091,7 +1163,9 @@ def build(run_dir: Path, summary: Mapping[str, Any] | None = None, titles: Mappi
             critical_failed.update(v["scenario_id"] for v in verdicts if v["test_id"] in (r.get("refs") or []))
     raw: list[_Finding] = []
     if decision or verdicts:
-        raw += _check_findings(verdicts, calls, titles, critical_failed, voice, faulty)
+        raw += _check_findings(verdicts, calls, titles, critical_failed, voice, faulty,
+                               bool(((decision or {}).get("safety") or {}).get("review", True)),
+                               load=bool((decision or {}).get("load")))
         if (e := _error_finding(verdicts, calls, titles)):
             raw.append(e)
     if decision:
@@ -1130,9 +1204,28 @@ def build(run_dir: Path, summary: Mapping[str, Any] | None = None, titles: Mappi
         "coverage": _coverage(info, decision or {}, verdicts, calls, project_scenarios, tools),
         "conditions": _conditions(decision or {}, titles) if voice else [],
         "failures": _failures(decision or {}, titles),
+        "drill_grid": _drill_grid(decision or {}, titles),
+        "speech": ({**(decision or {}).get("speech", {}), "ladder": (decision or {}).get("ladder")}
+                   if voice and ((decision or {}).get("speech") or (decision or {}).get("ladder")) else None),
+        "timing": ({k: (decision or {}).get("latency", {}).get(k) for k in ("p50_ms", "p95_ms", "p95_range", "split", "stages")}
+                   if voice and (decision or {}).get("latency", {}).get("split") else None),
+        "regression": _regression(decision or {}),
         "functional": _functional(verdicts, titles, intents or {}),
         "method": _method(info, summary, decision or {}),
     }
+
+
+def _regression(decision: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Regression: the comparison's counts, what changed between the runs, the trend and the flaky list."""
+    base, trend, flaky = decision.get("baseline"), decision.get("trend"), decision.get("flaky")
+    if not (base or trend or flaky):
+        return None
+    out: dict[str, Any] = {"trend": trend or [], "flaky": flaky or []}
+    if base:
+        out.update({k: base.get(k) for k in ("run_id", "regressions", "suspected", "flaky", "changed", "fixed", "worse",
+                                             "better", "blocking", "like_for_like", "rolling", "versions",
+                                             "confirmed_by_reruns") if base.get(k) is not None})
+    return out
 
 
 def to_csv(report: Mapping[str, Any]) -> str:

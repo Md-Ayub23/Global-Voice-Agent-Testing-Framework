@@ -58,6 +58,11 @@ Reply with only the words you say out loud: one or two short spoken sentences, n
 directions, no quotation marks, no descriptions of tone.""" + (VOICE_NOTE if voice else "") + note
 
 
+RANG_BACK = ("(The line went dead just after you agreed, before you heard the agent's answer. You have rung "
+             "back, and this is the agent answering the new call. Find out whether it went through; if it didn't, "
+             "ask again.)")
+
+
 class LLMCaller:
     def __init__(self, scenario: Mapping[str, Any], persona: Mapping[str, Any], llm: Any, *,
                  model: str, agent_name: str, max_tokens: int = 2048, metadata: Mapping[str, str] = (),
@@ -68,10 +73,16 @@ class LLMCaller:
         self._system = caller_system_prompt(scenario, persona, agent_name, voice, language)
         self._metadata = dict(metadata or {})
         self._history: list[LLMMessage] = []
+        self._note = ""
+
+    def rang_back(self) -> None:
+        """Resilience dropped-call drill: the line went dead, and the caller has rung back."""
+        self._note = (RANG_BACK + " ")
 
     async def next_turn(self, heard_text: str) -> CallerAction:
         # The caller only ever sees heard_text: what reached its "ears".
-        self._history.append(LLMMessage("user", heard_text.strip() or "(silence)"))
+        note, self._note = self._note, ""
+        self._history.append(LLMMessage("user", note + (heard_text.strip() or "(silence)")))
         response = await self._llm.complete(LLMRequest(
             purpose="caller", model=self._model, system=self._system,
             messages=tuple(self._history), max_tokens=self._max_tokens, metadata=self._metadata))
@@ -133,9 +144,10 @@ class ScriptThenLLM:
     what a real caller would do next (push on a weak answer, finish the order, hear the read-back)."""
 
     def __init__(self, lines: Sequence[str], llm_caller: LLMCaller, turns: int,
-                 recordings: Sequence[str | None] = ()):
+                 recordings: Sequence[str | None] = (), backgrounds: Sequence[str | None] = ()):
         self._lines = list(lines)
         self._audio = list(recordings) + [None] * (len(self._lines) - len(recordings))
+        self._back = list(backgrounds) + [None] * (len(self._lines) - len(backgrounds))
         self._last_audio: str | None = None
         self._llm = llm_caller
         self._left = turns
@@ -146,7 +158,7 @@ class ScriptThenLLM:
             line = self._lines.pop(0)
             self._last_audio = self._audio.pop(0)
             self._llm.note_line(heard_text, line)      # so Claude knows the whole call when it takes over
-            return CallerAction(say=line, audio=self._last_audio)
+            return CallerAction(say=line, audio=self._last_audio, background=self._back.pop(0))
         if self._left <= 0:
             return CallerAction(say=None, hang_up=True)
         self.following_up = True
@@ -166,14 +178,16 @@ class ScriptThenLLM:
 class ScriptedCaller:
     """The fixed lines of a scripted test case; a line may come with a recording to play (voice)."""
 
-    def __init__(self, lines: Sequence[str], recordings: Sequence[str | None] = ()):
+    def __init__(self, lines: Sequence[str], recordings: Sequence[str | None] = (),
+                 backgrounds: Sequence[str | None] = ()):
         self._lines = list(lines)
         self._audio = list(recordings) + [None] * (len(self._lines) - len(recordings))
+        self._back = list(backgrounds) + [None] * (len(self._lines) - len(backgrounds))
 
     async def next_turn(self, heard_text: str) -> CallerAction:
         if not self._lines:
             return CallerAction(say=None, hang_up=True)
-        return CallerAction(say=self._lines.pop(0), audio=self._audio.pop(0))
+        return CallerAction(say=self._lines.pop(0), audio=self._audio.pop(0), background=self._back.pop(0))
 
 
 class RuleCaller:
@@ -187,12 +201,20 @@ class RuleCaller:
         self._facts = c.get("facts", {})
         self._turns = 0
         self._confused = 0
+        self._rang_back = False
+
+    def rang_back(self) -> None:
+        """Resilience dropped-call drill: the line went dead; the caller rings back and starts again."""
+        self._turns, self._confused, self._rang_back = 0, 0, True
 
     async def next_turn(self, heard_text: str) -> CallerAction:
         self._turns += 1
         heard = heard_text.lower()
         f = self._facts
         if self._turns == 1:
+            if self._rang_back:
+                return CallerAction(say="Hi, I was just booking and the line went dead before I heard back. Did it go "
+                                        f"through? If not, I'd like to {self._goal[0].lower()}{self._goal[1:]}")
             return CallerAction(say=f"Hi, I'd like to {self._goal[0].lower()}{self._goal[1:]}")
         if "goodbye" in heard:
             return CallerAction(say=None, hang_up=True)

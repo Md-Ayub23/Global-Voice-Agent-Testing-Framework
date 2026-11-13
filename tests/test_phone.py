@@ -41,6 +41,17 @@ def tones(text: str) -> np.ndarray:
     return resample(from_pcm16(clip.pcm16), clip.sample_rate_hz, 8000)
 
 
+async def paced(frames, send, frame_s: float = 0.02) -> None:
+    """Send frames in real time against a clock. A plain sleep(0.02) per frame runs slow on Windows,
+    whose timers tick every ~15.6 ms (each sleep lasts ~31 ms), so speech took 1.5x as long."""
+    start = time.monotonic()
+    for i, f in enumerate(frames):
+        await send(f)
+        delay = start + (i + 1) * frame_s - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+
 def heard(x: np.ndarray) -> str:
     return CodecSTT().transcribe(AudioClip(to_pcm16(x), 8000)).text
 
@@ -131,10 +142,8 @@ class FakeTwilio:
 
             async def say(text):
                 pcm = pcm16_to_ulaw(to_pcm16(tones(text)))
-                for i in range(0, len(pcm), 160):
-                    await ws.send(json.dumps({"event": "media", "streamSid": "MZ1",
-                                              "media": {"track": "inbound", "payload": base64.b64encode(pcm[i:i + 160]).decode()}}))
-                    await asyncio.sleep(0.02)
+                await paced(range(0, len(pcm), 160), lambda i: ws.send(json.dumps({"event": "media", "streamSid": "MZ1",
+                            "media": {"track": "inbound", "payload": base64.b64encode(pcm[i:i + 160]).decode()}})))
 
             await say("Riverside clinic, how can I help?")
             got: list[np.ndarray] = []
@@ -181,15 +190,20 @@ async def _call(p, caller_says: str):
     start = time.monotonic()
     rec = Recorder(8000, lambda: time.monotonic() - start)
     session = await build_connector(p, ROOT, None).open(ctx(), rec)
-    # The greeting comes down the phone line...
-    await asyncio.sleep(2.2)
+    # The greeting comes down the phone line: wait until it has been spoken and half a second of quiet follows
+    # (how long the call takes to connect differs from computer to computer).
+    deadline = time.monotonic() + 8
+    while time.monotonic() < deadline:
+        await asyncio.sleep(0.1)
+        spans = rec.agent_spans(0, rec.now_sample())
+        if spans and rec.now_sample() - spans[-1][1] > rec.sr // 2:
+            break
     greeting = heard(rec.agent.slice(0, rec.now_sample()))
     # ...the caller answers in real time, 20 ms frames, then stays quiet while the agent answers.
     x = tones(caller_says)
-    for i in range(0, len(x) + 160 * 60, 160):
-        frame = x[i:i + 160] if i < len(x) else np.zeros(160, np.float32)
-        await session.send_frame(np.pad(frame, (0, 160 - len(frame))))
-        await asyncio.sleep(0.02)
+    frames = (np.pad(f := (x[i:i + 160] if i < len(x) else np.zeros(160, np.float32)), (0, 160 - len(f)))
+              for i in range(0, len(x) + 160 * 60, 160))
+    await paced(frames, session.send_frame)
     await asyncio.wait_for(session.closed.wait(), 10)
     reply = heard(rec.agent.slice(rec.ms(0), rec.now_sample()))
     await session.close()
@@ -247,28 +261,42 @@ def test_phone_call_is_a_voice_connection_the_schema_accepts():
     assert ws_url("https://abc.trycloudflare.com/") == "wss://abc.trycloudflare.com"
 
 
+def _fake_program(folder: Path, name: str, code: str) -> Path:
+    """A stand-in program written in Python: a script with a #! line on Linux and macOS, and on Windows (which
+    can't run a script by its #! line) a .cmd file that runs the script with this Python."""
+    import os
+    import sys
+
+    script = folder / f"{name}.py"
+    script.write_text(code)
+    if os.name == "nt":
+        exe = folder / f"{name}.cmd"
+        exe.write_text(f'@"{sys.executable}" "{script}" %*\r\n')
+        return exe
+    exe = folder / name
+    exe.write_text(f"#!{sys.executable}\n{code}")
+    exe.chmod(0o755)
+    return exe
+
+
 def test_the_quick_tunnel_address_is_read_from_cloudflared(tmp_path):
     """cloudflared prints the random trycloudflare.com address in its log; Vocto reads it from there.
     (A stand-in program here: Vocto's tests never open a real public tunnel.)"""
-    import sys
-
     from vatf.connectors.tunnel import QuickTunnel, TunnelError
 
     fake = tmp_path / "cloudflared"
-    fake.write_text(f"#!{sys.executable}\nimport sys, time\n"
-                    "print('INF Requesting new quick Tunnel on trycloudflare.com...', flush=True)\n"
-                    "print('INF |  https://silly-words-here-1234.trycloudflare.com  |', flush=True)\n"
-                    "time.sleep(30)\n")
-    fake.chmod(0o755)
+    fake = _fake_program(tmp_path, "cloudflared",
+                         "import sys, time\n"
+                         "print('INF Requesting new quick Tunnel on trycloudflare.com...', flush=True)\n"
+                         "print('INF |  https://silly-words-here-1234.trycloudflare.com  |', flush=True)\n"
+                         "time.sleep(30)\n")
     t = QuickTunnel(fake, 8765)
     try:
         assert t.wait(10) == "https://silly-words-here-1234.trycloudflare.com" and t.alive()
     finally:
         t.stop()
     assert not t.alive()
-    broken = tmp_path / "broken"
-    broken.write_text(f"#!{sys.executable}\nprint('ERR failed to request quick Tunnel: 429 Too Many Requests')\n")
-    broken.chmod(0o755)
+    broken = _fake_program(tmp_path, "broken", "print('ERR failed to request quick Tunnel: 429 Too Many Requests')\n")
     with pytest.raises(TunnelError, match="429 Too Many Requests"):
         QuickTunnel(broken, 8765).wait(10)
 
@@ -413,11 +441,9 @@ class FakePlivo:
 
             async def say(text):
                 pcm = pcm16_to_ulaw(to_pcm16(tones(text)))
-                for i in range(0, len(pcm), 160):
-                    await ws.send(json.dumps({"event": "media", "streamId": "st-1", "media": {
-                        "track": "inbound", "timestamp": str(int(time.time() * 1000)), "chunk": i // 160,
-                        "payload": base64.b64encode(pcm[i:i + 160]).decode()}}))
-                    await asyncio.sleep(0.02)
+                await paced(range(0, len(pcm), 160), lambda i: ws.send(json.dumps({"event": "media", "streamId": "st-1", "media": {
+                            "track": "inbound", "timestamp": str(int(time.time() * 1000)), "chunk": i // 160,
+                            "payload": base64.b64encode(pcm[i:i + 160]).decode()}})))
 
             await say("Riverside clinic, how can I help?")
             got_audio: list[np.ndarray] = []

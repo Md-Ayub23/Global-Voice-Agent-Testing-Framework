@@ -20,7 +20,7 @@ uv run python -m vatf run examples/clinic --test-mode resilience --drills timeou
 | **Timing & turns** | Does a call feel natural? | Voice only. Answer times (typical and slowest), cut-ins, "mm-hm", pauses and silence. |
 | **Speech & accents** | Does it understand different callers on real phone lines? | Voice only. Every test case once under each caller condition you pick (clean line, phone line, noise, quiet or fast caller, bad signal, accents), side by side. See below. |
 | **Safety & security** | Can callers trick it into something harmful? | Only the attack calls written for this agent (Set up › Safety tests). |
-| **Resilience** | What happens when your systems fail during a call? | Your test cases again with their booking or order tool failing on purpose, one kind of failure at a time, plus any test case that breaks a tool itself. See below. |
+| **Resilience** | What happens when your systems fail during a call? | Your test cases again with a tool failing on purpose (the booking tool or the lookups, once or on every call, crashes, refusals or a dropped call), one kind of failure at a time, plus any test case that breaks a tool itself. See below. |
 | **Load & capacity** | How many calls at once can it handle? | The load test (ramp, spike, soak, steady). See [phase7-guide.md](phase7-guide.md). |
 | **Regression** | Did the latest change make anything worse? | Your full test set, compared with the run saved as the baseline. Needs a baseline first. |
 | **Real calls** | How is it doing with real callers? | Opens Quality › Real calls. See [phase8-guide.md](phase8-guide.md). |
@@ -60,6 +60,40 @@ Every Functional call is checked on what the agent **said**, what its tools **di
 - **Report.** The Analysis tab leads with tasks done right (with its likely range), untrue claims, details
   saved right and other changes, then how each task ended (said, did, saved) and results per job.
 
+## Timing & turns
+
+Timing runs your test cases as voice calls and times everything from the recording, the way a caller
+hears it. All timing numbers are measured by code; AI never times anything.
+
+- **One answer-time rule.** The typical answer (p50) and the slowest 5% (p95) must be within the limits in
+  Pass rules (800 ms and 1500 ms by default). p90 and p99 are shown next to them, never as a second
+  limit. Below 20 timed answers the p95 says "too few to judge" and shows what is known ("at least 1.4 s");
+  with enough answers it shows its likely range.
+- **Plain answers and tool answers apart.** An answer that needed a tool (the agent called one in that
+  turn) is timed apart from a plain answer. For tool answers there are two numbers: the first sound
+  (often "let me check") and the full wait until the real answer, after the tool answered.
+- **Coughs and door bangs.** The caller behaviour *Coughs, or a door bangs, while the agent talks* (persona
+  `behaviour.noises`, on in the *Hard* preset and the *Caller who coughs* persona) plays a cough, a door bang
+  or a clatter over the agent. It is not speech, so the agent should keep talking: **Kept talking through a
+  cough or bang**.
+- **Cut off in a pause.** When the caller stops to think mid-sentence (behaviour *pauses mid-sentence*), an
+  agent that starts before the caller has finished is counted as **Cut the caller off in a pause**, apart from
+  *talked over the caller*.
+- **Said the same thing again.** Agent turns nearly the same as an earlier one (5 words or more), unless the
+  caller asked it to repeat, went quiet, or repeated themselves. Text and voice. A stuck agent asking for the
+  same details again and again shows up here.
+- **Where the time went (optional).** If the agent's logs report its own speech recognition, AI and voice
+  times, add one pattern per stage on the profile (`logs.timing.stt`, `llm`, `tts`, each with a group named
+  `ms`, e.g. `llm_latency=(?P<ms>\d+)`). The report shows each stage's typical and slowest time.
+- **Report.** The Analysis tab leads with typical wait, slowest waits (with range and number of answers),
+  stops when cut in, keeps going through "mm-hm", and longest silence; then the wait spread split into plain and
+  tool answers, slowest answers per test case, **moments to listen to** (the 5 slowest waits and slow stops,
+  each opening the call at that moment), and where the time went.
+
+```powershell
+uv run python -m vatf run examples/clinic --profile profile-voice.yaml --test-mode timing --conditions hard
+```
+
 ## Speech & accents
 
 Pick the **conditions to compare** on the run page. Every test case runs once under each one, so 6 test
@@ -76,11 +110,39 @@ Keep **As written** on: it is the clean result the others are compared with.
 | Fast talker | Speaks about 30% faster than normal. |
 | Bad mobile signal | A phone line that loses 5% of its audio packets. |
 | Unsteady network | 80 ms of network jitter, with 1% of audio packets arriving out of order. |
+| People talking nearby | Other voices in the background, 10 dB below the caller: the hardest noise for speech recognition. |
+| Speakerphone in a room | The caller's voice echoes (about 0.6 s of reverberation). |
+| Numbers on the keypad | Numbers of 6 digits or more (phone numbers, codes) are typed as touch tones instead of said. |
 | Accents | The caller's voice is swapped for an accent (American, British, Scottish, Irish, Indian, or English spoken with a Hindi, Mandarin, Spanish, Arabic, Korean or Vietnamese first language). |
 
 The report shows **Results by caller condition**: each condition with the calls passed, the details the
 agent got right, answer times, and a status. *Handled* means every call passed; *Struggled* means some
-failed; *Broke* means none passed. "Worse than clean" marks a condition that did worse than As written.
+failed; *Broke* means none passed. "Worse than clean" marks a condition that did worse than As written by
+more than chance (Fisher's exact test); a smaller gap reads "no clear difference with this many calls".
+
+**Details by type.** Every caller fact a tool received is checked as the caller said it and given a type
+(name, phone number, date or time, email, address, code, amount). The report shows details right per type
+and per condition, and lists the details saved wrong: what the caller said next to what was saved, each
+opening the call at that moment.
+
+**Fair test.** After a voice call, Vocto's own careful speech recogniser listens to the caller's side of the
+recording: the audio exactly as the agent received it, after noise and the phone line. If it can't hear a
+fact either, a wrong detail is marked **too hard to hear (test issue)**, not the agent's failure.
+
+**Read back before saving.** Whether the agent read the caller's details back, and the caller said yes, before
+the booking or order was saved. The habit that prevents most speech mistakes. Shown, never blocking.
+
+**Find the breaking point.** On the run page, *Find the breaking point* runs up to 5 test cases (key ones
+first) once at cafe noise 20, 15, 10, 5 and 0 dB and at 1, 3, 5 and 10% packet loss. The report says how far
+the agent works ("works down to 5 dB") with a chart per step. These calls never decide the release.
+From the terminal: `--sweep as_written,snr:20,snr:15,snr:10,snr:5,snr:0,loss:1,loss:3,loss:5,loss:10`.
+
+**Synthetic or real voices.** The report always says whether the callers were synthetic voices (a best
+case: machine voices are cleaner than people) or recordings of real callers.
+
+**Hard-to-hear test cases.** On Speech › Test cases, *Write with AI* can now write details that are easy to
+mishear on purpose: fifteen and fifty, the 13th and the 30th, letters like B, D, P and T in a code, and
+uncommon names.
 The executive summary and the Speech scorecard name the conditions that broke the agent.
 
 **How many words the agent misheard.** If the agent reports what its speech recognition heard (the
@@ -114,41 +176,115 @@ tested with English and Tamil callers side by side.
 
 ## Resilience
 
-Real systems fail: a booking API times out, a service is busy, a login expires. Resilience mode checks
-what the agent does then, using **your own test cases**: each one that ends in a booking or order is run
-again with that tool failing the first time it is used, once per kind of failure you pick under
-**Failures to try**. Only the first try fails, the way real outages often clear, so the agent may get it
-done on a retry.
+Real systems fail: a booking API times out, a service is busy, a login expires, a slot is taken a second
+before the agent books it, the line drops. Resilience mode checks what the agent does then, using **your
+own test cases**: each one that ends in a booking or order is run again with one of its tools failing on
+purpose, once per kind of failure you pick on **Run**. Three choices make a drill:
+
+- **What breaks**: the booking or order tool (default), or **the lookups before it** (free times, the
+  menu, the account). When a lookup fails, the risk is the agent inventing what it couldn't read.
+- **How often**: **first call only** (outages often clear, so a retry may work) or **every call** (an
+  outage that lasts the whole call: the agent must say so, stop retrying and offer a way forward).
+- **Which failure**:
 
 | Failure | What breaks | It passes when |
 |---|---|---|
-| Doesn't answer | The tool times out (8 s). | It is done on a retry and confirmed, or the caller is told honestly it couldn't be done. |
+| Doesn't answer | The tool times out (8 s). | Done on a retry and confirmed, or the caller is told honestly it couldn't be done. |
 | Server error | The tool answers with an error (500). | The same. |
 | Too many requests | The service is busy (429) and says to try again in 2 s. | The same. |
 | Login expired | The agent's access token has expired (401). | The same. |
 | Rubbish answer | The tool answers with broken data; nothing is saved. | The same. |
 | Slow answer | The tool takes 4 s longer, then answers fine. | The task still gets done. |
-| Saved, but the answer was lost | The booking is saved, but the agent gets a time-out back. | The task is done exactly once, and the caller isn't told it failed. |
+| Saved, but the answer was lost | The booking is saved, but the agent gets a time-out back. | Done exactly once, and the caller isn't told it failed. |
+| Already taken | The booking is refused (409); the same request is refused again. | Another option the caller agrees to, or an honest no. Never "it's booked". |
+| Payment declined | The payment or order is refused (402). | The same. |
+| Out of stock | The order is refused (409). | The same. |
+| Call dropped | The line drops just after the booking is sent; the caller rings back on a new call. | Exactly one booking at the end (text runs only: the second call would need its own recording). |
+
+**Every call** applies to the five crash failures. A drill on every call passes only with an honest "it
+can't be done right now". On top of the outcome check, each drill gets hard checks:
+
+- **Stops retrying**: after a failure the agent tries the tool again at most 3 times (counted until a try
+  works). An agent that loops on a dead service fails.
+- **Acts on real data** (lookup drills, blocks): nothing is booked or ordered before some lookup really
+  answered. Booking a slot the agent never saw fails.
+- **Offers a person** (every-call drills, when the agent has a transfer or callback tool): it hands the
+  caller over, or offers to.
+- And one AI judge question on every drill: *did the agent offer a way forward* (try later, another
+  option, a callback, a person)? Like every judge item it is an opinion until the judges are trusted.
 
 A drill fails when the agent claims a booking that wasn't made, says it failed when it was done, or makes
-it twice. *Saved, but the answer was lost* is the duplicate-request test: an agent that blindly retries
-books twice, and one that gives up tells the caller something untrue. The report says how to fix it
-(look the booking up before retrying or giving up, and give the tool a request id so a retry is safe).
+it twice. *Saved, but the answer was lost* and *Call dropped* are the duplicate-request tests: an agent
+that blindly retries books twice. The report says how to fix it (look the booking up before retrying or
+giving up, and give the tool a request id so a retry is safe).
+
+**How your tools say no.** The refusal drills use a plain answer such as `{"error": "conflict"}` unless
+you give your own. On **Resilience › Test cases**, *How your tools say no* shows each tool that changes
+data with its three refusals; **Write with AI** drafts answers shaped like a real API for that tool (from
+its description), you check or edit them and press **Save** (profile `resilience.refusals`).
 
 A drill keeps the test's caller (persona, goal, facts) and the checks that stay true when a tool fails
-(no secrets, no forbidden tool); checks written for the happy path are left out. Scripted test cases
-aren't drilled, because their fixed lines can't react to a failure. Each drill is one call per failure,
-so *Repeats per test and failure* starts at 1.
+(no secrets, no forbidden tool, identity first); checks written for the happy path are left out. Scripted
+test cases aren't drilled, because their fixed lines can't react to a failure. Each drill is one call, so
+*Repeats per test and failure* starts at 1.
 
-The report shows **Results by tool failure**: each failure with the calls passed, how they ended (done on
-a retry, honest that it couldn't, untrue claims, duplicates) and the test cases that failed, with a link
-to a failed call. The Resilience scorecard reads "Handled N of M kinds of failure".
+From the terminal:
+
+```powershell
+uv run python -m vatf run examples/clinic --test-mode resilience --drills error,slot_taken,dropped_call --drill-on both --drill-repeat both
+```
+
+The **Analysis** tab shows: failures handled, untrue claims and duplicates (target 0), and retries (text)
+or the longest silence during a failure (voice); how calls ended per failure; a **test cases × failures**
+grid (a red cell opens its failed call); and **How it recovered**: retries, the most in one call, calls
+that kept trying too long, retries sent before a 429 said to, and in voice whether the caller heard the
+agent within 3 s of the failure and the longest silence. All of these are measured from the tool calls and
+the recording, never by AI. Failures inside the agent's own speech, AI or voice providers are out of
+scope: Vocto can't break those from outside.
 
 **Unsteady network.** The *Unsteady network* caller condition (voice) sends the caller's audio with
 80 ms of network jitter and 1% of packets out of order, as on a poor mobile data or Wi-Fi call. Pick it
 in Speech & accents to compare it with a clean line, or as a run's caller conditions.
 
 **Recovery after a load spike** is part of the load test: see [phase7-guide.md](phase7-guide.md).
+
+## Regression
+
+Regression answers "did the latest change make anything worse?". It runs your full test set and compares
+it with the run you saved as the **baseline** (open a good run, **Set as baseline**). AI agents don't
+answer the same way twice, so a plain "it failed once" comparison raises false alarms. Vocto guards
+against that in five ways:
+
+- **Confirm before blocking.** A test that passed every repeat in the baseline and fails just once now
+  runs 5 more times at once. It blocks only if at least 2 of its calls failed; otherwise it shows as
+  **Suspected (didn't repeat)** and never blocks. Two or more failures block straight away.
+- **Flaky tests.** Each test's pass rate over its last 10 runs (runs with bug switches left out). A test
+  that both passed and failed is **flaky**: its single failures don't block, and it is listed on its own
+  for the team to fix.
+- **Edited tests.** Every run saves a fingerprint of each test case. A test you edited since the baseline
+  shows as **Test edited**, never as a regression.
+- **What changed.** Each run records the agent version label (the **Agent version** field on Run, or
+  `--agent-version`), fingerprints of the profile and the agent's prompt (`agent_prompt`), the AI judge
+  and caller models and Vocto's version. The report lists what differs from the baseline. When the judge
+  models changed, judge scores never block (the judges moved, not the agent).
+- **Rolling baseline (option).** `regression.baseline.rolling: 3` compares with the last 3 good runs made
+  the same way, pooled, instead of one lucky or unlucky run.
+
+```yaml
+regression:
+  confirm: {reruns: 5, min_failures: 2}   # reruns: 0 = one failure blocks, as before
+  baseline: {rolling: 0}                  # 3 = the last 3 good runs pooled
+```
+
+The **Analysis** tab leads with Confirmed regressions, Suspected, Fixed since baseline and Flaky tests,
+then the pass rate over the last 10 runs (version labels on the line), what changed between the runs, a
+before / now table and the flaky list. A test that is fixed since the baseline has **Keep as a regression
+test**: it tags the test case `regression`, and kept tests run in every scheduled health check along
+with the critical ones.
+
+```powershell
+uv run python -m vatf run examples/clinic --test-mode regression --agent-version v1.4
+```
 
 ## Recorded caller lines
 

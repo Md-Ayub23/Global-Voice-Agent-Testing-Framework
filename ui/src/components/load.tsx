@@ -88,7 +88,7 @@ export function StageP95Chart({ rows, limit, width = 760 }: { rows: LoadStageSta
   const timed = rows.filter((r) => r.latency.p95_ms != null);
   if (!timed.length) return null;
   const W = Math.max(280, width), H = Math.round(Math.max(150, Math.min(220, W * 0.28))), L = 44, R = 10, T = 18, B = 26;
-  const max = niceMax(Math.max(...timed.map((r) => r.latency.p95_ms || 0), limit || 0, 1) * 1.1);
+  const max = niceMax(Math.max(...timed.map((r) => r.latency.p95_ms || 0), limit || 0, 100) * 1.1);
   const y = (v: number) => T + (H - T - B) * (1 - v / max);
   const step = (W - L - R) / rows.length;
   const bw = Math.min(46, step * 0.56);
@@ -130,7 +130,10 @@ export function StageP95Chart({ rows, limit, width = 760 }: { rows: LoadStageSta
 const pctText = (v: number | null | undefined) => (v == null ? "—" : `${v % 1 ? v.toFixed(1) : v}%`);
 
 function StageStatus({ r }: { r: LoadStageStats }) {
+  if (r.too_few) return <Chip icon="help" title={r.untrusted_why}>too few to judge</Chip>;
   if (!r.trusted) return <Chip icon="help" title={r.untrusted_why}>not enough evidence</Chip>;
+  if (r.meets_limits && r.reached === false)
+    return <Chip icon="help" title={`Calls ended so fast that at most ${r.in_flight_max ?? 0} were in progress at once, so this stage can't vouch for ${r.level} at once.`}>only {r.in_flight_max ?? 0} at once</Chip>;
   return r.meets_limits ? <Badge status="PASS" label="within limits" /> : <Badge status="FAIL" label="over a limit" />;
 }
 
@@ -177,6 +180,64 @@ function Kpi({ label, value, foot, tone }: { label: string; value: ReactNode; fo
   );
 }
 
+// Capacity: answer time p95 (line) and failed calls (bars) against calls at once, the breaking point marked.
+export function CapacityChart({ load, width = 760, voice = true }: { load: LoadSummary; width?: number; voice?: boolean }) {
+  const byLevel = new Map<number, LoadStageStats[]>();
+  for (const r of load.stages) if (r.finished) byLevel.set(r.level, [...(byLevel.get(r.level) || []), r]);
+  const pts = [...byLevel.entries()].sort((a, b) => a[0] - b[0]).map(([level, rs]) => {
+    const fin = rs.reduce((a, r) => a + r.finished, 0), failed = rs.reduce((a, r) => a + r.failed, 0);
+    const p95s = rs.map((r) => r.latency.p95_ms).filter((v): v is number => v != null);
+    return { level, p95: p95s.length ? Math.max(...p95s) : null, failedPct: fin ? (100 * failed) / fin : 0,
+      tooFew: rs.every((r) => r.too_few), ok: rs.every((r) => r.meets_limits) };
+  });
+  if (!pts.length) return null;
+  const W = Math.max(280, width), H = Math.round(Math.max(170, Math.min(240, W * 0.3))), L = 48, R = 40, T = 18, B = 30;
+  const limit = load.p95_limit_ms;
+  const hasP95 = voice && pts.some((p) => p.p95 != null);      // a text call's answer time is not a voice answer time
+  const maxMs = niceMax(Math.max(100, ...pts.map((p) => p.p95 || 0), limit || 0) * 1.1);
+  const maxPct = Math.max(10, niceMax(Math.max(...pts.map((p) => p.failedPct), load.limits.max_failed_pct) * 1.2));
+  const step = (W - L - R) / pts.length;
+  const cx = (i: number) => L + step * i + step / 2;
+  const yMs = (v: number) => T + (H - T - B) * (1 - v / maxMs);
+  const yPct = (v: number) => T + (H - T - B) * (1 - v / maxPct);
+  const bw = Math.min(30, step * 0.4);
+  const line = pts.map((p, i) => (p.p95 == null ? "" : `${i && pts[i - 1].p95 != null ? "L" : "M"}${cx(i)},${yMs(p.p95)}`)).join(" ");
+  const brk = load.breaking && !load.breaking.untrusted ? pts.findIndex((p) => p.level === load.breaking!.level) : -1;
+  return (
+    <svg className="chart w-full block overflow-visible" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Answer time and failed calls against calls at once" id="capacity-chart">
+      {[0, 0.25, 0.5, 0.75, 1].map((f) => (
+        <g key={f}>
+          <line x1={L} x2={W - R} y1={T + (H - T - B) * (1 - f)} y2={T + (H - T - B) * (1 - f)} stroke="var(--line)" />
+          {hasP95 && <text x={L - 8} y={T + (H - T - B) * (1 - f) + 4} textAnchor="end">{fmtMs(maxMs * f)}</text>}
+          <text x={W - R + 6} y={T + (H - T - B) * (1 - f) + 4} textAnchor="start">{Math.round(maxPct * f)}%</text>
+        </g>
+      ))}
+      {pts.map((p, i) => (
+        <TipG key={p.level} content={<><b>{p.level} at once</b><br />p95 {fmtMs(p.p95)} · {p.failedPct.toFixed(p.failedPct % 1 ? 1 : 0)}% failed{p.tooFew ? <><br />too few calls to judge</> : null}</>}>
+          <rect x={cx(i) - step / 2} y={T} width={step} height={H - T - B} fill="transparent" />
+          <rect x={cx(i) - bw / 2} y={yPct(p.failedPct)} width={bw} height={Math.max(0, yPct(0) - yPct(p.failedPct))} rx={2}
+            fill={p.failedPct > load.limits.max_failed_pct ? "var(--bad)" : "var(--line-strong)"} opacity={p.tooFew ? 0.5 : 0.85} />
+          <text x={cx(i)} y={H - 10} textAnchor="middle">{p.level}×</text>
+        </TipG>
+      ))}
+      {limit != null && hasP95 && limit <= maxMs && (
+        <g>
+          <line x1={L} x2={W - R} y1={yMs(limit)} y2={yMs(limit)} stroke="var(--warn)" strokeDasharray="5 4" strokeWidth={1.5} />
+          <text x={L + 4} y={yMs(limit) - 5} style={{ fill: "var(--warn)", fontWeight: 600 }}>p95 limit {fmtMs(limit)}</text>
+        </g>
+      )}
+      {hasP95 && <path d={line} fill="none" stroke="var(--accent)" strokeWidth={2} strokeLinejoin="round" />}
+      {hasP95 && pts.map((p, i) => p.p95 != null && <circle key={p.level} cx={cx(i)} cy={yMs(p.p95)} r={4} fill={p.tooFew ? "var(--muted)" : p.ok ? "var(--accent)" : "var(--bad)"} stroke="var(--surface)" strokeWidth={1.5} />)}
+      {brk >= 0 && (
+        <g>
+          <line x1={cx(brk) - step / 2} x2={cx(brk) - step / 2} y1={T} y2={H - B} stroke="var(--bad)" strokeDasharray="4 3" strokeWidth={1.5} />
+          <text x={cx(brk) - step / 2 + 4} y={T + 10} style={{ fill: "var(--bad)", fontWeight: 600 }}>breaks at {pts[brk].level}</text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
 // The Load tab of a load run's report.
 export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice: boolean; callHref: (id: string) => string }) {
   const [box, w] = useWidth<HTMLDivElement>();
@@ -184,15 +245,26 @@ export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice
   const top = Math.max(...load.stages.map((s) => s.level));
   const failedPct = load.calls ? (100 * load.failed) / load.calls : 0;
   const cmp = load.comparisons;
+  const [box3, w3] = useWidth<HTMLDivElement>();
+  const hr = load.headroom;
+  const leaks = load.leaks || [];
   return (
     <div className="flex flex-col gap-4" id="load-report">
+      {hr && (
+        <Notice tone={hr.peak != null && hr.capacity < hr.peak ? "bad" : hr.exact || hr.capacity ? "good" : "warn"} icon="activity">
+          <b id="load-headroom">{hr.text}</b>
+        </Notice>
+      )}
       <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(190px,1fr))]">
-        <Kpi label="Capacity" tone={load.capacity == null ? undefined : load.capacity >= top ? "good" : "bad"}
-          value={<span id="load-capacity">{load.capacity == null ? "—" : load.capacity}</span>}
+        <Kpi label="Capacity" tone={load.capacity == null ? undefined : hr?.peak != null ? (load.capacity >= hr.peak ? "good" : "bad")
+          : load.shape === "find_limit" ? undefined : load.capacity >= top ? "good" : "bad"}
+          value={<span id="load-capacity">{load.capacity == null ? "—" : hr && !hr.exact && load.capacity ? `${load.capacity}+` : load.capacity}</span>}
           foot={load.capacity == null ? "no stage had enough evidence" : load.capacity >= top ? `held the target of ${top} at once`
             : load.capacity === 0 ? `failed already at ${Math.min(...load.stages.map((s) => s.level))} at once` : `calls at once within every limit (target ${top})`} />
         <Kpi label="Calls" value={load.calls} foot={`${load.failed} failed (${failedPct.toFixed(failedPct % 1 ? 1 : 0)}%) · limit ${load.limits.max_failed_pct}% per stage`}
           tone={load.failed ? "bad" : undefined} />
+        {load.leaks && <Kpi label="Cross-call leaks" value={<span id="load-leaks">{leaks.length}</span>} tone={leaks.length ? "bad" : "good"}
+          foot={leaks.length ? "a caller's details turned up in another call" : "no caller's details turned up in another call"} />}
         {voice && <Kpi label="Answer time p95, top level" value={fmtMs(cmp.slowdown?.top_p95_ms ?? load.stages[load.stages.length - 1]?.latency.p95_ms)}
           foot={load.p95_limit_ms != null ? `limit ${fmtMs(load.p95_limit_ms)}${cmp.slowdown ? ` · ${fmtMs(cmp.slowdown.low_p95_ms)} at ${cmp.slowdown.low_level} at once` : ""}` : "no limit"} />}
         <Kpi label="Tests passed, top level" value={cmp.pass_rate ? pctText(cmp.pass_rate.top) : pctText(load.stages[load.stages.length - 1]?.pass_rate)}
@@ -211,6 +283,28 @@ export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice
         </Notice>
       )}
       {load.warnings.map((x, i) => <Notice key={i} tone="warn" icon="info">{x.message}</Notice>)}
+
+      {leaks.length > 0 && (
+        <Card id="load-leak-list">
+          <CardHead level={2} title="Cross-call leaks" sub="a caller's own details found in another caller's call (target 0) · opens the call at that moment" />
+          <div className="grid gap-1.5">
+            {leaks.map((l, i) => (
+              <a key={i} href={callHref(l.in_test) + `?at=${l.seq}`} className="flex items-center gap-2.5 text-[13px] rounded-md bg-surface-2 px-2.5 py-1.5 hover:no-underline text-ink">
+                <Icon name="alert" size={14} className="text-bad flex-none" />
+                <span className="flex-1 min-w-0">{l.text}</span>
+                <Chip tone="bad">{l.where === "said" ? "said aloud" : "in a tool call"}</Chip>
+              </a>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {load.stages.filter((s) => s.finished).length > 1 && (
+        <Card id="load-capacity-chart">
+          <CardHead level={2} title="Capacity" sub={`${voice ? "answer time p95 (line) and " : ""}failed calls (bars) at each level of calls at once${load.breaking && !load.breaking.untrusted ? " · the breaking point is marked" : ""}`} />
+          <div ref={box3}><CapacityChart load={load} width={w3} voice={voice} /></div>
+        </Card>
+      )}
 
       <Card>
         <CardHead level={2} title="Calls at once" sub={`${SHAPE_LABEL[load.shape]} · the plan (shaded) and the calls really in progress (line) · the bar under each stage is its result`} />

@@ -32,6 +32,28 @@ profile `load` section (Test › Load test, or by hand)
 | spike | `start_at` for `before_minutes`, `calls_at_once` for `minutes`, `start_at` for `after_minutes` | check it copes with a sudden rush and recovers |
 | soak | `calls_at_once` for `minutes`, read in windows of `window_minutes` | find slow leaks (answers slower over time) |
 | steady | `calls_at_once` for `minutes` | a plain check at the busiest time you expect |
+| find_limit | like ramp, `start_at` up to `calls_at_once` (the most to try), but it **stops at the first level that breaks a limit** | find where the agent breaks and your headroom |
+
+**Your busiest time.** Owners know their busiest hour, not "calls at once". Give `peak_calls_per_hour`
+and `call_minutes` (average call length): by Little's law, calls at once = calls per minute × minutes
+per call, so 120 calls an hour of 4 minutes each are 8 at once. That becomes the target (unless you type
+`calls_at_once`), and for find_limit the most to try is twice it. `expected_peak` can also be typed. The
+report then says, in one sentence: "Handles 12 calls at once within your limits (it broke a limit at 13).
+Your peak is 8, so you have 50% headroom." When nothing broke, it says "at least".
+
+**Light callers** (voice, on by default): under load each caller line is synthesised once and reused,
+and the careful second listen is skipped, so one computer can push more calls. Answer times still come
+from the audio. Switch `light: false` for full callers.
+
+**Cross-call leaks.** Every load call is checked: a caller's own identity details (facts named like
+name, phone, email, date of birth, reference, account) must never turn up in another call, in what the
+agent said or in its tool calls. A detail written in that call's own test case doesn't count. Any hit
+blocks. `unique_facts: [full_name, phone]` gives those facts a made-up value per call, so calls of the
+same test can be told apart too; pick only details your system doesn't need to find the caller.
+
+**Phone lines.** A load test over `phone_call` rings the real number: the Load test page shows about how
+many calls, the most at once and the estimated cost at your prices (Running costs), and Start waits for a
+tick that your phone account allows that many calls at once. From the terminal, add `--yes`.
 
 Each simulated caller makes one test call after another (closed loop): a stage keeps its level of
 calls in progress, new calls start 0.25 s apart (all at once in a spike), `pause_seconds` adds a
@@ -57,7 +79,8 @@ load:
     drift:     {blocks: false, pct: 50}
     recovery:  {blocks: false, pct: 25, ms: 200}   # spike: back to normal speed after the rush
     max_lag_ms: 100     # Vocto's own lag: above it a stage is "not enough evidence"
-    min_calls: 3
+    min_calls: 10       # finished calls a stage needs; fewer: "too few to judge"
+    min_answers: 20     # timed answers before a stage's p95 can break the limit
 ```
 
 ## The decision
@@ -70,6 +93,13 @@ Every stage runs at or below the target, so every stage must meet the limits:
   action, a forbidden phrase, a secret, a wrong tool order or a wrong read-back.
 - A test that fails for a reason load can cause by itself, like a slot already taken because many
   calls share one copy of the test data, only lowers the pass rate.
+- **Too few to judge**: a stage with fewer than `min_calls` finished calls (default 10) decides
+  nothing; its p95 needs `min_answers` timed answers (default 20) before it can break the limit. A lower
+  level with too few calls is listed and doesn't decide the run; the top level with too few is "not
+  enough evidence". Before the run, with `call_minutes` set, the page warns which stages are too short.
+- **Find the limit** stops stepping up at the first level that breaks a limit. Breaking above your peak
+  is the answer, not a failure: only a level at or below `expected_peak` (else the first level) can make
+  it NO-GO.
 - **Not enough evidence** when a stage had fewer than `min_calls` finished calls, when Vocto's own
   computer fell behind (lag p95 over `max_lag_ms`) or when more than 10% of calls failed because of
   Vocto itself. It never blames the agent for Vocto's limits.

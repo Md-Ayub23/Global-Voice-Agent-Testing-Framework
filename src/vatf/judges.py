@@ -87,10 +87,12 @@ def write_tools(profile: Mapping[str, Any]) -> set[str]:
 def split_relevant(items: Sequence[RubricItem], events: Sequence[Mapping[str, Any]],
                    profile: Mapping[str, Any]) -> tuple[list[RubricItem], list[RubricItem]]:
     """(items to ask the judges, items that can't come up in this call). An item that needs a change
-    (confirming before acting) is not asked when no write tool was called."""
+    (confirming before acting) is not asked when no write tool was called; one that needs a failure
+    (offering a way forward) when no tool failed."""
     writes = write_tools(profile)
     changed = any(e["type"] == "tool_request" and e["data"].get("tool") in writes for e in events)
-    ask = [i for i in items if not (i.needs == "write" and not changed)]
+    failed = any(e["type"] == "tool_response" and not e["data"].get("ok") for e in events)
+    ask = [i for i in items if not (i.needs == "write" and not changed) and not (i.needs == "failure" and not failed)]
     return ask, [i for i in items if i not in ask]
 
 

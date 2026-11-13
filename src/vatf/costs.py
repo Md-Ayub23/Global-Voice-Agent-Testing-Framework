@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any, Mapping, Sequence
 
 FIELDS = ("per_call", "per_minute", "per_reply", "per_tool_call")
-TASK_EXPECTED = ("success", "recover_or_honest")
+TASK_EXPECTED = ("success", "recover_or_honest", "alternative_or_honest")
 
 
 def prices(profile: Mapping[str, Any] | None) -> dict[str, Any] | None:

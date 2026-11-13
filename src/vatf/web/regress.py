@@ -79,6 +79,8 @@ def compare_runs(root: Path, runs: Path, run_a: str, run_b: str) -> dict[str, An
     except BaselineError as e:
         raise ValueError(str(e)) from e
     info = data._safe_json(b_dir / "run.json") or {}
+    # Tests the later run reran to confirm a single failure (its own comparison with the baseline says which).
+    b["reruns"] = dict((data._safe_json(b_dir / "comparison.json") or {}).get("confirmed_by_reruns") or {})
     try:
         project = load_project(root / info["project"], info.get("profile_file", "profile.yaml"))
         profile = project.profile
@@ -92,7 +94,7 @@ def compare_runs(root: Path, runs: Path, run_a: str, run_b: str) -> dict[str, An
     ab = (a_info.get("ab") or {}), (info.get("ab") or {})
     pair = bool(ab[0].get("group")) and ab[0].get("group") == ab[1].get("group") and ab[0].get("side") == "A"
     if pair:    # an A/B test of two versions: B against A, worded so, and nothing blocks
-        out = as_ab(compare(a, b, {"regression": {"enabled": False}}, "ab"))
+        out = as_ab(compare(a, b, {"regression": {"enabled": False, "confirm": {"reruns": 0}}}, "ab"))
         out["ab"] = {"labels": {"A": ab[0].get("label", "A"), "B": ab[1].get("label", "B")}}
     else:
         out = compare(a, b, profile, run_a)
@@ -100,6 +102,34 @@ def compare_runs(root: Path, runs: Path, run_a: str, run_b: str) -> dict[str, An
     out["same_agent"] = a.get("profile_id") == b.get("profile_id")
     out["snapshots"] = {"a": a, "b": b}
     return out
+
+
+def keep_as_test(root: Path, runs: Path, run_id: str, scenario_id: str) -> dict[str, Any]:
+    """Keep a fixed bug as a regression test: tag the test case `regression`, so it stays in every health check
+    and shows as a kept bug on the Test cases tab. Only the agent's own test cases (a file in scenarios/)."""
+    from .setup import _dump_rt, _load_rt
+
+    info = data._safe_json(data._run_dir(runs, run_id) / "run.json") or {}
+    if not info.get("project"):
+        raise ValueError("this run doesn't say which agent it tested")
+    folder = (root / info["project"]).resolve()
+    if not folder.is_relative_to(root.resolve()):
+        raise ValueError("this run's agent folder is outside the dashboard's folder")
+    for path in sorted((folder / "scenarios").glob("*.yaml")):
+        doc = _load_rt(path.read_text(encoding="utf-8"))
+        if isinstance(doc, dict) and doc.get("id") == scenario_id:
+            break
+    else:
+        raise data.NotFound(f"{scenario_id} is not one of this agent's own test cases (built-in tests can't be tagged)")
+    tags = list(doc.get("tags") or [])
+    if "regression" in tags:
+        return {"kept": True, "file": f"scenarios/{path.name}", "already": True}
+    if "tags" in doc:
+        doc["tags"].append("regression")
+    else:
+        doc["tags"] = ["regression"]
+    path.write_text(_dump_rt(doc), encoding="utf-8", newline="\n")
+    return {"kept": True, "file": f"scenarios/{path.name}", "already": False}
 
 
 def run_comparison(runs: Path, run_id: str) -> dict[str, Any] | None:

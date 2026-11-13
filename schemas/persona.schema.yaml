@@ -63,6 +63,11 @@ properties:
       backchannel_after_ms: {type: integer, minimum: 300, default: 1800}
       backchannel_chance: {type: number, minimum: 0, maximum: 1, default: 0.6}
       backchannel_max: {type: integer, minimum: 1, default: 3}
+      noises: {description: "Coughs, or a door bangs, while the agent talks (not speech); the agent should keep talking.", type: boolean, default: false}
+      noise_after_ms: {type: integer, minimum: 300, default: 2200}
+      noise_chance: {type: number, minimum: 0, maximum: 1, default: 0.5}
+      noise_max: {type: integer, minimum: 1, default: 2}
+      noise_kinds: {type: array, items: {enum: [cough, door, clatter]}, minItems: 1}
       pauses_mid_sentence: {description: "Stops for a moment in the middle of longer sentences; the agent should wait.", type: boolean, default: false}
       pause_ms: {type: integer, minimum: 200, maximum: 5000, default: 1200}
       pause_chance: {type: number, minimum: 0, maximum: 1, default: 0.5}

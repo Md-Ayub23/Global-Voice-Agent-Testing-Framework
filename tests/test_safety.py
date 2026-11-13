@@ -266,7 +266,7 @@ def test_a_judge_disagreement_is_to_review_not_a_failed_attack():
                          call("safety.messy.many-requests", ["FAIL", "NEEDS_REVIEW"]),
                          call("safety.abuse.insults", ["PASS"])], {})
     assert (s["calls"], s["passed"], s["failed"], s["to_review"]) == (3, 1, 1, 1)
-    assert s["packs"]["secrets"] == {"calls": 1, "failed": 0, "to_review": 1}
+    assert {k: s["packs"]["secrets"][k] for k in ("calls", "failed", "to_review")} == {"calls": 1, "failed": 0, "to_review": 1}
     assert s["findings"][0]["result"] == "FAIL"
 
 

@@ -10,6 +10,7 @@ from ..baseline import BaselineError, load_baseline
 from ..gateway import uses_gateway
 from ..load import DEFAULTS, LIMIT_DEFAULTS, LoadSettingsError, p95_limit, scenario_ids, settings, stages, summary
 from ..loader import ProjectError, load_project
+from ..loadstats import identity_facts
 from . import data
 from .regress import _brief, _profile
 
@@ -29,7 +30,7 @@ def load_page(root: Path, runs: Path, key: str, file: str = "profile.yaml") -> d
         s = settings(profile)
         out["settings"] = s
         st = stages(s)
-        out["plan"] = summary(s, st)
+        out["plan"] = summary(s, st, profile)
         out["tests_used"] = scenario_ids(s, p.scenarios, mode)
     except LoadSettingsError as e:
         out.update(settings=None, plan=None, tests_used=[], error=str(e))
@@ -37,7 +38,9 @@ def load_page(root: Path, runs: Path, key: str, file: str = "profile.yaml") -> d
     out["p95_limit_ms"] = p95_limit(s, profile, mode) if s else None
     out["voice_p95_ms"] = (profile.get("thresholds") or {}).get("latency_p95_ms", 1500) if mode == "voice" else None
     out["tests"] = [{"id": sc["id"], "title": sc.get("title", sc["id"]), "criticality": sc.get("criticality", "normal"),
-                     "faults": bool((sc.get("setup") or {}).get("faults")), "style": sc["style"]}
+                     "faults": bool((sc.get("setup") or {}).get("faults")), "style": sc["style"],
+                     # the caller's identity details: what the leak check looks for, and what unique_facts can vary
+                     "facts": sorted(identity_facts((sc.get("caller") or {}).get("facts") or {}))}
                     for sc in p.scenarios if mode in sc.get("modes", ["text", "voice"]) and not is_safety(sc)]
     conn = profile["connection"]
     tid = profile.get("test_id") or {}

@@ -98,3 +98,24 @@ def fisher_exact(a: int, b: int, c: int, d: int) -> float:
     observed = prob(a)
     total = sum(p for x in range(lo, hi + 1) if (p := prob(x)) <= observed * (1 + 1e-9))
     return min(1.0, total)
+
+
+def percentile_range(values: list[int], p: float, conf: float = 0.95) -> tuple[int | None, int | None]:
+    """The likely range of the true p-th percentile from these values (distribution-free: order statistics
+    with binomial ranks). (low, high) are measured values; high is None when even the slowest measured
+    value may be below the true percentile (too few values: "at least low"), and low is None the other way.
+
+    Of 10 answers, the true p95 is at least the 8th slowest-from-the-bottom value and may be slower than
+    anything measured: (x8, None). Of 60, both ends are measured values."""
+    xs = sorted(values)
+    n = len(xs)
+    if not n:
+        return None, None
+    q, tail = p / 100, (1 - conf) / 2
+
+    def cdf(k: int) -> float:                     # P(at most k of the n values are below the percentile)
+        return sum(math.comb(n, i) * q ** i * (1 - q) ** (n - i) for i in range(0, k + 1)) if k >= 0 else 0.0
+
+    low = max((r for r in range(1, n + 1) if cdf(r - 1) <= tail), default=None)
+    high = min((r for r in range(1, n + 1) if 1 - cdf(r - 1) <= tail), default=None)
+    return (xs[low - 1] if low else None), (xs[high - 1] if high else None)

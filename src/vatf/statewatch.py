@@ -293,7 +293,7 @@ def side_effects_check(scenario: Mapping[str, Any], profile: Mapping[str, Any],
     record_room: dict[str, int] = {}
     for o in outcomes:
         rec = o.get("record")
-        if not rec or o.get("expected") not in ("success", "recover_or_honest"):
+        if not rec or o.get("expected") not in ("success", "recover_or_honest", "alternative_or_honest"):
             continue
         for t in _probe_tables(profile, rec["probe"]):
             record_room[t] = record_room.get(t, 0) + int(rec.get("expect_count", 1))

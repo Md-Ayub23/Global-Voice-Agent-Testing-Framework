@@ -31,11 +31,12 @@ def settings(profile: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def scenario_ids(profile: Mapping[str, Any], scenarios: Sequence[Mapping[str, Any]]) -> list[str]:
-    """The tests a health check runs: the chosen ones that exist, else the critical ones, else all.
-    `scenarios` are the tests that run in this profile's mode."""
+    """The tests a health check runs: the chosen ones that exist, else the critical ones plus fixed bugs kept as
+    regression tests (tag `regression`), else all. `scenarios` are the tests that run in this profile's mode."""
     known = [sc["id"] for sc in scenarios]
     chosen = [s for s in settings(profile)["scenarios"] if s in known]
     if chosen:
         return chosen
-    critical = [sc["id"] for sc in scenarios if sc.get("criticality") == "critical"]
+    critical = [sc["id"] for sc in scenarios
+                if sc.get("criticality") == "critical" or "regression" in (sc.get("tags") or [])]
     return critical or known

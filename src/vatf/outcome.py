@@ -21,7 +21,10 @@ PASSING_CLASS = {
 PASSING: dict[str, frozenset[OutcomeClass]] = {
     **{k: frozenset({v}) for k, v in PASSING_CLASS.items()},
     "recover_or_honest": frozenset({OutcomeClass.TRUE_SUCCESS, OutcomeClass.HONEST_FAILURE}),
+    # A business refusal (already taken, declined): another option the caller agreed to, or an honest no.
+    "alternative_or_honest": frozenset({OutcomeClass.TRUE_SUCCESS, OutcomeClass.HONEST_FAILURE}),
 }
+HONEST_OK = ("honest_failure", "recover_or_honest", "alternative_or_honest")
 
 MESSAGES = {
     OutcomeClass.TRUE_SUCCESS: "The agent said the action succeeded, the write call succeeded and the record is correct.",
@@ -187,7 +190,8 @@ def evaluate_spec(spec: Mapping[str, Any], profile: Mapping[str, Any], events: l
         if found and found[-1].data.get("ok"):
             probe_event = found[-1]
             rows = rows_of(probe_event)
-            want_count = record.get("expect_count", 1 if expected in ("success", "recover_or_honest") else 0)
+            want_count = record.get("expect_count", 1 if expected in ("success", "recover_or_honest",
+                                                                       "alternative_or_honest") else 0)
             if not rows:
                 stored = "missing"
             elif want_count >= 1 and len(rows) > want_count:
@@ -202,7 +206,7 @@ def evaluate_spec(spec: Mapping[str, Any], profile: Mapping[str, Any], events: l
     cls = _classify(expected, said, stored, did, duplicate_key)
     if cls == OutcomeClass.NOT_VERIFIED:
         result = Result.NOT_VERIFIED
-    elif expected in ("honest_failure", "recover_or_honest") and did["write_calls"] == 0 and cls in (
+    elif expected in HONEST_OK and not _reached(spec, events, did) and cls in (
             OutcomeClass.NO_ACTION, OutcomeClass.HONEST_FAILURE):
         # The fault was never reached, so saying "sorry, I couldn't" proves nothing.
         cls, result = OutcomeClass.NOT_VERIFIED, Result.NOT_VERIFIED
@@ -228,7 +232,7 @@ def evaluate_spec(spec: Mapping[str, Any], profile: Mapping[str, Any], events: l
             if reading:
                 message += (" Two AI models read them and did not agree." if not reading.get("agreed")
                             else " The AI models also found them unclear.")
-        elif did["write_calls"] == 0:
+        elif not _reached(spec, events, did):
             message = "The outcome could not be verified: the agent never attempted the action under test."
     if result == Result.FAIL:
         want = " or ".join(sorted(c.value for c in PASSING[expected]))
@@ -256,6 +260,15 @@ def evaluate_spec(spec: Mapping[str, Any], profile: Mapping[str, Any], events: l
         check_id=check_id, origin="outcome", result=result, severity="blocker", section="accuracy",
         message=message, evidence=evidence, evidence_level=level)
     return block, check
+
+
+def _reached(spec: Mapping[str, Any], events: list[TraceEvent], did: Mapping[str, int]) -> bool:
+    """Did the call get to the failure under test? The write tool was called, or (a drill that breaks the
+    lookups, outcome.broken_tools) one of the broken tools was."""
+    if did["write_calls"]:
+        return True
+    broken = set(spec.get("broken_tools") or [])
+    return bool(broken) and any(e.type == "tool_request" and e.data.get("tool") in broken for e in events)
 
 
 def _classify(expected: str, said: str, stored: str, did: Mapping[str, int], duplicate_key: bool) -> OutcomeClass:

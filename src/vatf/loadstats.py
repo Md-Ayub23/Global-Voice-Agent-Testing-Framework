@@ -222,8 +222,9 @@ def stage_stats(stage: Stage, verdicts: Sequence[Mapping[str, Any]], samples: Se
         "in_flight_max": int(max(in_flight)) if in_flight else None,
     }
     trusted, untrusted_why = True, ""
-    if finished < int(limits["min_calls"]):
-        trusted, untrusted_why = False, f"only {finished} call(s) finished ({limits['min_calls']} needed)"
+    too_few = finished < int(limits["min_calls"])
+    if too_few:
+        trusted, untrusted_why = False, f"too few to judge: {finished} call(s) finished ({limits['min_calls']} needed)"
     elif out["lag_p95_ms"] is not None and out["lag_p95_ms"] > float(limits["max_lag_ms"]):
         trusted, untrusted_why = False, (f"Vocto's own computer couldn't keep up (lag p95 {out['lag_p95_ms']} ms, "
                                          f"limit {limits['max_lag_ms']} ms)")
@@ -233,23 +234,29 @@ def stage_stats(stage: Stage, verdicts: Sequence[Mapping[str, Any]], samples: Se
                          f"{len(failed)} of {finished} calls failed ({out['failed_pct']:g}%, limit "
                          f"{limits['max_failed_pct']:g}%): " + ", ".join(f"{n} {w}" for w, n in why.items()) + "."})
     p95 = out["latency"]["p95_ms"]
-    if p95_limit is not None and p95 is not None and p95 > p95_limit:
+    # The p95 of a handful of answers is just the slowest one: it decides nothing below min_answers.
+    out["p95_enough"] = len(lat) >= int(limits.get("min_answers", 0))
+    if p95_limit is not None and p95 is not None and p95 > p95_limit and out["p95_enough"]:
         problems.append({"rule": "latency", "message": f"answer time p95 {p95:,} ms (limit {p95_limit:,.0f} ms) "
                                                        f"over {len(lat)} answers."})
     for q in out["quality"]:
         if q["blocks"] and q["band"] == "bad":
             problems.append({"rule": "metric", "message": f"{q['title']} is in the bad band ({q['value']} {q['unit']})."})
     out["trusted"] = trusted
+    out["too_few"] = too_few
     out["untrusted_why"] = untrusted_why
     out["problems"] = problems
     out["meets_limits"] = None if not trusted else not problems
+    # Calls that end very fast (a few ms each) never pile up: the stage then never had its level in progress
+    # at once, so it can't vouch for that level. Failures in it still count.
+    out["reached"] = out["in_flight_max"] is None or out["in_flight_max"] >= stage.level
     return out
 
 
 def summarise(settings: Mapping[str, Any], stage_list: Sequence[Stage], verdicts: Sequence[Mapping[str, Any]],
               samples: Sequence[Sequence[float]], p95_limit: float | None, profile: Mapping[str, Any],
               mode: str, notes: Sequence[str] = (), gateway: Mapping[str, int] | None = None,
-              timeline: Sequence[Sequence[float]] = ()) -> dict[str, Any]:
+              timeline: Sequence[Sequence[float]] = (), leaks: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     """load.json: the stages' numbers, capacity, top-vs-low comparisons and what to keep in mind."""
     limits = settings["limits"]
     samples = _Timed(samples)
@@ -260,12 +267,19 @@ def summarise(settings: Mapping[str, Any], stage_list: Sequence[Stage], verdicts
             for st in stage_list]
 
     # Capacity: the highest level up to which every stage met the limits (and could be trusted).
-    capacity, breaking = 0, None
+    capacity, breaking, capped = 0, None, None
     for level in sorted({r["level"] for r in rows}):
         at = [r for r in rows if r["level"] == level]
+        if all(r.get("too_few") for r in at):
+            continue        # too few calls to judge this level: it neither counts for capacity nor stops it
+        at = [r for r in at if not r.get("too_few")]
         if all(r["meets_limits"] for r in at):
-            if breaking is None:
-                capacity = level
+            if breaking is None and capped is None:
+                if all(r.get("reached", True) for r in at):
+                    capacity = level
+                else:       # within limits, but the calls never really piled up to this level
+                    capped = max(capacity, max(int(r["in_flight_max"] or 0) for r in at))
+                    capacity = capped
         elif breaking is None:
             bad = next((r for r in at if r["meets_limits"] is False), None)
             if bad is not None:
@@ -370,6 +384,14 @@ def summarise(settings: Mapping[str, Any], stage_list: Sequence[Stage], verdicts
                                                        + " and ".join(why) + "."}
                 (blocking if rule["blocks"] else warnings).append(item)
 
+    if leaks:
+        blocking.append({"rule": "leak", "message":
+                         f"A caller's details turned up in another call {len(leaks)} time(s) "
+                         f"(in {len({l['in_test'] for l in leaks})} call(s)): " + "; ".join(l["text"] for l in leaks[:3])
+                         + ". One caller hearing or changing another caller's data blocks a release.",
+                         "refs": list(dict.fromkeys(l["in_test"] for l in leaks))[:20]})
+    tried = max((r["level"] for r in rows if r["finished"]), default=0)
+    peak = settings.get("expected_peak") or (None if settings["shape"] == "find_limit" else settings["calls_at_once"])
     calls = len(verdicts)
     harness = sum(1 for v in verdicts if (v.get("load") or {}).get("outcome") == "harness")
     all_notes = list(notes)
@@ -392,6 +414,10 @@ def summarise(settings: Mapping[str, Any], stage_list: Sequence[Stage], verdicts
         "calls": calls, "failed": sum(r["failed"] for r in rows), "harness_errors": harness,
         "harness_share": round(harness / calls, 3) if calls else 0.0,
         "capacity": capacity, "breaking": breaking,
+        "expected_peak": settings.get("expected_peak"),
+        "headroom": headroom(capacity, breaking, tried, peak, capped),
+        "capped": capped,
+        "leaks": list(leaks), "light": bool(settings.get("light", True)) and mode == "voice",
         "stages": rows, "comparisons": comparisons,
         "blocking": blocking, "warnings": warnings,
         "unattributed_tool_calls": unattributed,
@@ -399,3 +425,103 @@ def summarise(settings: Mapping[str, Any], stage_list: Sequence[Stage], verdicts
         "timeline": [list(t) for t in timeline],
         "notes": all_notes,
     }
+
+
+def headroom(capacity: int, breaking: Mapping[str, Any] | None, tried: int, peak: int | None,
+             capped: int | None = None) -> dict[str, Any]:
+    """The plain sentence: how many calls at once the agent handles within the limits, and the headroom over
+    the busiest time the owner expects. "At least" when nothing broke: capacity is known only up to what was tried."""
+    exact = bool(breaking) and not breaking.get("untrusted")
+    if not tried:
+        return {"capacity": capacity, "exact": False, "peak": peak, "pct": None, "text": "No stage finished a call."}
+    if capacity == 0 and exact:
+        text = f"It broke a limit at {breaking['level']} call{'s' if breaking['level'] != 1 else ''} at once, the lowest level tried."
+    elif exact:
+        text = (f"Handles {capacity} call{'s' if capacity != 1 else ''} at once within your limits "
+                f"(it broke a limit at {breaking['level']}).")
+    elif capped is not None and capacity:
+        text = (f"Handles at least {capacity} call{'s' if capacity != 1 else ''} at once within your limits: calls "
+                f"ended so fast that no more than {capped} were ever in progress at once, so higher levels weren't "
+                f"really tested.")
+    elif capacity:
+        text = (f"Handles at least {capacity} call{'s' if capacity != 1 else ''} at once within your limits: "
+                f"the most this test {'could judge' if breaking else 'tried'}.")
+    else:
+        text = "Capacity couldn't be judged: no level had enough calls, or Vocto's computer couldn't keep up."
+    pct = None
+    if peak and (capacity or exact):
+        if capacity >= peak:
+            pct = round(100 * (capacity - peak) / peak)
+            text += f" Your peak is {peak}, so you have {'at least ' if not exact else ''}{pct}% headroom."
+        else:
+            pct = round(100 * (capacity - peak) / peak)
+            text += f" Your peak is {peak}, so it is {peak - capacity} call{'s' if peak - capacity != 1 else ''} at once short."
+    return {"capacity": capacity, "exact": exact, "peak": peak, "pct": pct, "text": text}
+
+
+# ---- cross-call leaks --------------------------------------------------------------------------------
+
+IDENTITY = re.compile(r"name|phone|mobile|email|e_mail|birth|dob|reference|(^|_)ref($|_)|account|address|postcode|"
+                      r"post_code|zip|card|policy|member|order_id|booking_id|customer_id|patient_id|nhs|ssn|passport", re.I)
+NOT_IDENTITY = re.compile(r"doctor|staff|agent|business|clinic|restaurant|shop|store|item|dish|product|service|"
+                          r"company|brand|pet", re.I)
+FIRST = ("Aisha", "Bruno", "Chen", "Dara", "Elif", "Farid", "Greta", "Hiro", "Ines", "Jonas", "Kavya", "Liam", "Mina",
+         "Nikos", "Olu", "Pia", "Quinn", "Rosa", "Sanjay", "Tove", "Umar", "Vera", "Wren", "Xavi", "Yara", "Zeno",
+         "Anouk", "Bilal", "Cleo", "Dev")
+LAST = ("Abara", "Brandt", "Castellano", "Duarte", "Eriksen", "Fontaine", "Gallo", "Haddad", "Ivanova", "Jansen",
+        "Kowalczyk", "Lindqvist", "Moreau", "Nakamura", "Okafor", "Petrov", "Quintero", "Rasmussen", "Silva",
+        "Takahashi", "Underwood", "Varga", "Whitlock", "Xu", "Yilmaz", "Zielinski", "Achterberg", "Bianchi",
+        "Coelho", "Dimitriou")
+
+
+def identity_facts(facts: Mapping[str, Any]) -> dict[str, str]:
+    """A caller's own identity details (name, phone, email, date of birth, reference...): what must never
+    turn up in another caller's call. Short values (under 4 characters) are left out: too common to tell apart."""
+    return {k: str(v).strip() for k, v in facts.items()
+            if not isinstance(v, (dict, list)) and v is not None and IDENTITY.search(k) and not NOT_IDENTITY.search(k)
+            and len(str(v).strip()) >= 4}
+
+
+def unique_value(name: str, value: Any, n: int) -> str:
+    """A value of its own for call n of the load: a made-up name, a phone number from the range kept for
+    drama (07700 900xxx), an example.com email, or the value with the call number."""
+    key = name.lower()
+    if "email" in key:
+        return f"caller{n}@example.com"
+    if "phone" in key or "mobile" in key:
+        return f"07700 900{n % 1000:03d}"
+    if "name" in key:
+        return f"{FIRST[n % len(FIRST)]} {LAST[(n // len(FIRST)) % len(LAST)]}"
+    return f"{value}-{n}"
+
+
+def cross_call_leaks(calls: Sequence[Mapping[str, Any]], show: bool = False, limit: int = 50) -> list[dict[str, Any]]:
+    """Every call's own identity details checked against what the agent said and sent to its tools in every
+    other call of the load. A detail that is the call's own, or written anywhere in its own test case, is
+    never a leak. `show`: put the detail itself in the text (only when personal data isn't masked)."""
+    from .speechcheck import said_in
+
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for x in calls:
+        mine = {v.lower() for v in x["own"].values()}
+        for y in calls:
+            if y is x or y["test_id"] == x["test_id"]:
+                continue
+            for fact, value in y["own"].items():
+                low = value.lower()
+                if low in mine or low in x["context"] or (x["test_id"], y["test_id"], fact) in seen:
+                    continue
+                hit = next((("said", seq) for seq, text in x["said"] if said_in(value, text)), None) or \
+                    next((("tool", seq) for seq, args in x["tools"] if low in args.lower() or said_in(value, args)), None)
+                if hit is None:
+                    continue
+                seen.add((x["test_id"], y["test_id"], fact))
+                where = "the agent said" if hit[0] == "said" else "the agent sent to a tool"
+                detail = f"{fact} {value!r}" if show else fact.replace("_", " ")
+                out.append({"in_test": x["test_id"], "in_scenario": x["scenario_id"], "seq": hit[1], "where": hit[0],
+                            "from_test": y["test_id"], "from_scenario": y["scenario_id"], "fact": fact,
+                            "text": f"call {x['test_id']}: {where} the {detail} of the caller in call {y['test_id']}"})
+                if len(out) >= limit:
+                    return out
+    return out

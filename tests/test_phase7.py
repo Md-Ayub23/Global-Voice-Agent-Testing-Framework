@@ -177,7 +177,9 @@ def lv(stage, outcome="ok", status="PASS", answers=(), blockers=(), why=""):
 
 
 def test_stage_numbers_capacity_slowdown_and_trust():
-    s = settings({"load": {"calls_at_once": 3, "steps": 3, "step_minutes": 1, "limits": {"p95_ms": 1000}}})
+    # Small fixed stages: the minimums lowered (the defaults, 10 calls and 20 answers, are tested in test_load_upgrade).
+    s = settings({"load": {"calls_at_once": 3, "steps": 3, "step_minutes": 1,
+                           "limits": {"p95_ms": 1000, "min_calls": 3, "min_answers": 1}}})
     st = stages(s)
     samples = [(t / 10, 1.0, 1 if t < 600 else (2 if t < 1200 else 3)) for t in range(1800)]
     verdicts = ([lv(0, answers=[(5 + i, 300)]) for i in range(4)]
@@ -293,6 +295,8 @@ def test_load_reference_agent_capacity_is_found_exactly(tmp_path):
     try:
         proj = load_project(ROOT / "examples" / "load-ref")
         proj.profile["connection"]["target"] = f"ws://127.0.0.1:{box['port']}"
+        # 15 s stages finish a handful of calls: the minimums are lowered for this quick check.
+        proj.profile.setdefault("load", {}).setdefault("limits", {}).update(min_calls=2, min_answers=2)
         s = settings(proj.profile, calls_at_once=4, step_minutes=0.25)
         cfg = RunConfig(root=ROOT, runs_dir=tmp_path / "runs", offline=True, speech=SpeechConfig(engine="codec"),
                         baseline="none")
@@ -340,7 +344,10 @@ def test_clinic_load_go_then_double_booking_no_go_with_baseline_ci_and_alerts(cl
     assert load_cli(clinic, runs, "--junit", str(junit), "--summary", str(summary)) == 0
     good = newest(runs)
     decision = read_json(good / "decision.json")
-    assert decision["decision"] == "GO" and decision["load"]["capacity"] == 3
+    # The offline practice agent answers in about a millisecond, so calls never pile up to 3 at once: capacity is
+    # only counted up to the calls really in progress, not the level that was asked for.
+    assert decision["decision"] == "GO" and decision["load"]["capacity"] == 1
+    assert "ended so fast" in decision["load"]["headroom"]["text"]
     assert decision["reasons"][0]["rule"] == "load_ok"
     load = read_json(good / "load.json")
     assert load["calls"] >= 6 and load["stages"][0]["failed"] == 0

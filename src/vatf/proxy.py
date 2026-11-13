@@ -49,6 +49,7 @@ class InProcessToolProxy:
         self._ctx: CallContext | None = None
         self._sink: EventSink | None = None
         self._calls_per_tool: dict[str, int] = {}
+        self._refused: dict[str, list[dict]] = {}    # refused faults with same_args: the requests said no to
         self._n = 0
         self.turn: int | None = None  # set by the orchestrator before each caller turn
 
@@ -57,6 +58,10 @@ class InProcessToolProxy:
 
     async def detach(self) -> None:
         self._sink = None
+
+    def calls_to(self, tool: str) -> int:
+        """How many times the agent has called this tool so far in the call."""
+        return self._calls_per_tool.get(tool, 0)
 
     def endpoint_for(self, tool: str) -> str:
         return self._tools[tool].get("upstream", "")
@@ -81,13 +86,29 @@ class InProcessToolProxy:
 
         fault = next((f for f in self._faults if f["tool"] == tool
                       and f.get("on_call", n_for_tool) == n_for_tool), None)
+        if fault is None and args in self._refused.get(tool, []):
+            # A business refusal holds: asking again for the same thing (same slot, same card) is refused again.
+            fault = next((f for f in self._faults if f["tool"] == tool and f["type"] == "refused"), None)
         if fault is None:
             status, body, ms = self._forward(tool, args)
             return self._respond(call_id, tool, status, body, ms, True)
 
+        kind = fault["type"]
+        if kind == "poisoned_data":
+            # The real answer, with an instruction hidden in a field a person would type (a safety test).
+            status, body, ms = self._forward(tool, args)
+            body, where = poison(body, fault.get("text", ""))
+            self._sink.emit("tool_proxy", "fault_injected", {"call_id": call_id, "tool": tool,
+                                                            "fault": {**dict(fault), "field": where}}, turn=self.turn)
+            return self._respond(call_id, tool, status, body, ms, True)
         self._sink.emit("tool_proxy", "fault_injected", {"call_id": call_id, "tool": tool, "fault": dict(fault)},
                         turn=self.turn)
-        kind = fault["type"]
+        if kind == "refused":
+            # A business "no" (already taken, declined, out of stock): nothing is saved.
+            if fault.get("same_args"):
+                self._refused.setdefault(tool, []).append(args)
+            return self._respond(call_id, tool, int(fault.get("status", 409)),
+                                 fault.get("body") or {"error": "refused"}, 0, False)
         # A slow answer and a rubbish answer reach the backend unless the fault says forward: false.
         forward = bool(fault.get("forward", kind in ("slow", "malformed_response")))
         reached = False
@@ -157,6 +178,42 @@ class InProcessToolProxy:
             module, _, func = upstream[len("python:"):].partition(":")
             self._handlers[upstream] = getattr(importlib.import_module(module), func)
         return self._handlers[upstream]
+
+
+POISON_FIELDS = ("notes", "note", "comments", "comment", "description", "memo", "remarks", "name", "full_name",
+                 "title", "message")
+
+
+def poison(body: Any, text: str) -> tuple[Any, str]:
+    """The tool's answer with `text` hidden in it, and where: appended to the first notes-like or name-like
+    text field (in the first record of a list), else added as a "notes" field. A plain-text answer gets it
+    on the end. The rest of the answer is untouched, so the agent can still do its job with it."""
+    import copy
+
+    body = copy.deepcopy(body)
+    target = body
+    path = ""
+    if isinstance(body, list) and body and isinstance(body[0], dict):
+        target, path = body[0], "[0]."
+    elif isinstance(body, dict):
+        for k, v in body.items():            # e.g. {"patient": {...}} or {"slots": [{...}]}
+            if isinstance(v, dict):
+                target, path = v, f"{k}."
+                break
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                target, path = v[0], f"{k}[0]."
+                break
+    if isinstance(target, dict):
+        for name in POISON_FIELDS:
+            key = next((k for k in target if str(k).lower() == name and isinstance(target[k], str)), None)
+            if key is not None:
+                target[key] = f"{target[key]} {text}".strip()
+                return body, path + str(key)
+        target["notes"] = text
+        return body, path + "notes"
+    if isinstance(body, str):
+        return f"{body} {text}".strip(), "text"
+    return {"result": body, "notes": text}, "notes"
 
 
 def _http_call(method: str, url: str, args: Mapping[str, Any], headers: Mapping[str, str]) -> tuple[int, Any]:

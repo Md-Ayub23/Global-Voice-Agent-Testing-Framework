@@ -20,14 +20,21 @@ Harder callers (conditions.py, from the persona or the run's preset):
     the turn number, so a scripted test's turn checks still line up;
   * "mm-hm": a short backchannel while the agent talks; the agent should keep talking
     (caller_sound events, with agent_kept_talking);
-  * pauses mid-sentence, fillers ("um"): how a line is said (caller_turn data.spoken, pause_ms);
+  * a cough, a door bang or a clatter while the agent talks: not speech, so the agent should keep talking
+    too (caller_sound kind noise, with agent_kept_talking);
+  * pauses mid-sentence, fillers ("um"): how a line is said (caller_turn data.spoken, pause_ms, and
+    data.pause: where in the recording the pause was, so an agent that jumps in during it is seen);
   * goes quiet: handled by the orchestrator's call loop (caller_sound kind silence);
   * quieter voice: speech levelled volume_db below normal.
+
+A scripted line may have a voice behind it (turn `background`, safety tests): another speaker says those
+words 8 dB quieter, from halfway through the caller's line, like a TV or a colleague in the room.
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,12 +44,17 @@ import numpy as np
 
 from .audio.pcm import SPEECH_DBFS, from_pcm16, read_wav, resample, set_level, to_pcm16
 from .audio.recorder import Line, Recorder
+from .audio.noise import room_echo, sound_effect, touch_tones
 from .audio.vad import trim
 from .contracts.models import AudioClip
 
 POLL_S = 0.03
 RECORDING = "audio/call.wav"
+KEYPAD_NUMBER = re.compile(r"\d(?:[ \-]?\d){5,}")    # a number of 6 digits or more, maybe spaced: typed on the keypad
 KEPT_TALKING_MS = 300     # after a "mm-hm" ends, the agent's turn must go on at least this long
+# A voice in the room behind the caller (safety tests, scripted turn `background`): another speaker, quieter.
+BACKGROUND_VOICE, BACKGROUND_VOICE_2 = "en_GB-alan-medium", "en_US-lessac-medium"
+BACKGROUND_DB = -8.0
 
 
 @dataclass
@@ -57,6 +69,7 @@ class Heard:
     auto: bool = False                # the cut-in was the caller's own (persona behaviour), not the scenario's
     plan: int | None = None           # which audio.barge_in entry (1, 2...) cut in on this turn
     backchannels: list[tuple[int, int, str]] = field(default_factory=list)   # (start, end, word) said over the turn
+    noises: list[tuple[int, int, str]] = field(default_factory=list)         # (start, end, kind) of coughs, bangs
 
 
 @dataclass
@@ -67,6 +80,29 @@ class Prepared:
     spoken: str | None
     pause_ms: int
     recording: str | None = None
+    pause_at_ms: int = 0              # where the pause starts, from the start of the clip
+
+
+class CachedTTS:
+    """Light load callers: a caller line is synthesised once and the clip reused by every call that says it
+    (the same voice and speed). Under load this takes the biggest cost off Vocto's own computer; answer times
+    are still read from the audio."""
+
+    def __init__(self, tts: Any, cache: dict):
+        self.tts, self.cache = tts, cache
+
+    def warm_up(self, *args: Any) -> None:
+        self.tts.warm_up(*args)
+
+    def synthesize(self, text: str, voice: str = "", speaking_rate: float = 1.0) -> Any:
+        key = (text, voice, speaking_rate)
+        hit = self.cache.get(key)
+        if hit is None:
+            hit = self.cache[key] = self.tts.synthesize(text, voice, speaking_rate)
+        return hit
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.tts, name)
 
 
 @dataclass
@@ -104,26 +140,50 @@ class VoiceConversation:
         for w in words:
             if w not in self._sounds:
                 self._sounds[w] = await self.synthesize(w)
+        if b.noises:
+            for kind in b.noise_kinds:
+                self._sounds["noise:" + kind] = sound_effect(kind, self.rec.sr, self.cond.seed)
 
     # ---- the caller's mouth -------------------------------------------------
     async def synthesize(self, text: str) -> np.ndarray:
         clip = await asyncio.to_thread(self.tts.synthesize, text, self.voice, self.rate)
         x = resample(from_pcm16(clip.pcm16), clip.sample_rate_hz, self.rec.sr)
         volume = self.cond.volume_db if self.cond else 0.0
-        return set_level(trim(x, self.rec.sr), SPEECH_DBFS + volume)
+        x = set_level(trim(x, self.rec.sr), SPEECH_DBFS + volume)
+        if self.cond is not None and self.cond.echo:      # speakerphone: the room's echo comes with the voice
+            x = room_echo(x, self.rec.sr, self.cond.seed)
+        return x
+
+    async def with_keypad(self, text: str) -> "Prepared | None":
+        """Keypad condition: a line with a number of 6 digits or more (a phone number, a code; not a year) is said up to the number, and the number
+        is typed as touch tones ("my number is" + tones). None when the line has no such number."""
+        m = KEYPAD_NUMBER.search(text)
+        if self.cond is None or not self.cond.keypad or not m:
+            return None
+        keys = re.sub(r"\D", "", m.group(0))
+        before, after = text[:m.start()].strip(), text[m.end():].strip(" .,")
+        parts = [await self.synthesize(before)] if before else []
+        parts += [np.zeros(self.rec.sr // 4, np.float32), touch_tones(keys, self.rec.sr), np.zeros(self.rec.sr // 4, np.float32)]
+        if after:
+            parts.append(await self.synthesize(after))
+        spoken = f"{before} [keypad {keys}] {after}".strip()
+        return Prepared(np.concatenate(parts), spoken, 0)
 
     async def prepare(self, text: str) -> "Prepared":
         """A caller line as this caller says it: with a filler, or a pause in the middle (conditions)."""
         if self.cond is None or not text:
             return Prepared(await self.synthesize(text), None, 0)
+        if (typed := await self.with_keypad(text)) is not None:
+            return typed
         first, second, spoken = self.cond.spoken(text)
         clip = await self.synthesize(first)
-        pause = 0
+        pause, at = 0, 0
         if second:
             pause = self.cond.behaviour.pause_ms
+            at = len(clip) * 1000 // self.rec.sr
             clip = np.concatenate([clip, np.zeros(pause * self.rec.sr // 1000, np.float32),
                                    await self.synthesize(second)])
-        return Prepared(clip, spoken, pause)
+        return Prepared(clip, spoken, pause, pause_at_ms=at)
 
     async def recording(self, path: Path, name: str) -> "Prepared":
         """A caller line played from a recording of a real caller: levelled to this caller's speaking volume."""
@@ -131,20 +191,33 @@ class VoiceConversation:
         volume = self.cond.volume_db if self.cond else 0.0
         return Prepared(set_level(trim(x, self.rec.sr), SPEECH_DBFS + volume), None, 0, name)
 
+    async def with_background(self, clip: "Prepared", words: str) -> "Prepared":
+        """The caller's line with another voice in the room (a TV, a colleague) saying `words`: a different
+        voice, BACKGROUND_DB quieter, starting halfway through the line and running on after it."""
+        other = BACKGROUND_VOICE if self.voice != BACKGROUND_VOICE else BACKGROUND_VOICE_2
+        x = await asyncio.to_thread(self.tts.synthesize, words, other, 1.0)
+        back = set_level(trim(resample(from_pcm16(x.pcm16), x.sample_rate_hz, self.rec.sr), self.rec.sr),
+                         SPEECH_DBFS + BACKGROUND_DB)
+        start = len(clip.clip) // 2
+        out = np.zeros(max(len(clip.clip), start + len(back)), np.float32)
+        out[:len(clip.clip)] += clip.clip
+        out[start:start + len(back)] += back
+        return Prepared(np.clip(out, -1.0, 1.0), clip.spoken, clip.pause_ms, clip.recording, clip.pause_at_ms)
+
     async def say(self, text: str, turn: int, clip: "np.ndarray | Prepared | None" = None,
-                  emit: bool = True) -> tuple[int, int]:
+                  emit: bool = True, background: str | None = None) -> tuple[int, int]:
         if not isinstance(clip, Prepared):
             clip = Prepared(await self.synthesize(text) if clip is None else clip, None, 0)
         start, end = self.line.speak(clip.clip)
         self.proxy.turn = turn  # tool calls from here on belong to this caller turn
         if emit:
             self.emit_caller_turn(text, start, end, turn, spoken=clip.spoken, pause_ms=clip.pause_ms,
-                                  recording=clip.recording)
+                                  recording=clip.recording, background=background, pause_at_ms=clip.pause_at_ms)
         return start, end
 
     def emit_caller_turn(self, text: str, start: int, end: int, turn: int, barge_in: bool = False,
                          spoken: str | None = None, pause_ms: int = 0, auto: bool = False,
-                         recording: str | None = None) -> None:
+                         recording: str | None = None, background: str | None = None, pause_at_ms: int = 0) -> None:
         data: dict[str, Any] = {"text": text,
                                 "audio": {"file": RECORDING, "start_ms": self.ms(start), "end_ms": self.ms(end)}}
         if barge_in:
@@ -155,8 +228,12 @@ class VoiceConversation:
             data["spoken"] = spoken
         if pause_ms:
             data["pause_ms"] = pause_ms
+            p0 = self.ms(start) + pause_at_ms
+            data["pause"] = {"start_ms": p0, "end_ms": p0 + pause_ms}     # where the caller stopped to think
         if recording:
             data["recording"] = recording       # played from a real caller's recording, not synthesized
+        if background:
+            data["background"] = background     # another voice in the room said this behind the caller
         self.writer.emit("caller", "caller_turn", data, turn=turn, t_ms=self.ms(start))
 
     # ---- the caller's ears --------------------------------------------------
@@ -196,6 +273,7 @@ class VoiceConversation:
         # May the caller cut in on this turn? Not on the greeting: callers let the agent say hello.
         cut_in = bool(b and b.interrupts and not barges and self.agent_turns > 1)
         mm_hm = bool(b and b.backchannels)
+        bang = bool(b and b.noises and self.agent_turns > 1)
         wait_from = max(since, caller_end or since)
         heard = Heard()
         deadline_wait = None
@@ -227,6 +305,12 @@ class VoiceConversation:
                     word = self.cond.pick(list(self.cond.backchannel_lines()))
                     s0, s1 = self.line.speak(self._sounds[word])
                     heard.backchannels.append((s0, s1, word))
+            if bang and talking and now >= heard.start + b.noise_after_ms * self.rec.sr // 1000:
+                bang = False                                      # at most one per agent turn
+                if self.cond.wants_noise():
+                    kind = self.cond.pick(list(b.noise_kinds))
+                    s0, s1 = self.line.speak(self._sounds["noise:" + kind])
+                    heard.noises.append((s0, s1, kind))
             if cut_in and talking and now >= heard.start + b.interrupt_after_ms * self.rec.sr // 1000:
                 cut_in = False
                 if self.cond.wants_interrupt():
@@ -303,8 +387,11 @@ class VoiceConversation:
                                  t_ms=self.ms(heard.start) if heard.start is not None else None)
         for s0, s1, word in heard.backchannels:
             self.emit_backchannel(heard, s0, s1, word, turn, getattr(event, "seq", None))
+        for s0, s1, kind in heard.noises:
+            self.emit_backchannel(heard, s0, s1, kind, turn, getattr(event, "seq", None), sound="noise")
 
-    def emit_backchannel(self, heard: Heard, s0: int, s1: int, word: str, turn: int, agent_seq: int | None) -> None:
+    def emit_backchannel(self, heard: Heard, s0: int, s1: int, word: str, turn: int, agent_seq: int | None,
+                         sound: str = "backchannel") -> None:
         """A "mm-hm" said over an agent turn, and whether the agent kept talking through it (it should:
         a backchannel says "go on", not "stop"). Stopping = clearing its audio within a second of it, or
         its turn ending within KEPT_TALKING_MS of the backchannel's end."""
@@ -317,7 +404,7 @@ class VoiceConversation:
         end = heard.end if heard.end is not None else s1
         kept = bool(not cleared and not (heard.interrupted and heard.barge and heard.barge[0] <= s1)
                     and end >= s1 + KEPT_TALKING_MS * sr // 1000)
-        data: dict[str, Any] = {"kind": "backchannel", "text": word, "agent_kept_talking": kept,
+        data: dict[str, Any] = {"kind": sound, ("sound" if sound == "noise" else "text"): word, "agent_kept_talking": kept,
                                 "audio": {"file": RECORDING, "start_ms": self.ms(s0), "end_ms": self.ms(s1)}}
         if agent_seq is not None:
             data["agent_turn"] = agent_seq

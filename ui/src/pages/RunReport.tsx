@@ -256,7 +256,8 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           <Tabs value={shown} onChange={setTab} tabs={tabs} className="mb-0" />
         </div>
 
-        {shown === "analysis" && rd && <TypeAnalysis mode={rd.mode.id} d={d} rd={rd} finals={finals} titles={titleOf} callHref={callLink} />}
+        {shown === "analysis" && rd && <TypeAnalysis mode={rd.mode.id} d={d} rd={rd} finals={finals} titles={titleOf} callHref={callLink}
+          cmp={run.comparison} runId={runId} runHref={(id) => projectHref(project.key, `/runs/${id}`)} />}
         {shown === "findings" && rd && rd.mode.id === "speech" && <ConditionsCard r={rd} callHref={callLink} />}
         {shown === "findings" && rd && <FailuresCard r={rd} callHref={callLink} />}
         {shown === "findings" && rd && <AnalysisCard runId={runId} r={rd} saved={run.analysis} callHref={callLink} apiKey={!!system?.api_key?.set} />}

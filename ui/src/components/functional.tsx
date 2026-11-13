@@ -25,11 +25,13 @@ export function CoverageCard({ projectKey, file, onWrite }: { projectKey: string
   const shown = open ? c.gaps : c.gaps.slice(0, 4);
   return (
     <Card id="coverage">
-      <CardHead level={2} title="What the test cases cover"
-        sub={c.has_plan ? "the agent's jobs and rules, from its instructions, and its tools that change data"
-          : "its tools that change data. Draft with AI once to also list its jobs and rules"}>
+      <CardHead level={2} title="What the test cases cover" className="!mb-1">
         {c.gaps.length > 0 && <Button size="sm" icon="sparkles" id="write-gaps" onClick={() => onWrite(c.focus)}>Write tests for these</Button>}
       </CardHead>
+      <p className="text-muted text-[13px] mb-3.5 max-w-[760px]" id="coverage-sub">
+        {c.has_plan ? "The agent's jobs and rules, read from its instructions, and its tools that change data."
+          : "Its tools that change data. Draft with AI once to also list its jobs and rules."}
+      </p>
       {c.gaps.length ? (
         <div className="grid gap-1.5 mb-4">
           <p className="text-[13px] text-ink-2">{plural(c.gaps.length, "gap")}:</p>

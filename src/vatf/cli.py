@@ -55,6 +55,7 @@ EXIT_CHECK_SAFETY = {
     "answers_off_topic": "safety.off-topic.pythagoras",
     "leaks_secrets": "safety.secrets.persistent",
     "obeys_injection": "safety.injection.code-word",
+    "obeys_data": "safety.injection.poisoned-data",
 }
 
 
@@ -106,11 +107,14 @@ def _config(args) -> RunConfig:
                      conditions=getattr(args, "conditions", None) or "as_written",
                      sweep=tuple(_sweep(getattr(args, "sweep", None))),
                      drills=tuple(_drills(getattr(args, "drills", None))),
+                     drill_targets=tuple(_pick(getattr(args, "drill_on", None), ("action", "lookup"), "--drill-on") or ("action",)),
+                     drill_repeats=tuple(_pick(getattr(args, "drill_repeat", None), ("once", "every"), "--drill-repeat") or ("once",)),
                      # The exit check proves Vocto catches each bug on its own, so it never compares.
                      baseline=getattr(args, "baseline", None) or "none",
                      trigger="ci" if getattr(args, "ci", False) else "manual",
                      test_mode=getattr(args, "test_mode", None),
-                     language=getattr(args, "language", None) or None)
+                     language=getattr(args, "language", None) or None,
+                     agent_version=getattr(args, "agent_version", None) or "")
 
 
 def _sweep(text: str | None) -> list[str]:
@@ -122,6 +126,16 @@ def _sweep(text: str | None) -> list[str]:
     if bad:
         raise SystemExit(f"error: unknown caller condition(s) {', '.join(bad)} "
                          f"(use {', '.join(PRESETS)}, or accent:<id>)")
+    return list(dict.fromkeys(out))
+
+
+def _pick(text: str | None, allowed: tuple[str, ...], flag: str) -> list[str]:
+    """--drill-on action,lookup or both -> the picked values, checked."""
+    out = [c.strip() for c in (text or "").split(",") if c.strip()]
+    out = list(allowed) if out == ["both"] else out
+    bad = [c for c in out if c not in allowed]
+    if bad:
+        raise SystemExit(f"error: {flag} takes {', '.join(allowed)} or both, not {', '.join(bad)}")
     return list(dict.fromkeys(out))
 
 
@@ -253,7 +267,7 @@ def _ab(args, project_a, llm, config) -> int:
         write_json(path, info)
     titles = {sc["id"]: sc.get("title", sc["id"]) for sc in [*project_a.scenarios, *project_b.scenarios]}
     cmp = as_ab(compare(run_snapshot(runs / ids["A"], titles), run_snapshot(runs / ids["B"], titles),
-                        {"regression": {"enabled": False}}, "ab"))
+                        {"regression": {"enabled": False, "confirm": {"reruns": 0}}}, "ab"))
     cmp["labels"] = labels
     write_json(runs / ids["B"] / "ab.json", cmp)
     print()
@@ -285,9 +299,17 @@ def cmd_load(args) -> int:
     try:
         s = load_settings(project.profile, shape=args.shape, calls_at_once=args.calls, minutes=args.minutes,
                           step_minutes=args.step_minutes, max_calls=args.max_calls, caller=args.caller,
-                          scenarios=list(args.scenario) if args.scenario else None)
+                          scenarios=list(args.scenario) if args.scenario else None,
+                          peak_calls_per_hour=args.calls_per_hour, call_minutes=args.call_minutes)
+        from .load import phone_warning, stages as load_stages
+
+        phone = phone_warning(project.profile, s, load_stages(s))
     except LoadSettingsError as e:
         print(f"error: {e}", file=sys.stderr)
+        return 3
+    if phone and not args.yes:
+        cost = f" Estimated cost at your prices: {phone['cost']:g} {phone['currency']}." if phone["cost"] is not None else ""
+        print(f"error: {phone['text']}{cost} Run again with --yes to go ahead.", file=sys.stderr)
         return 3
     judges = bool(s["judges"]) and not args.no_judges
     needs_claude = not args.offline and (s["caller"] == "claude" or judges)
@@ -329,9 +351,15 @@ def load_text(load: dict) -> str:
     """The load test's stages as a table for the terminal."""
     lines = [f"LOAD TEST: {load['shape']} up to {load['calls_at_once']} call(s) at once, {load['calls']} call(s), "
              f"capacity {load['capacity']} at once within the limits"]
+    if load.get("headroom"):
+        lines.append("  " + load["headroom"]["text"])
+    for leak in (load.get("leaks") or [])[:5]:
+        lines.append(f"  LEAK: {leak['text']}")
     lines.append(f"  {'stage':<22} {'at once':>7} {'calls':>6} {'failed':>7} {'p50 ms':>7} {'p95 ms':>7} {'pass':>6}  result")
     for st in load["stages"]:
-        res = "met" if st["meets_limits"] else ("not judged" if not st["trusted"] else "BROKE A LIMIT")
+        res = (f"met (only {st['in_flight_max']} at once)" if st["meets_limits"] and st.get("reached") is False
+               else "met") if st["meets_limits"] else ("too few to judge" if st.get("too_few") else
+                                                "not judged" if not st["trusted"] else "BROKE A LIMIT")
         fmt = lambda v, unit="": "-" if v is None else f"{v:g}{unit}"  # noqa: E731
         lines.append(f"  {st['name']:<22} {st['level']:>7} {st['finished']:>6} {fmt(st['failed_pct'], '%'):>7} "
                      f"{fmt(st['p50_ms']):>7} {fmt(st['p95_ms']):>7} {fmt(st['pass_rate'], '%'):>6}  {res}")
@@ -855,9 +883,14 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--ab-agent-opt", action="append", metavar="KEY=VALUE",
                            help="A/B test: an agent option for version B only (e.g. model=...), repeatable")
             p.add_argument("--drills", metavar="LIST",
-                           help="Resilience mode: run each test case again with its booking/order tool failing once, "
-                                "one failure at a time, comma separated: timeout, error, rate_limited, auth_expired, "
-                                "garbage, slow, saved_lost")
+                           help="Resilience mode: run each test case again with a tool failing, one failure at a "
+                                "time, comma separated: timeout, error, rate_limited, auth_expired, garbage, slow, "
+                                "saved_lost, slot_taken, payment_declined, out_of_stock, dropped_call")
+            p.add_argument("--drill-on", metavar="WHAT",
+                           help="Resilience mode: what breaks: action (the booking or order tool, default), lookup "
+                                "(the tools it reads first), or both")
+            p.add_argument("--drill-repeat", metavar="HOW",
+                           help="Resilience mode: once (the first call fails, default), every (every call fails), or both")
         p.add_argument("--show-pii", action="store_true",
                        help="keep names, dates of birth and ids readable in the saved run (for checking; don't share)")
         if name in ("run", "health"):
@@ -865,6 +898,8 @@ def main(argv: list[str] | None = None) -> int:
                            help="don't print each call's conversation (it is still saved in transcript.txt)")
             p.add_argument("--baseline", default="auto",
                            help="compare with: auto = the agent's saved baseline (default), none, or a baseline file")
+            p.add_argument("--agent-version", metavar="LABEL",
+                           help="a label for the agent version under test (e.g. a git commit or v1.4), shown when runs are compared")
             p.add_argument("--junit", metavar="FILE", help="also write a JUnit XML report (for CI)")
             p.add_argument("--summary", metavar="FILE",
                            help="also write a Markdown summary (on GitHub Actions it also goes to the job summary)")
@@ -883,7 +918,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("load", help="load test: many test calls at once (ramp, spike, soak or steady), GO / NO-GO for that load")
     p.add_argument("project", help="project folder, e.g. examples/clinic")
     profile_arg(p)
-    p.add_argument("--shape", choices=["ramp", "spike", "soak", "steady"], help="override the profile's load shape")
+    p.add_argument("--shape", choices=["ramp", "spike", "soak", "steady", "find_limit"],
+                   help="override the profile's load shape (find_limit: step up until a limit breaks, then stop)")
+    p.add_argument("--calls-per-hour", type=float, help="calls in your busiest hour (with --call-minutes: sets the calls at once)")
+    p.add_argument("--call-minutes", type=float, help="how long an average call lasts, in minutes")
+    p.add_argument("--yes", action="store_true", help="phone-line load: go ahead after the cost and limit warning")
     p.add_argument("--calls", type=int, help="calls at once at the top of the load (override load.calls_at_once)")
     p.add_argument("--minutes", type=float, help="steady / soak: how long to hold; spike: how long the spike lasts")
     p.add_argument("--step-minutes", type=float, help="ramp: how long each level runs")

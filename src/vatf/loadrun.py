@@ -14,6 +14,8 @@ for the dashboard's Live page.
 from __future__ import annotations
 
 import asyncio
+import copy
+import json
 import time
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +27,7 @@ from .contracts.orchestrator import PlannedCall
 from .decision import LocalDecisionEngine, apply_load
 from .evidence import utc_now
 from .load import p95_limit, scenario_ids, stages, summary
-from .loadstats import call_facts, summarise
+from .loadstats import call_facts, cross_call_leaks, identity_facts, stage_stats, summarise, unique_value
 from .orchestrator import Orchestrator, RunConfig, RunSetupError
 from .probe import ProbeSetupError, load_fixtures
 from .proxy import InProcessToolProxy
@@ -46,9 +48,21 @@ class HarnessMonitor:
     def __init__(self) -> None:
         self.samples: list[tuple[float, float, int]] = []   # (t_s since the load started, lag_ms, in_flight)
         self.timeline: list[tuple[float, int, float]] = []  # one per second: (t_s, in_flight, lag max ms)
-        self.in_flight = 0
+        self._in_flight = 0
+        self._peak = 0            # the most calls in flight since the last sample: short calls fall between ticks
+        self._second_peak = 0
         self._task: asyncio.Task | None = None
         self._t0 = 0.0
+
+    @property
+    def in_flight(self) -> int:
+        return self._in_flight
+
+    @in_flight.setter
+    def in_flight(self, n: int) -> None:
+        self._in_flight = n
+        self._peak = max(self._peak, n)
+        self._second_peak = max(self._second_peak, n)
 
     def start(self, t0: float, on_second=None) -> None:
         self._t0 = t0
@@ -63,11 +77,13 @@ class HarnessMonitor:
             now = loop.time()
             lag = max(0.0, (now - before - TICK_S) * 1000)
             t = now - self._t0
-            self.samples.append((round(t, 2), round(lag, 1), self.in_flight))
+            self.samples.append((round(t, 2), round(lag, 1), self._peak))
+            self._peak = self._in_flight
             worst = max(worst, lag)
             if int(t) > second:
                 second = int(t)
-                self.timeline.append((second, self.in_flight, round(worst, 1)))
+                self.timeline.append((second, self._second_peak, round(worst, 1)))
+                self._second_peak = self._in_flight
                 worst = 0.0
                 if on_second:
                     on_second(t)
@@ -115,6 +131,11 @@ class LoadOrchestrator(Orchestrator):
         self._live_path: Path | None = None
         self._counts = {"started": 0, "finished": 0, "failed": 0, "harness": 0}
         self._stage_now = 0
+        # Light load callers (voice): lines synthesised once and reused, no careful second listen.
+        self.light = self.mode == "voice" and bool(self.load.get("light", True))
+        self._leak_info: dict[str, dict[str, Any]] = {}
+        self._numbers: dict[tuple[str, int], int] = {}
+        self._stopped: dict[str, Any] | None = None   # find_limit: where it stopped stepping up, and why
 
     # ---- what the run will do -----------------------------------------------------------
     def plan(self) -> list[PlannedCall]:
@@ -135,7 +156,7 @@ class LoadOrchestrator(Orchestrator):
         info = super()._run_info(run_id, plan)
         info["kind"] = "load"
         info["test_mode"] = "load"
-        info["load"] = {**summary(self.load, self.stage_list), "settings": self.load,
+        info["load"] = {**summary(self.load, self.stage_list, self.profile), "settings": self.load, "light": self.light,
                         "p95_limit_ms": p95_limit(self.load, self.profile, self.mode),
                         "launched_per_call": bool(self.profile["connection"].get("launch")) or
                         self.profile["connection"].get("type") == "text_python"}
@@ -147,6 +168,35 @@ class LoadOrchestrator(Orchestrator):
         proxy = InProcessToolProxy(self.profile, [], real_delays=self.mode == "voice")
         proxy._sink = self._fallback_sink        # forwards untouched; recorded only in load.json's count
         return proxy
+
+    # ---- each call: its own details, and what it said (for the leak check) -----------------------
+    def _scenario_for(self, pc: PlannedCall) -> dict[str, Any]:
+        """unique_facts: the named caller facts get a value of their own on this call (a name, a phone number,
+        an email), so calls of the same test can be told apart and a detail turning up in another call is a leak."""
+        sc = self.project.scenario(pc.scenario_id)
+        names = [n for n in self.load.get("unique_facts") or [] if n in ((sc.get("caller") or {}).get("facts") or {})]
+        if not names:
+            return sc
+        n = self._numbers.get((pc.scenario_id, pc.repeat), pc.repeat)    # the call's number in the load
+        out = copy.deepcopy(sc)
+        facts = out["caller"]["facts"]
+        for name in names:
+            facts[name] = unique_value(name, facts[name], n)
+        return out
+
+    def _seen_call(self, test_id: str, scenario: Mapping[str, Any], events: list) -> None:
+        own = identity_facts((scenario.get("caller") or {}).get("facts") or {})
+        said, tools = [], []
+        for e in events:
+            if e.type == "agent_turn":
+                text = e.data.get("heard_text") or e.data.get("text") or ""
+                if text:
+                    said.append((e.seq, str(text)))
+            elif e.type == "tool_request":
+                tools.append((e.seq, json.dumps(e.data.get("args") or {}, ensure_ascii=False, default=str)))
+        self._leak_info[test_id] = {"test_id": test_id, "scenario_id": scenario.get("id"), "own": own,
+                                    "context": json.dumps(scenario, ensure_ascii=False, default=str).lower(),
+                                    "said": said, "tools": tools}
 
     # ---- running ---------------------------------------------------------------------------
     def _fixtures_once(self) -> list[str]:
@@ -186,11 +236,15 @@ class LoadOrchestrator(Orchestrator):
         loop.set_default_executor(ThreadPoolExecutor(max_workers=max(32, top * 6), thread_name_prefix="vatf-load"))
         self._live_path = run_dir / "load_live.json"
         verdicts = await self._drive(run_id, plan)
+        if self._stopped:
+            notes.append(self._stopped["note"])
+        leaks = cross_call_leaks([self._leak_info[v["test_id"]] for v in verdicts if v["test_id"] in self._leak_info],
+                                 show=not self.config.mask_pii)
         gateway = ({"unattributed": self._gateway.unattributed, "unknown_ids": self._gateway.unknown_ids}
                    if self._gateway else {})
         limit = p95_limit(self.load, self.profile, self.mode)
         result = summarise(self.load, self.stage_list, verdicts, self.monitor.samples, limit, self.profile,
-                           self.mode, notes, gateway, self.monitor.timeline)
+                           self.mode, notes, gateway, self.monitor.timeline, leaks=leaks)
         write_json(run_dir / "load.json", result)
         self._write_live(final=True)
         self._judge_cost = self._spent()   # the run's whole AI spend (callers, judges): per-call costs can't be split
@@ -236,6 +290,8 @@ class LoadOrchestrator(Orchestrator):
                 if st is None or self._counts["started"] >= self.load["max_calls"]:
                     break
                 if st.index != stage_seen:
+                    if stage_seen >= 0 and self.load["shape"] == "find_limit" and self._broke(stage_seen, verdicts):
+                        break
                     stage_seen = st.index
                     self._stage_now = st.index
                     self.log(f"load: {st.name}, {st.level} call(s) at once for {_dur(st.seconds)}")
@@ -244,6 +300,7 @@ class LoadOrchestrator(Orchestrator):
                     pc = plan[self._counts["started"] % len(plan)]
                     repeats[pc.scenario_id] = repeats.get(pc.scenario_id, 0) + 1
                     call = PlannedCall(pc.scenario_id, pc.persona_id, repeats[pc.scenario_id])
+                    self._numbers[(call.scenario_id, call.repeat)] = self._counts["started"] + 1
                     self._counts["started"] += 1
                     task = loop.create_task(self._one(run_id, call, st, len(running) + 1, now, verdicts))
                     running.add(task)
@@ -287,6 +344,22 @@ class LoadOrchestrator(Orchestrator):
         out.append(verdict)
         tag = verdict["status"] + (f", {facts['why']}" if facts["why"] else "")
         self.log(f"  {pc.scenario_id} call {pc.repeat} ({stage.level} at once): {tag}  ({verdict['test_id']})")
+
+    def _broke(self, index: int, verdicts: list[dict[str, Any]]) -> bool:
+        """Find the limit: did the stage that just ended break a limit (on the calls that have finished)? Then
+        stop stepping up: the stages after it are dropped, and the calls still going finish."""
+        st = self.stage_list[index]
+        mine = [v for v in verdicts if (v.get("load") or {}).get("stage") == index]
+        row = stage_stats(st, mine, self.monitor.samples, self.load["limits"],
+                          p95_limit(self.load, self.profile, self.mode), self.profile, verdicts)
+        if not (row["trusted"] and row["problems"]):
+            return False
+        why = "; ".join(p["message"] for p in row["problems"])
+        self.stage_list = self.stage_list[:index + 1]
+        self._stopped = {"stage": st.name, "level": st.level,
+                         "note": f"Find the limit stopped after {st.name} ({st.level} at once): {why} The higher levels were not tried."}
+        self.log(f"load: {st.name} broke a limit ({why}); stopping here (find the limit)")
+        return True
 
     def _write_live(self, final: bool = False) -> None:
         if self._live_path is None:

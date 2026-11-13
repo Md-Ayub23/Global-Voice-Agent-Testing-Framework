@@ -37,7 +37,7 @@ properties:
       additionalProperties: false
       required: [rule, message]
       properties:
-        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings, metric, metric_warnings, regression, regression_warnings, load_failed_calls, load_latency, load_metric, load_blocker, load_slowdown, load_pass_drop, load_drift, load_recovery, load_evidence, load_ok, load_warnings, latency_sample]}
+        rule: {enum: [blocker, reliability, latency, coverage, needs_review, all_targets_met, safety_warnings, metric, metric_warnings, regression, regression_warnings, load_failed_calls, load_latency, load_metric, load_blocker, load_slowdown, load_pass_drop, load_drift, load_recovery, load_evidence, load_ok, load_warnings, load_leak, load_too_few, load_limit, latency_sample, safety_review, safety_unsafe]}
         message: {type: string}
         refs:
           description: test_id or test_id/check_id pointing at the verdicts behind this reason.
@@ -85,6 +85,24 @@ properties:
       p95_enough: {description: "Enough timed answers (p95_needs) for p95 to decide on its own.", type: [boolean, "null"]}
       p95_needs: {type: integer}
       over_p95_limit: {description: "Timed answers slower than the p95 limit.", type: integer}
+      split:
+        description: "Voice: plain answers and answers that needed a tool, timed apart (tool: also the full wait until the real answer)."
+        type: object
+      p95_range:
+        description: "The likely range (95%) of the true p95 from these answers. high_ms null: may be slower than anything measured (too few answers)."
+        type: object
+        properties: {low_ms: {type: [integer, "null"]}, high_ms: {type: [integer, "null"]}}
+      slowest:
+        description: "The 5 slowest timed answers, each a moment to listen to."
+        type: array
+        items: {type: object, required: [test_id, seq, ms]}
+      slow_stops:
+        description: "Cut-ins the agent took longer than 1 s to stop for (up to 5)."
+        type: array
+        items: {type: object, required: [test_id, seq, ms]}
+      stages:
+        description: "Where answer time went, per stage (stt, llm, tts), from the agent's own logs."
+        type: object
 
   coverage:
     type: object
@@ -128,7 +146,7 @@ properties:
     properties:
       decided_by:
         type: array
-        items: {enum: [all_checks, hard_checks, trusted_judges, reliability, latency, call_quality, evidence, regression, load]}
+        items: {enum: [all_checks, hard_checks, trusted_judges, human_labels, reliability, latency, call_quality, evidence, regression, load]}
       judge_opinions: {description: "Judge findings from items not trusted yet: shown, never counted.", type: integer}
       opinions_to_label: {description: "Of those, where the judges split and a person's label is wanted.", type: integer}
       trusted_items: {type: integer}
@@ -156,7 +174,7 @@ properties:
       type: object
       required: [id, title, unit, better, value, band, blocks, calls]
       properties:
-        id: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, turns_to_goal, escalated, duration_s]}
+        id: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, noise_kept, paused_cut_off, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, repeated_question, turns_to_goal, escalated, duration_s]}
         title: {type: string}
         unit: {enum: [ms, "%", wpm, turns, s]}
         better: {enum: [lower, higher]}
@@ -185,6 +203,30 @@ properties:
         p90_ms: {type: [integer, "null"]}
         talked_over_pct: {type: [number, "null"]}
         behaviours: {type: array, items: {type: string}}
+        by_type: {description: "Details right per type (name, phone, date...): {type: {right, checked}}.", type: object}
+        read_back_before_save: {type: integer}
+        saves_checked: {type: integer}
+        too_hard_calls: {description: "Calls with a detail no listener could hear on the line (a test issue).", type: integer}
+        ladder: {description: "A breaking-point ladder step: {kind: noise | loss, level}.", type: [object, "null"]}
+        vs_clean: {description: "Pass rate against the clean line, with Fisher's exact test: worse only when bigger than chance.", type: [object, "null"]}
+
+  trend:
+    description: "Regression: this run and up to 9 before it (same profile and mode), oldest first: pass rate, p95, decision, agent version."
+    type: array
+    items: {type: object, required: [run_id]}
+
+  flaky:
+    description: "Regression: tests that both passed and failed over the last 10 runs, worst first; their single failures don't block."
+    type: array
+    items: {type: object, required: [scenario_id, rate]}
+
+  ladder:
+    description: "Speech: the breaking-point ladder. Per kind (noise, loss): each step's calls and the hardest step still handled."
+    type: object
+
+  speech:
+    description: "Speech: the caller's details over the run, by type, read back before saving, too hard to hear, voices used, examples saved wrong (speechcheck.run_summary)."
+    type: object
 
   costs:
     description: What the agent cost to run in this run, from the owner's prices (profile costs, costs.py).
@@ -210,9 +252,12 @@ properties:
       required: [failure, title, calls, passed, failed]
       properties:
         failure: {type: string}
+        key: {description: "The failure plus -lookup (the lookups broke) and -every (every call failed).", type: string}
+        target: {enum: [action, lookup]}
+        repeat: {enum: [once, every]}
         title: {type: string}
         about: {type: string}
-        expected: {enum: [success, recover_or_honest]}
+        expected: {enum: [success, recover_or_honest, honest_failure, alternative_or_honest]}
         calls: {type: integer}
         passed: {type: integer}
         failed: {type: integer}
@@ -224,6 +269,14 @@ properties:
         pass_rate: {type: [number, "null"]}
         failed_tests: {type: array, items: {type: string}}
         failed_calls: {type: array, items: {type: string}}
+        retries: {description: "Tries of the broken tools after a failure, until one worked (all calls).", type: integer}
+        max_retries: {type: integer}
+        early_429: {description: "Retries sent before a 429 said to try again.", type: integer}
+        too_many_tries: {description: "Calls where the agent kept trying past the limit (stops-retrying failed).", type: integer}
+        informed: {description: "Voice: calls where the caller heard the agent within 3 s of the failure.", type: integer}
+        timed: {description: "Voice: calls where that could be measured.", type: integer}
+        longest_silence_ms: {type: [integer, "null"]}
+        tests: {description: "Per test case: passed, failed, other, the first failed class and a call.", type: object}
 
   load:
     description: Phase 7, load runs only (decision.apply_load). The full numbers are in the run's load.json.
@@ -231,8 +284,34 @@ properties:
     additionalProperties: false
     required: [shape, calls_at_once, capacity, stages]
     properties:
-      shape: {enum: [ramp, spike, soak, steady]}
+      shape: {enum: [ramp, spike, soak, steady, find_limit]}
       calls_at_once: {type: integer, minimum: 1}
+      expected_peak: {description: "Calls at once at the busiest time the owner expects (typed, or from calls per hour).", type: [integer, "null"]}
+      headroom:
+        description: "The plain sentence: capacity within the limits and the headroom over the expected peak."
+        type: object
+        additionalProperties: false
+        properties:
+          capacity: {type: integer}
+          exact: {description: "true when a level broke a limit (capacity is known); false: at least this much.", type: boolean}
+          peak: {type: [integer, "null"]}
+          pct: {type: [integer, "null"]}
+          text: {type: string}
+      leaks:
+        description: "Cross-call leaks: a caller's identity details found in another call (loadstats.cross_call_leaks). Any blocks."
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            in_test: {type: string}
+            in_scenario: {type: [string, "null"]}
+            seq: {type: integer}
+            where: {enum: [said, tool]}
+            from_test: {type: string}
+            from_scenario: {type: [string, "null"]}
+            fact: {type: string}
+            text: {type: string}
       capacity: {description: "The highest level of calls at once up to which every stage met the limits.", type: integer, minimum: 0}
       breaking: {type: [object, "null"]}
       calls: {type: integer}
@@ -257,6 +336,9 @@ properties:
             pass_rate: {type: [number, "null"]}
             trusted: {type: boolean}
             meets_limits: {type: [boolean, "null"]}
+            too_few: {description: "Fewer finished calls than limits.min_calls: too few to judge.", type: boolean}
+            in_flight_max: {description: "The most calls really in progress at once in this stage.", type: [integer, "null"]}
+            reached: {description: "False when calls ended so fast that the stage never had its level in progress at once.", type: boolean}
             p50_ms: {type: [integer, "null"]}
             p95_ms: {type: [integer, "null"]}
 
@@ -266,15 +348,50 @@ properties:
     additionalProperties: false
     properties:
       calls: {type: integer}
-      passed: {type: integer}
-      failed: {description: "Attack calls with at least one failed check (hard check or judge).", type: integer}
-      to_review: {description: "Attack calls with no failure but a judge disagreement for a person to label.", type: integer}
+      passed: {description: "Attack calls handled safely (the same as resisted).", type: integer}
+      failed: {description: "Unsafe attack calls: a failed hard check, or a judge failure that doesn't wait for a person.", type: integer}
+      to_review: {description: "Attack calls waiting for a person: a judge split, or an unsafe judge answer not labelled yet.", type: integer}
+      resisted: {type: integer}
+      not_landed: {description: "Poisoned-data attacks where the agent looked nothing up, so the attack never happened.", type: integer}
+      errors: {description: "Attack calls Vocto couldn't finish (they say nothing about the agent).", type: integer}
+      leaks: {description: "Attack calls where a hard check marked blocker failed (secret, write tool, injected word).", type: integer}
+      review: {description: "Whether unsafe or split judge answers wait for a person (profile safety.review).", type: boolean}
+      rate: {description: "Attack success rate: unsafe / (unsafe + resisted).", type: [number, "null"]}
+      low: {type: [number, "null"]}
+      high: {type: [number, "null"]}
       packs:
         type: object
         additionalProperties:
           type: object
           additionalProperties: false
-          properties: {calls: {type: integer}, failed: {type: integer}, to_review: {type: integer}}
+          properties:
+            calls: {type: integer}
+            failed: {type: integer}
+            to_review: {type: integer}
+            resisted: {type: integer}
+            not_landed: {type: integer}
+            errors: {type: integer}
+            rate: {type: [number, "null"]}
+            low: {type: [number, "null"]}
+            high: {type: [number, "null"]}
+      owasp:
+        description: The attack success rate per OWASP Top 10 for LLM applications (2025) entry the attacks map to.
+        type: array
+        items:
+          type: object
+          additionalProperties: false
+          properties:
+            id: {type: string}
+            title: {type: string}
+            packs: {type: array, items: {type: string}}
+            calls: {type: integer}
+            unsafe: {type: integer}
+            resisted: {type: integer}
+            to_review: {type: integer}
+            rate: {type: [number, "null"]}
+            low: {type: [number, "null"]}
+            high: {type: [number, "null"]}
+      switched_off: {description: "Kinds of attack switched off for this agent.", type: array, items: {type: string}}
       findings:
         type: array
         items:
@@ -289,6 +406,7 @@ properties:
             severity: {type: string}
             result: {type: string}
             can_block: {type: boolean}
+            waiting: {description: "An unsafe or split judge answer waiting for a person's label.", type: boolean}
             message: {type: string}
 
   baseline:
@@ -309,6 +427,13 @@ properties:
       new: {type: integer}
       removed: {type: integer}
       blocking: {description: "Changes set to block (profile regression.<kind>.blocks) that made this a NO_GO.", type: integer}
+      suspected: {description: "New failures that didn't repeat on the reruns: shown, never blocking.", type: integer}
+      flaky: {description: "New failures of tests known to be flaky (passed and failed over the last 10 runs).", type: integer}
+      changed: {description: "Tests edited since the baseline: not compared.", type: integer}
+      fixed: {description: "Tests that failed in the baseline and pass every repeat now.", type: integer}
+      confirmed_by_reruns: {description: "Tests rerun to confirm a single new failure: {scenario id: extra calls}.", type: object}
+      rolling: {description: "The runs pooled as the baseline (rolling baseline).", type: array, items: {type: string}}
+      versions: {description: "What changed between the two runs: agent version, profile, prompt, judge models, Vocto.", type: array}
 
   calls:
     description: Pointers to every call verdict in the run.

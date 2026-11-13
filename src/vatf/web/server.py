@@ -164,6 +164,18 @@ def make_handler(app: App):
     def get_safety(h, q, key):
         return safety.safety_page(app.root, app.runs, key, q.get("file", "profile.yaml"), app.active_runs())
 
+    @route("POST", r"/api/project/([\w.\-]+)/safety/write")
+    def post_safety_write(h, q, key):
+        return safety.write_attacks(app.root, key, h.body())
+
+    @route("GET", r"/api/project/([\w.\-]+)/resilience")
+    def get_resilience(h, q, key):
+        return safety.resilience_page(app.root, key, q.get("file", "profile.yaml"))
+
+    @route("POST", r"/api/project/([\w.\-]+)/resilience/write")
+    def post_resilience_write(h, q, key):
+        return safety.write_refusals(app.root, key, h.body())
+
     @route("GET", r"/api/project/([\w.\-]+)/plan")
     def get_plan(h, q, key):
         return plans.plan_page(app.root, key, q.get("file", "profile.yaml"), q.get("test_type"))
@@ -257,6 +269,13 @@ def make_handler(app: App):
     @route("GET", r"/api/runs/(r-[\w-]+)/comparison")
     def get_comparison(h, q, run_id):
         return {"comparison": regress.run_comparison(app.runs, run_id)}
+
+    @route("POST", r"/api/runs/(r-[\w-]+)/keep-test")
+    def post_keep_test(h, q, run_id):
+        sid = str(h.body().get("scenario_id") or "")
+        if not sid:
+            raise ValueError("say which test case to keep")
+        return regress.keep_as_test(app.root, app.runs, run_id, sid)
 
     @route("GET", r"/api/compare")
     def get_compare(h, q):

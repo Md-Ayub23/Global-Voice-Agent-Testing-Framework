@@ -4,7 +4,13 @@ Used for current run vs the agent's baseline (the regression gate) and for any t
 dashboard's Compare page. Every change has a kind (test, latency, score, metric, judge, safety) and
 a direction:
 
-  regression  a test that passed every repeat in the baseline now fails at least once
+  regression  a test that passed every repeat in the baseline now fails, and the failure held up: at least
+              regression.confirm.min_failures calls failed (Vocto reruns a test that failed once, see
+              orchestrator._confirm, so 1 of 3 becomes 1 of 8 or 2+ of 8)
+  suspected   it failed once and didn't fail again on the reruns: shown, never blocks
+  flaky       it failed, but it has both passed and failed over the last 10 runs: shown on the flaky list,
+              its single failures never block
+  changed     the test itself was edited since the baseline (its fingerprint differs): not comparable
   worse       a number moved the wrong way by more than its limit (profile `regression`)
   better      fixed tests and numbers that improved by more than the same limit
   new/removed tests in only one of the two runs
@@ -31,6 +37,9 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     "load": {"blocks": False, "failed_points": 2, "pass_drop_points": 20},
     # Step 4: the agent's cost per completed task (and per call) at the owner's prices.
     "cost": {"blocks": False, "increase_pct": 10},
+    # Regression upgrade: confirm a new failure before it blocks, and the baseline to compare with.
+    "confirm": {"reruns": 5, "min_failures": 2},
+    "baseline": {"rolling": 0},           # 0: the saved baseline run; 3: the last 3 good runs pooled
 }
 KIND_RULE = {"test": "new_failures", "latency": "latency", "score": "scores", "metric": "metrics",
              "judge": "judges", "safety": "safety", "load": "load",
@@ -58,8 +67,10 @@ def _rate(passed: int, failed: int) -> float | None:
     return passed / (passed + failed) if passed + failed else None
 
 
-def _test_changes(base: Mapping[str, Any], cur: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _test_changes(base: Mapping[str, Any], cur: Mapping[str, Any], flaky: Mapping[str, Any] | None = None,
+                  min_failures: int = 2, reruns: Mapping[str, int] | None = None) -> list[dict[str, Any]]:
     out = []
+    flaky, reruns = flaky or {}, reruns or {}
     for sid, c in cur.items():
         b = base.get(sid)
         title = c.get("title", sid)
@@ -70,11 +81,29 @@ def _test_changes(base: Mapping[str, Any], cur: Mapping[str, Any]) -> list[dict[
             continue
         before, after = f"{b['passed']}/{b['k']}", f"{c['passed']}/{c['k']}"
         base_clean = b["k"] > 0 and b["passed"] == b["k"] and not b["failed"]
-        if base_clean and c["failed"]:
+        edited = bool(b.get("sha") and c.get("sha") and b["sha"] != c["sha"])
+        if edited and (c["failed"] or b["failed"]):
+            out.append({"kind": "test", "id": sid, "title": title, "direction": "changed", "before": before,
+                        "after": after, "message": f"{title} was edited since the baseline, so its results can't be "
+                                                   f"compared ({before} before, {after} now). Never counted as a regression."})
+        elif base_clean and c["failed"] and sid in flaky:
+            f = flaky[sid]
+            out.append({"kind": "test", "id": sid, "title": title, "direction": "flaky", "before": before, "after": after,
+                        "criticality": c.get("criticality"), "flaky_rate": f["rate"],
+                        "message": f"{title} failed {c['failed']} of {c['k']}, but it is flaky: it passed {f['passed']} of "
+                                   f"{f['calls']} calls over its last {f['runs']} runs. Its single failures don't block; fix it to trust it."})
+        elif base_clean and c["failed"] and c["failed"] >= min_failures:
             out.append({"kind": "test", "id": sid, "title": title, "direction": "regression", "before": before,
                         "after": after, "criticality": c.get("criticality"),
                         "message": f"{title} passed every repeat in the baseline ({before}) and now failed "
                                    f"{c['failed']} of {c['k']}."})
+        elif base_clean and c["failed"]:
+            out.append({"kind": "test", "id": sid, "title": title, "direction": "suspected", "before": before,
+                        "after": after, "criticality": c.get("criticality"),
+                        "message": f"{title} failed {c['failed']} of {c['k']} (it passed every repeat in the baseline, "
+                                   f"{before}). " + (f"The failure didn't repeat on {reruns[sid]} reruns: suspected, not confirmed."
+                                                     if sid in reruns else "It wasn't rerun to confirm, so it is suspected, "
+                                                     "not confirmed: run it again with more repeats to be sure.")})
         elif b["failed"] and not c["failed"] and c["passed"] == c["k"] and c["k"]:
             out.append({"kind": "test", "id": sid, "title": title, "direction": "better", "before": before,
                         "after": after, "message": f"{title} is fixed: it failed {b['failed']} of {b['k']} in the "
@@ -260,7 +289,18 @@ def _safety_changes(base: Mapping[str, Any] | None, cur: Mapping[str, Any] | Non
     return out
 
 
-ORDER = {"regression": 0, "worse": 1, "better": 2, "new": 3, "removed": 4, "same": 5}
+ORDER = {"regression": 0, "worse": 1, "suspected": 2, "flaky": 3, "better": 4, "new": 5, "removed": 6, "same": 7,
+         "changed": 8}
+VERSION_TITLES = {"agent": "agent version", "profile": "agent settings (profile)", "prompt": "agent's prompt",
+                  "judge_models": "AI judge models", "caller_model": "caller model", "vocto": "Vocto version"}
+
+
+def _version_changes(base: Mapping[str, Any] | None, cur: Mapping[str, Any] | None) -> list[dict[str, Any]]:
+    """What the two runs were made with, where it differs: the comparison can then say "worse since the
+    prompt changed"."""
+    b, c = base or {}, cur or {}
+    return [{"field": k, "title": t, "before": b.get(k), "after": c.get(k)} for k, t in VERSION_TITLES.items()
+            if (b.get(k) or c.get(k)) and b.get(k) != c.get(k)]
 
 
 def compare(base: Mapping[str, Any], cur: Mapping[str, Any], profile: Mapping[str, Any] | None = None,
@@ -271,7 +311,12 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any], profile: Mapping[st
     differences = [{"field": k, "title": HOW_TITLES[k], "before": hb.get(k), "after": hc.get(k)}
                    for k in HOW_TITLES if hb.get(k) != hc.get(k)]
     like = not any(d["field"] in LIKE_FOR_LIKE for d in differences)
-    changes = (_test_changes(base.get("tests") or {}, cur.get("tests") or {})
+    versions = _version_changes(base.get("versions"), cur.get("versions"))
+    judges_changed = any(v["field"] == "judge_models" for v in versions)
+    # With reruns switched off (confirm.reruns: 0) one failure blocks, as before the confirm step existed.
+    min_failures = int(r["confirm"]["min_failures"]) if int(r["confirm"]["reruns"] or 0) > 0 else 1
+    changes = (_test_changes(base.get("tests") or {}, cur.get("tests") or {}, cur.get("flaky"), min_failures,
+                             cur.get("reruns"))
                + _latency_changes(base.get("latency"), cur.get("latency"), r["latency"])
                + _score_changes(base.get("scores") or {}, cur.get("scores") or {}, r["scores"])
                + _metric_changes(base.get("quality") or {}, cur.get("quality") or {})
@@ -282,7 +327,11 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any], profile: Mapping[st
     for c in changes:
         rule = r[KIND_RULE[c["kind"]]]
         bad = c["direction"] in ("regression", "worse")
-        c["blocks"] = bool(bad and like and r["enabled"] and rule.get("blocks"))
+        # A new judge model moves judge scores without the agent changing: those changes never block.
+        c["blocks"] = bool(bad and like and r["enabled"] and rule.get("blocks")
+                           and not (c["kind"] == "judge" and judges_changed))
+        if c["kind"] == "judge" and judges_changed:
+            c["message"] += " The AI judge models changed between the runs, so this may not be the agent."
     changes.sort(key=lambda c: (not c["blocks"], ORDER[c["direction"]], c["kind"], c["id"]))
     counts = {d: sum(c["direction"] == d for c in changes) for d in ORDER}
     return {
@@ -290,7 +339,8 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any], profile: Mapping[st
         "baseline": {"run_id": base.get("run_id"), "finished_at": base.get("finished_at"),
                      "decision": base.get("decision"), "profile_file": base.get("profile_file")},
         "current": {"run_id": cur.get("run_id"), "finished_at": cur.get("finished_at"), "decision": cur.get("decision")},
-        "like_for_like": like, "differences": differences,
+        "like_for_like": like, "differences": differences, "versions": versions,
+        **({"rolling": list(base["rolling"])} if base.get("rolling") else {}),
         "gate_enabled": bool(r["enabled"]),
         "changes": changes, "counts": counts,
         "blocking": sum(c["blocks"] for c in changes),
@@ -303,7 +353,11 @@ def as_ab(cmp: dict[str, Any]) -> dict[str, Any]:
              "better": "{t} failed with version A ({b}) and passed every call with version B ({a}).",
              "same": "{t} fails with both versions ({b} with A, {a} with B).",
              "new": "{t}: run with version B only ({a} passed).",
-             "removed": "{t}: run with version A only ({b} passed)."}
+             "removed": "{t}: run with version A only ({b} passed).",
+             "suspected": "{t} passed every call with version A ({b}) and failed once with version B ({a}): "
+                          "once may be chance, run more repeats to be sure.",
+             "flaky": "{t} is flaky (it both passes and fails over its recent runs): {b} with A, {a} with B.",
+             "changed": "{t} was edited between the two runs, so its results can't be compared ({b} with A, {a} with B)."}
     for c in cmp["changes"]:
         if c["kind"] == "test":
             c["message"] = tests[c["direction"]].format(t=c["title"], b=c["before"], a=c["after"])

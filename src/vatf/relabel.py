@@ -124,10 +124,20 @@ def reevaluate_run(root: Path, runs_dir: Path, run_id: str) -> dict[str, Any]:
     if (run_dir / "baseline.json").is_file():   # Phase 6: compare again with the same baseline as the run did
         old_cmp = read_json(run_dir / "comparison.json") if (run_dir / "comparison.json").is_file() else {}
         titles = {sc["id"]: sc.get("title", sc["id"]) for sc in scenarios}
-        comparison = compare(read_json(run_dir / "baseline.json"), snapshot(decision, info, titles), project.profile,
-                             old_cmp.get("source", "baseline"))
+        cur = snapshot(decision, info, titles)
+        # The same flaky list and reruns the run had (Regression): relabelling changes judge results only.
+        cur["flaky"] = {f["scenario_id"]: f for f in old.get("flaky") or []}
+        cur["reruns"] = dict(old_cmp.get("confirmed_by_reruns") or {})
+        comparison = compare(read_json(run_dir / "baseline.json"), cur, project.profile, old_cmp.get("source", "baseline"))
+        if old_cmp.get("confirmed_by_reruns"):
+            comparison["confirmed_by_reruns"] = dict(old_cmp["confirmed_by_reruns"])
         write_json(run_dir / "comparison.json", comparison)
         decision = apply_regression(decision, comparison)
+    for key in ("trend", "flaky"):                # Regression: kept as the run made them
+        if key in old:
+            decision[key] = old[key]
+    if decision.get("trend") and decision["trend"][-1].get("run_id") == run_id:
+        decision["trend"][-1]["decision"] = decision["decision"]
     decision["created_at"] = old.get("created_at", decision["created_at"])
     decision["relabelled_at"] = utc_now()
     write_json(run_dir / "decision.json", decision)

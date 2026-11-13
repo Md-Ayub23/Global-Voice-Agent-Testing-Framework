@@ -28,7 +28,7 @@ export interface Plan {
 export interface LibraryPersona {
   id: string; title: string; description: string; added: boolean;
   traits: Record<string, string>; speech: { tts_voice?: string; speaking_rate?: number; accent?: string; volume_db?: number };
-  behaviour: { interrupts?: boolean; backchannels?: boolean; pauses_mid_sentence?: boolean; goes_quiet?: boolean }; use?: string;
+  behaviour: { interrupts?: boolean; backchannels?: boolean; noises?: boolean; pauses_mid_sentence?: boolean; goes_quiet?: boolean }; use?: string;
 }
 export interface PlanPage {
   agent_prompt: string; has_rules: boolean; plan: Plan | null; api_key: boolean; model: string;

@@ -27,6 +27,9 @@ properties:
       The test type this case belongs to (its page in the dashboard). Left out, it is placed by what the case
       does: a broken tool is resilience, cutting in or silence is timing, a hard line is speech, else functional.
     enum: [functional, timing, speech, resilience]
+  language:
+    description: "The language the caller speaks (e.g. ta for Tamil), over the persona's and the agent's. A run's own choice wins."
+    type: string
   modes:
     description: Which runs include this scenario. Default both; barge-in and noise tests need voice.
     type: array
@@ -49,6 +52,13 @@ properties:
         description: Faults the tool proxy injects (honesty under failure).
         type: array
         items: {$ref: "#/$defs/fault"}
+      drop_call:
+        description: "Resilience: the line drops just after after_tool is called, and the caller rings back (text runs)."
+        type: object
+        additionalProperties: false
+        required: [after_tool]
+        properties:
+          after_tool: {type: string}
 
   caller:
     description: >
@@ -105,6 +115,12 @@ properties:
             Text runs send the caller text. Use recordings only with the speaker's consent.
           type: string
           pattern: "^[^/\\\\].*\\.(wav|WAV)$"
+        background:
+          description: >
+            Words another voice says behind the caller on this line (a TV, someone in the room). Voice runs mix
+            them in quieter, in a different voice; text runs add them to the caller's words, as speech
+            recognition would pick them up.
+          type: string
         expect:
           type: array
           items: {$ref: "#/$defs/check"}
@@ -116,10 +132,12 @@ properties:
     properties:
       noise:
         description: Synthetic background noise on the caller's line (see src/vatf/audio/noise.py).
-        enum: [none, office, street, cafe, car, tv]
+        enum: [none, office, street, cafe, car, tv, chatter]
         default: none
       noise_file: {description: "A WAV recording to use as background noise instead (path from the repo root).", type: string}
       snr_db: {description: "Speech-to-noise ratio in dB. Lower is noisier. Default 15.", type: number}
+      echo: {description: "The caller is on speakerphone in a room: their voice reverberates.", type: boolean, default: false}
+      keypad: {description: "The caller types numbers (6 digits or more) on the keypad as touch tones instead of saying them.", type: boolean, default: false}
       line:
         description: Phase 5. The phone line the caller is on (src/vatf/audio/line.py).
         type: object
@@ -195,7 +213,13 @@ $defs:
           no_action - nothing should be written.
           recover_or_honest - a tool fails once on purpose: the agent may succeed on a retry or say honestly
           that it couldn't; a false claim or a duplicate fails (Resilience failure drills).
-        enum: [success, honest_failure, no_action, recover_or_honest]
+          alternative_or_honest - the tool refused (already taken, declined): another option the caller took, or an
+          honest no (Resilience refusal drills).
+        enum: [success, honest_failure, no_action, recover_or_honest, alternative_or_honest]
+      broken_tools:
+        description: "Resilience lookup drills: the tools broken on purpose. Reaching any of them counts as reaching the failure."
+        type: array
+        items: {type: string}
       action:
         type: object
         additionalProperties: false
@@ -237,9 +261,17 @@ $defs:
         description: >
           timeout (no answer), http_error (status, default 500), slow (answers after delay_ms),
           malformed_response (rubbish), rate_limited (429 "too many requests", retry_after_s),
-          auth_expired (401 "token expired").
-        enum: [timeout, http_error, slow, malformed_response, rate_limited, auth_expired]
-      status: {description: "For http_error.", type: integer}
+          auth_expired (401 "token expired"), poisoned_data (the real answer, with `text` hidden in a name or
+          notes field: a safety test of instructions hidden in data), refused (a business "no" such as already
+          taken or payment declined: status and body, nothing saved).
+        enum: [timeout, http_error, slow, malformed_response, rate_limited, auth_expired, poisoned_data, refused]
+      text: {description: "For poisoned_data: the hidden instruction.", type: string}
+      code_word: {description: "For poisoned_data: the word that proves the agent obeyed it.", type: string}
+      status: {description: "For http_error and refused.", type: integer}
+      body: {description: "For refused: the tool's answer (e.g. {error: conflict, message: ...})."}
+      same_args:
+        description: "For refused: asking again with the same arguments is refused too (the slot stays taken)."
+        type: boolean
       retry_after_s: {description: "For rate_limited: when the tool says to try again (default 2).", type: integer, minimum: 0}
       delay_ms: {description: "For slow and timeout.", type: integer}
       forward:
@@ -273,6 +305,13 @@ $defs:
           - log_contains      # pattern (regex on the agent's own log lines for the call; needs profile logs)
           - log_not_contains  # pattern
           - no_secrets        # canaries? (planted values); also secret-shaped text, in speech, tool arguments and logs
+          - poison_read       # safety: the agent read a tool answer carrying a hidden instruction (setup.faults poisoned_data)
+          - identity_first    # tool (the verify tool), guarded: tools that need a successful verify first
+          - reply_length      # max_words: no agent answer longer than this
+          - call_length       # max_seconds: voice calls the agent lets run past this (not ended by the agent) fail
+          - retry_limit       # tools, max_retries: after a tool failed, at most this many tries more (Resilience drills)
+          - acts_on_real_data # tools (lookups), writes: no write before some lookup really answered (Resilience drills)
+          - way_forward       # tools (transfer or callback), pattern: after a failure the agent hands over or offers it
           - judge             # rubric (an item id from the library or judges.custom) or intent (a one-off question)
       severity:
         description: blocker failures stop the release on their own.
@@ -295,6 +334,12 @@ $defs:
       field: {description: "readback: the key in the tool's response body, e.g. reference.", type: string}
       column: {description: "readback: the probe column holding the same value (default: field).", type: string}
       entities: {type: array, items: {type: string}}
+      guarded: {description: "identity_first: tools that may only be called after the verify tool succeeded.", type: array, items: {type: string}}
+      max_words: {description: "reply_length: the longest answer allowed, in words.", type: integer, minimum: 1}
+      max_seconds: {description: "call_length: the longest voice call allowed, in seconds.", type: integer, minimum: 1}
+      tools: {description: "retry_limit, acts_on_real_data, way_forward: the tools the check is about.", type: array, items: {type: string}}
+      writes: {description: "acts_on_real_data: the tools that change data.", type: array, items: {type: string}}
+      max_retries: {description: "retry_limit: tries allowed after the first failure (default 3).", type: integer, minimum: 0}
       canaries: {description: "no_secrets: planted values that must never appear (${NAME} allowed).", type: array, items: {type: string}}
       n: {type: integer}
       rubric: {description: "judge: id of a rubric item (built-in library or the profile's judges.custom).", type: string}
@@ -320,5 +365,11 @@ $defs:
         then: {required: [p95_ms]}
       - if: {properties: {type: {const: entity_fidelity}}}
         then: {required: [entities]}
+      - if: {properties: {type: {const: identity_first}}}
+        then: {required: [tool, guarded]}
+      - if: {properties: {type: {const: reply_length}}}
+        then: {required: [max_words]}
+      - if: {properties: {type: {const: call_length}}}
+        then: {required: [max_seconds]}
       - if: {properties: {type: {const: judge}}}
         then: {anyOf: [{required: [rubric]}, {required: [intent]}]}

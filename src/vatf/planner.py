@@ -59,12 +59,13 @@ KINDS = {
     "cut_in": "timing", "cut_in_correction": "timing", "backchannel": "timing", "mid_sentence_pause": "timing",
     "goes_quiet": "timing",
     "background_noise": "speech", "phone_line": "speech", "bad_signal": "speech", "accent": "speech",
-    "quiet_voice": "speech", "spelled_details": "speech",
+    "quiet_voice": "speech", "spelled_details": "speech", "confusable_details": "speech",
+    "noise_over_agent": "timing",
 }
 # The library caller a kind needs (its behaviour or voice is what the test is about), when the draft's own
 # caller doesn't have it.
 KIND_PERSONA = {"backchannel": ("says-mm-hm", "backchannels"), "mid_sentence_pause": ("pauses-mid-sentence", "pauses_mid_sentence"),
-                "goes_quiet": ("goes-quiet", "goes_quiet"), "quiet_voice": ("quiet-caller", "volume_db"),
+                "goes_quiet": ("goes-quiet", "goes_quiet"), "noise_over_agent": ("coughs", "noises"), "quiet_voice": ("quiet-caller", "volume_db"),
                 "accent": ("indian-english", "accent")}
 # Fault per error kind when the draft names none.
 KIND_FAULT = {"tool_error": "http_error", "tool_timeout": "timeout", "tool_slow": "slow", "tool_bad_reply": "malformed_response"}
@@ -274,6 +275,8 @@ Kinds (category timing):
   backchannel: the caller says "mm-hm" while the agent explains something long; pick the says-mm-hm caller.
   mid_sentence_pause: the caller pauses mid-sentence while giving details; pick the pauses-mid-sentence caller.
   goes_quiet: the caller goes silent once (looking for a card or a date); pick the goes-quiet caller.
+  noise_over_agent: the caller coughs, or a door bangs, while the agent talks; pick the coughs caller. The agent
+        should keep talking, not stop as if cut in.
 Ask one judge question about the turn-taking itself (e.g. "Did the agent stop and use the caller's correction?").
 No faults and no noise.""",
     "speech": """
@@ -286,6 +289,10 @@ Kinds (category speech):
   accent: pick a caller with an accent (indian-english, scottish-english, spanish-speaker, mandarin-speaker).
   quiet_voice: pick the quiet-caller.
   spelled_details: the caller spells a name or reads a long number digit by digit (put it in facts).
+  confusable_details: details that are easy to mishear ON PURPOSE: numbers like fifteen / fifty, thirteen /
+        thirty, 13th / 30th; letters that sound alike (B, D, P, T; M, N; S, F) in a code or a spelled name;
+        uncommon names (Siobhan, Nguyen, Saoirse, Tamil names such as Thirunavukkarasu). Put each in facts so
+        Vocto checks it arrives exactly, and prefer an agent that reads it back.
 Give every test facts with names, numbers or dates that must arrive exactly, and an outcome that checks them
 in the database when the agent saves something. No faults.""",
     "resilience": """

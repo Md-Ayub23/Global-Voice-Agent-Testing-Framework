@@ -72,6 +72,10 @@ LIBRARY: dict[str, dict[str, Any]] = {p["id"]: p for p in [
     _p("says-mm-hm", "Caller who says \"mm-hm\"",
        "Listens actively: says \"mm-hm\" or \"okay\" while the agent explains. The agent should keep going, "
        "not stop or start again.", {}, US_1, behaviour={"backchannels": True}, use="timing"),
+    _p("coughs", "Caller who coughs (or a door bangs)",
+       "Has a cold: coughs now and then while the agent is talking, and a door bangs once in the background. "
+       "The agent should keep talking, not stop as if the caller had cut in.", {}, UK,
+       behaviour={"noises": True, "noise_chance": 0.7}, use="timing"),
     _p("pauses-mid-sentence", "Caller who pauses mid-sentence",
        "Stops to think in the middle of longer sentences. The agent should wait for the end, not answer half a "
        "sentence.", {"patience": "high"}, US_2, 0.95, behaviour={"pauses_mid_sentence": True, "fillers": True}, use="timing"),

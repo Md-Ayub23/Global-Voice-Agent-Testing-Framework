@@ -34,7 +34,7 @@ PROJECTS_DIR = "projects"
 ID = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 SECTIONS = {"name", "description", "agent_prompt", "domain", "languages", "connection", "test_id", "tools", "tool_gateway",
             "backend", "logs", "judges", "safety", "thresholds", "limits", "metrics", "pii", "agent_process",
-            "planted_bugs", "regression", "alerts", "health_checks", "load", "monitor", "costs"}
+            "planted_bugs", "regression", "alerts", "health_checks", "load", "monitor", "costs", "resilience"}
 # Written whole: a price the form cleared is gone, not kept from before.
 WHOLE = {"costs"}
 

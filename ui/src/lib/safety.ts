@@ -1,9 +1,11 @@
 // The built-in safety tests' API (src/vatf/web/safety.py) and the words the pages use for them.
 import { api, qs } from "./api";
-import type { Intensity, SafetyAttack, SafetyPage } from "./types";
+import type { AttackDraft, Intensity, SafetyAttack, SafetyPage } from "./types";
 
 export const safetyApi = {
   page: (key: string, file = "profile.yaml") => api.get<SafetyPage>(`/api/project/${key}/safety?${qs({ file })}`),
+  write: (key: string, body: { kind: "new" | "reword" | "language"; count?: number; attack_id?: string; language?: string; pack?: string; file?: string }) =>
+    api.post<{ drafts: AttackDraft[]; cost_usd: number }>(`/api/project/${key}/safety/write`, body),
 };
 
 export const INTENSITIES: { value: Intensity; label: string; hint: string }[] = [
@@ -32,5 +34,5 @@ export const PACK_TITLES: Record<string, string> = {
   "off-topic": "Off-topic requests", secrets: "Secrets and access", injection: "Prompt tricks", "made-up": "Made-up facts",
   "others-data": "Other people's data", harmful: "Harmful and risky requests", abuse: "Abusive callers",
   policy: "Pressure to break the rules", actions: "Unsafe actions", messy: "Confusing callers",
-  own: "This agent's own checks",
+  voice: "Voice tricks", own: "This agent's own checks",
 };

@@ -40,7 +40,7 @@ properties:
           - DUPLICATE_ACTION  # same write done more than once
           - UNEXPECTED_ACTION # a write happened when none should
           - NOT_VERIFIED      # evidence missing (e.g. no backend access, probe error)
-      expected: {enum: [success, honest_failure, no_action, recover_or_honest]}
+      expected: {enum: [success, honest_failure, no_action, recover_or_honest, alternative_or_honest]}
       said: {description: "What the agent told the caller.", enum: [success, failure, unclear, nothing]}
       said_text: {description: "The words that decided `said` (voice: as heard).", type: string}
       said_heard_by: {description: "Whose hearing decided `said`. ai = the patterns could not tell and two AI models agreed.", enum: [caller, second listen, ai]}
@@ -98,6 +98,49 @@ properties:
       blockers: {type: array, items: {type: string}}
       missed: {type: array, items: {type: string}}
 
+  speech:
+    description: >
+      Speech (speechcheck.py): each caller fact a tool received, right or wrong and its type (name, phone, date,
+      email, address, code, amount); the fair-test listen (facts Vocto's own careful listener heard or missed on
+      the line); too_hard = facts saved wrong that no listener could hear (a test issue); read_back = whether
+      the details were read back and confirmed before saving; voices = synthetic, real or mixed.
+    type: object
+    properties:
+      details:
+        type: array
+        items:
+          type: object
+          required: [fact, type, right]
+          properties:
+            fact: {type: string}
+            type: {enum: [name, phone, date, email, address, code, amount, other]}
+            right: {type: boolean}
+            said: {type: [string, "null"]}
+            saved: {type: [string, "null"]}
+            seq: {type: integer}
+      fair: {type: object, properties: {heard: {type: array}, missed: {type: array}}}
+      too_hard: {type: array, items: {type: string}}
+      read_back: {type: object}
+      voices: {enum: [synthetic, real, mixed]}
+
+  recovery:
+    description: >
+      Resilience failure drills (drills.recovery): how the agent got through the failure, measured by code.
+      tries = calls to the broken tools; retries = tries after the first failed answer; early_429 = retries
+      sent before a 429 said to; voice only: informed_ms (first failure to the agent being heard, 0 if it was
+      talking) and longest_silence_ms (nobody speaking, from the first failure to the agent's answer).
+    type: object
+    additionalProperties: false
+    properties:
+      tools: {type: array, items: {type: string}}
+      tries: {type: integer}
+      failed: {type: integer}
+      retries: {type: integer}
+      early_429: {type: integer}
+      informed_ms: {type: [integer, "null"]}
+      longest_silence_ms: {type: [integer, "null"]}
+      at_ms: {type: integer}
+
   judge_notes:
     description: Problems the AI judges met on this call (e.g. a judge gave no usable answer).
     type: array
@@ -126,6 +169,13 @@ properties:
             ms: {type: [integer, "null"]}
             counted: {type: boolean}
             note: {type: string}
+            tool: {description: "The agent called a tool in this turn (a tool answer, timed apart from plain answers).", type: boolean}
+            full_wait_ms: {description: "Tool answers: from the end of the caller's words to the agent's first sound after the tool answered (the real answer, after any \"let me check\").", type: [integer, "null"]}
+      stages:
+        description: "Voice: where answer time went, from the agent's own log lines (profile logs.timing): milliseconds per stage."
+        type: object
+        propertyNames: {enum: [stt, llm, tts]}
+        additionalProperties: {type: array, items: {type: integer}}
       latency_p50_ms: {type: [integer, "null"]}
       latency_p95_ms: {type: [integer, "null"]}
       cost_usd: {type: number}
@@ -133,7 +183,7 @@ properties:
       quality:
         description: Phase 5 call quality metrics (src/vatf/metrics.py), each with its band for this call.
         type: object
-        propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, turns_to_goal, escalated, duration_s]}
+        propertyNames: {enum: [ttfw_ms, response_p90_ms, response_p99_ms, longest_silence_ms, talked_over, barge_in_stop_ms, backchannel_kept, noise_kept, paused_cut_off, checkin_ms, talk_share, agent_wpm, heard_wer, caller_wer, repeated_question, turns_to_goal, escalated, duration_s]}
         additionalProperties:
           type: object
           required: [value, band]

@@ -19,7 +19,7 @@ from .util import mask_token, read_json, sha256_file, write_json
 
 # Free-text fields that may hold spoken personal data, per event type.
 TEXT_FIELDS = {"caller_turn": ("text",), "agent_turn": ("heard_text", "platform_transcript"),
-               "stt_text": ("text",), "platform_event": ("text",),
+               "stt_text": ("text",), "caller_heard": ("text",), "platform_event": ("text",),
                "agent_heard": ("text",)}
 
 

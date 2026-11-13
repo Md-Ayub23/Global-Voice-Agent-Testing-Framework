@@ -3,7 +3,7 @@
 Three inputs, read once per call and turned into one CallConditions:
 
   persona   who calls: voice / accent, speaking speed, volume, and behaviours
-            (cuts in, says "mm-hm", pauses mid-sentence, fillers, goes quiet once)
+            (cuts in, says "mm-hm", coughs or bangs a door, pauses mid-sentence, fillers, goes quiet once)
   scenario  where they call from: audio.noise / noise_file / snr_db and audio.line
             (phone codec, packet loss) - plus the exact barge-ins of audio.barge_in
   run       a preset laid over every test (RunConfig.conditions): as_written, phone, noisy, hard,
@@ -39,9 +39,9 @@ PRESETS: dict[str, dict[str, Any]] = {
     "noisy": {"title": "Noisy", "about": "Every call from a busy cafe (10 dB speech-to-noise).",
               "noise": "cafe", "snr_db": 10},
     "hard": {"title": "Hard", "about": "Street noise at 8 dB on a phone line with 3% packet loss, and every caller "
-                                       "cuts in, says \"mm-hm\" and pauses mid-sentence.",
+                                       "cuts in, says \"mm-hm\", coughs or bangs a door, and pauses mid-sentence.",
              "noise": "street", "snr_db": 8, "line": {"codec": "phone", "packet_loss_pct": 3},
-             "behaviour": {"interrupts": True, "backchannels": True, "pauses_mid_sentence": True}},
+             "behaviour": {"interrupts": True, "backchannels": True, "noises": True, "pauses_mid_sentence": True}},
     # Speech conditions (Speech mode sweeps these): each changes one thing about how the caller sounds.
     "quiet": {"title": "Quiet caller", "about": "The caller speaks softly (12 dB quieter) on a phone line.",
               "volume_db": -12, "line": {"codec": "phone"}},
@@ -52,18 +52,44 @@ PRESETS: dict[str, dict[str, Any]] = {
                "noise": "street", "snr_db": 5},
     "lossy": {"title": "Bad mobile signal", "about": "A phone line that loses 5% of its audio packets.",
               "line": {"codec": "phone", "packet_loss_pct": 5}},
+    "echo": {"title": "Speakerphone in a room", "about": "The caller is on speakerphone in a hard-walled room: their "
+                                                     "voice echoes (about 0.6 s of reverberation).",
+             "echo": True},
+    "chatter": {"title": "People talking nearby", "about": "Other people talk in the background (10 dB below the "
+                                                          "caller): the hardest noise for speech recognition.",
+                "noise": "chatter", "snr_db": 10},
+    "keypad": {"title": "Numbers on the keypad", "about": "The caller types numbers (phone numbers, codes) on the "
+                                                         "keypad instead of saying them: touch tones on the line.",
+               "keypad": True},
     # Network conditions (Resilience): how the audio travels, not how the caller sounds.
     "jittery": {"title": "Unsteady network", "about": "The caller's audio arrives in bursts with gaps (delay varying "
                                                       "by about 80 ms), and 1% of packets arrive out of order.",
                 "line": {"jitter_ms": 80, "reorder_pct": 1}},
 }
 ACCENT_PREFIX = "accent:"
+# The breaking-point ladder (Speech mode): one thing made harder step by step on a few probe tests.
+NOISE_LADDER = (20, 15, 10, 5, 0)          # cafe noise, speech-to-noise in dB (lower is louder noise)
+LOSS_LADDER = (1, 3, 5, 10)                # phone line, % of audio packets lost
+LADDER_TESTS = 5                           # the probe set: at most this many test cases climb the ladder
+
+
+def ladder_step(preset: str) -> tuple[str, float] | None:
+    """("noise", 10) for "snr:10", ("loss", 5) for "loss:5", else None."""
+    for prefix, kind in (("snr:", "noise"), ("loss:", "loss")):
+        if preset.startswith(prefix):
+            try:
+                return kind, float(preset[len(prefix):])
+            except ValueError:
+                return None
+    return None
 
 
 def known(preset: str) -> bool:
     """A run preset or Speech mode condition: a PRESETS id, or "accent:<id>" for one of ACCENTS."""
     if preset.startswith(ACCENT_PREFIX):
         return preset[len(ACCENT_PREFIX):] in ACCENTS
+    if (step := ladder_step(preset)):
+        return (-10 <= step[1] <= 40) if step[0] == "noise" else (0 < step[1] <= 50)
     return preset in PRESETS
 
 
@@ -72,6 +98,8 @@ def title(preset: str) -> str:
     if preset.startswith(ACCENT_PREFIX):
         acc = preset[len(ACCENT_PREFIX):]
         return f"{ACCENTS[acc][0]} accent" if acc in ACCENTS else preset
+    if (step := ladder_step(preset)):
+        return f"Cafe noise {step[1]:g} dB" if step[0] == "noise" else f"{step[1]:g}% packets lost"
     return PRESETS[preset]["title"] if preset in PRESETS else preset
 
 
@@ -86,6 +114,11 @@ class Behaviour:
     backchannel_after_ms: int = 1800
     backchannel_chance: float = 0.6
     backchannel_max: int = 3
+    noises: bool = False                # a cough, a door bang or a clatter while the agent talks
+    noise_after_ms: int = 2200
+    noise_chance: float = 0.5
+    noise_max: int = 2
+    noise_kinds: tuple[str, ...] = ("cough", "door", "clatter")
     pauses_mid_sentence: bool = False
     pause_ms: int = 1200
     pause_chance: float = 0.5           # of caller lines of 6 words or more
@@ -95,7 +128,8 @@ class Behaviour:
     quiet_ms: int = 12000               # the caller says nothing this long, once per call
 
     def any(self) -> bool:
-        return self.interrupts or self.backchannels or self.pauses_mid_sentence or self.fillers or self.goes_quiet
+        return (self.interrupts or self.backchannels or self.noises or self.pauses_mid_sentence or self.fillers
+                or self.goes_quiet)
 
 
 @dataclass
@@ -112,6 +146,8 @@ class CallConditions:
     packet_loss_pct: float = 0.0
     jitter_ms: float = 0.0              # an unsteady network: the spread of the audio's delay
     reorder_pct: float = 0.0            # and the share of packets that arrive out of order
+    echo: bool = False                  # speakerphone in a room: the caller's voice reverberates
+    keypad: bool = False                # numbers typed on the keypad (touch tones), not said
     behaviour: Behaviour = field(default_factory=Behaviour)
     seed: str = ""
     quiet_turn: int | None = None       # the caller turn (2nd or later) the caller goes quiet before
@@ -123,6 +159,7 @@ class CallConditions:
         self.quiet_turn = (2 + self._rng.randrange(3)) if b.goes_quiet else None
         self.interruptions = 0
         self.backchannels = 0
+        self.noises = 0
 
     # ---- choices made during the call (seeded) ------------------------------
     def roll(self, chance: float) -> bool:
@@ -143,6 +180,13 @@ class CallConditions:
         if not b.backchannels or self.backchannels >= b.backchannel_max or not self.roll(b.backchannel_chance):
             return False
         self.backchannels += 1
+        return True
+
+    def wants_noise(self) -> bool:
+        b = self.behaviour
+        if not b.noises or self.noises >= b.noise_max or not self.roll(b.noise_chance):
+            return False
+        self.noises += 1
         return True
 
     def backchannel_lines(self) -> tuple[str, ...]:
@@ -181,6 +225,10 @@ class CallConditions:
             parts.append(ACCENTS[self.accent][0] if self.accent in ACCENTS else self.accent)
         if self.volume_db:
             parts.append(f"voice {self.volume_db:+g} dB")
+        if self.echo:
+            parts.append("speakerphone echo")
+        if self.keypad:
+            parts.append("numbers on the keypad")
         if self.language != "en":
             parts.append(f"{language_name(self.language)} caller")
         return ", ".join(parts) or "clean line"
@@ -201,7 +249,14 @@ class CallConditions:
             out["volume_db"] = self.volume_db
         if self.jitter_ms or self.reorder_pct:
             out.update(jitter_ms=self.jitter_ms, reorder_pct=self.reorder_pct)
-        on = [k for k in ("interrupts", "backchannels", "pauses_mid_sentence", "fillers", "goes_quiet") if getattr(b, k)]
+        if self.echo:
+            out["echo"] = True
+        if self.keypad:
+            out["keypad"] = True
+        if (step := ladder_step(self.preset)):
+            out["ladder"] = {"kind": step[0], "level": step[1]}
+        on = [k for k in ("interrupts", "backchannels", "noises", "pauses_mid_sentence", "fillers", "goes_quiet")
+              if getattr(b, k)]
         out["behaviours"] = on
         return out
 
@@ -210,6 +265,7 @@ class CallConditions:
 
 
 BEHAVIOUR_WORDS = {"interrupts": "cuts in on long answers", "backchannels": "says \"mm-hm\" while the agent talks",
+                   "noises": "coughs, or a door bangs, while the agent talks",
                    "pauses_mid_sentence": "pauses in the middle of sentences", "fillers": "says \"um\" and \"uh\"",
                    "goes_quiet": "goes quiet once"}
 
@@ -249,6 +305,9 @@ def resolve(persona: Mapping[str, Any] | None, scenario: Mapping[str, Any], *, p
         raise ValueError(f"unknown caller conditions {preset!r} (use one of {', '.join(PRESETS)}, or accent:<id>)")
     accent = preset[len(ACCENT_PREFIX):] if preset.startswith(ACCENT_PREFIX) else None
     p = PRESETS.get(preset, {})
+    if (step := ladder_step(preset)):
+        p = ({"noise": "cafe", "snr_db": step[1]} if step[0] == "noise"
+             else {"line": {"codec": "phone", "packet_loss_pct": step[1]}})
     audio = dict(scenario.get("audio", {}) or {})
     if "noise" in p:
         audio.update(noise=p["noise"], snr_db=p["snr_db"])
@@ -261,7 +320,7 @@ def resolve(persona: Mapping[str, Any] | None, scenario: Mapping[str, Any], *, p
         persona = {**persona, "speech": speech}
     raw = _merge(persona.get("behaviour", {}) or {}, p.get("behaviour", {}))
     fields = {f for f in Behaviour.__dataclass_fields__}
-    b = Behaviour(**{k: (tuple(v) if k == "interrupt_lines" else v) for k, v in raw.items() if k in fields and v is not None})
+    b = Behaviour(**{k: (tuple(v) if k in ("interrupt_lines", "noise_kinds") else v) for k, v in raw.items() if k in fields and v is not None})
     if not raw.get("interrupt_lines"):        # the persona's own cut-in lines, else the language's
         b.interrupt_lines = phrases(language, "interrupt_lines")
     voice, accent_id = caller_voice(persona, default_voice), speech.get("accent")
@@ -279,6 +338,7 @@ def resolve(persona: Mapping[str, Any] | None, scenario: Mapping[str, Any], *, p
         snr_db=float(audio.get("snr_db", 15)), phone=line.get("codec") == "phone",
         packet_loss_pct=float(line.get("packet_loss_pct", 0) or 0),
         jitter_ms=float(line.get("jitter_ms", 0) or 0), reorder_pct=float(line.get("reorder_pct", 0) or 0),
+        echo=bool(p.get("echo") or audio.get("echo")), keypad=bool(p.get("keypad") or audio.get("keypad")),
         behaviour=b, seed=seed)
 
 
@@ -299,7 +359,7 @@ def preset_list() -> list[dict[str, str]]:
 
 # The Speech mode's choice of conditions: how the caller sounds, one change at a time. "hard" mixes
 # several and adds caller behaviours, so it is left to the run-wide presets.
-SPEECH_SWEEP = ("as_written", "phone", "noisy", "street", "quiet", "fast", "lossy", "jittery")
+SPEECH_SWEEP = ("as_written", "phone", "noisy", "street", "chatter", "echo", "quiet", "fast", "lossy", "jittery", "keypad")
 SPEECH_DEFAULT = ("as_written", "phone", "noisy", "quiet")
 
 
@@ -307,6 +367,10 @@ def sweep_list() -> list[dict[str, Any]]:
     """Speech mode conditions for the dashboard: line and voice conditions, then accents."""
     out = [{"id": k, "title": PRESETS[k]["title"], "about": PRESETS[k]["about"], "group": "line",
             "default": k in SPEECH_DEFAULT} for k in SPEECH_SWEEP]
+    out += [{"id": f"snr:{db}", "title": f"Cafe noise {db} dB", "about": f"Cafe noise at {db} dB speech-to-noise "
+             "(breaking-point ladder: lower is louder).", "group": "ladder", "default": False} for db in NOISE_LADDER]
+    out += [{"id": f"loss:{pc}", "title": f"{pc}% packets lost", "about": f"A phone line losing {pc}% of its audio "
+             "packets (breaking-point ladder).", "group": "ladder", "default": False} for pc in LOSS_LADDER]
     out += [{"id": ACCENT_PREFIX + k, "title": f"{label} accent", "about": f"The caller speaks {label} (voice {voice}).",
              "group": "accent", "default": False} for k, (label, voice) in ACCENTS.items()]
     return out
