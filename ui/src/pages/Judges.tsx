@@ -20,7 +20,7 @@ export function JudgesHeader({ project, current, toLabel, actions }: { project: 
       <PageHead title="AI judges" sub="AI judges read every conversation for what hard checks can't see. Your labels decide when to trust them.">{actions}</PageHead>
       <LinkTabs value={current} tabs={[
         { value: "scores", label: "Scores", icon: "scale", href: projectHref(project.key, "/judges") },
-        { value: "review", label: <>Review calls{toLabel ? <span className="ml-1 px-1.5 rounded-full bg-warn-soft text-warn text-[13px] font-semibold">{toLabel}</span> : null}</>, icon: "tag", href: projectHref(project.key, "/labels") },
+        { value: "review", label: <>Review calls{toLabel ? <span className="ml-1 px-1.5 rounded-full bg-warn-soft text-warn text-sm font-semibold">{toLabel}</span> : null}</>, icon: "tag", href: projectHref(project.key, "/labels") },
         { value: "settings", label: "Judge settings", icon: "sparkles", href: projectHref(project.key, "/setup/judges") },
       ]} />
     </>
@@ -30,7 +30,7 @@ export function JudgesHeader({ project, current, toLabel, actions }: { project: 
 export function JudgesPageView({ project }: { project: Project }) {
   useCrumbs([{ label: project.name, href: projectHref(project.key) }, { label: "AI judges" }, { label: "Scores" }]);
   const [tick, setTick] = useState(0);
-  const { data, error } = useLoad(() => judgesApi.page(project.key), [project.key, tick]);
+  const { data, error } = useLoad(() => judgesApi.page(project.key), [project.key, tick], { keep: true });
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton height={520} />;
   const s = data.summary;
@@ -46,7 +46,7 @@ export function JudgesPageView({ project }: { project: Project }) {
         </Button>} />
       <div className="flex flex-col gap-4">
         {!on && <Notice tone="warn"><b>The judges are off for this agent.</b> Runs check tools, the database, logs and timing only. <a href={projectHref(project.key, "/setup/judges")}>Turn them on</a>.</Notice>}
-        {data.problems.length > 0 && <Notice tone="warn">{data.problems.slice(0, 4).map((p, i) => <div key={i} className="text-[13px]">{p}</div>)}</Notice>}
+        {data.problems.length > 0 && <Notice tone="warn">{data.problems.slice(0, 4).map((p, i) => <div key={i} className="text-sm">{p}</div>)}</Notice>}
 
         <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
           <Kpi icon="scale" label="Items judged" value={s.items ?? "—"}
@@ -61,7 +61,7 @@ export function JudgesPageView({ project }: { project: Project }) {
         <HowItWorks th={th} tiebreak={st.tiebreak} />
 
         <Card flush>
-          <div className="px-[18px] pt-4 pb-2">
+          <div className="px-4.5 pt-4 pb-2">
             <CardHead level={2} title="What the judges score" sub={`Each item on the calls where it can come up, plus the questions scenarios add. Recent results come from the last ${plural(s.judged_runs || 0, "judged run")}.`} className="mb-0" />
           </div>
           {data.items.length ? (
@@ -90,7 +90,7 @@ function HowItWorks({ th, tiebreak }: { th: Thresholds; tiebreak: boolean }) {
         {steps.map(([icon, title, text], i) => (
           <div key={title} className="flex items-start gap-3">
             <span className="size-8 rounded-lg grid place-items-center bg-accent-soft text-accent-ink flex-none"><Icon name={icon} size={16} /></span>
-            <div><b className="text-[13.5px]">{i + 1}. {title}</b><div className="text-[13px] text-ink-2 mt-0.5">{text}</div></div>
+            <div><b className="text-sm">{i + 1}. {title}</b><div className="text-sm text-ink-2 mt-0.5">{text}</div></div>
           </div>
         ))}
       </div>
@@ -103,7 +103,7 @@ function RateMeter({ label, value, min, detail }: { label: string; value: number
   const ok = value != null && value >= min;
   return (
     <Tip className="block" content={detail}>
-      <div className="grid grid-cols-[112px_minmax(0,1fr)_38px] items-center gap-2 text-[13px]">
+      <div className="grid grid-cols-[112px_minmax(0,1fr)_38px] items-center gap-2 text-sm">
         <span className="text-muted truncate">{label}</span>
         <div className="relative h-2 rounded-full bg-surface-3">
           {value != null && <div className={cx("grow-x absolute inset-y-0 left-0 rounded-full", ok ? "bg-good" : "bg-warn")} style={{ width: `${Math.max(value * 100, 4)}%` }} />}
@@ -123,36 +123,36 @@ function ItemRow({ item, th, projectKey, onChange }: { item: JudgeItemRow; th: T
   const [open, setOpen] = useState(false);
   const teachable = item.disagreements.length + item.examples.length;
   return (
-    <div data-item={item.id} className="px-[18px] py-3.5 grid gap-3">
+    <div data-item={item.id} className="px-4.5 py-3.5 grid gap-3">
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1.1fr)_150px] items-start">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
-            <b className="text-[13.5px]">{item.title}</b>
-            <Chip className="text-[13px]">{packLabel(item.pack)}</Chip>
-            {item.severity === "blocker" && <Chip tone="bad" className="text-[13px]">blocker</Chip>}
-            {item.severity === "minor" && <Chip className="text-[13px]">minor</Chip>}
-            {item.needs === "write" && <Chip className="text-[13px]">only when something changed</Chip>}
+            <b className="text-sm">{item.title}</b>
+            <Chip className="text-sm">{packLabel(item.pack)}</Chip>
+            {item.severity === "blocker" && <Chip tone="bad" className="text-sm">blocker</Chip>}
+            {item.severity === "minor" && <Chip className="text-sm">minor</Chip>}
+            {item.needs === "write" && <Chip className="text-sm">only when something changed</Chip>}
           </div>
-          <div className="text-[13px] text-ink-2 mt-0.5">{item.question}</div>
-          {item.scenarios.length > 0 && item.pack === "scenario" && <div className="text-[13px] text-muted mt-0.5">in {item.scenarios.join(", ")}</div>}
+          <div className="text-sm text-ink-2 mt-0.5">{item.question}</div>
+          {item.scenarios.length > 0 && item.pack === "scenario" && <div className="text-sm text-muted mt-0.5">in {item.scenarios.join(", ")}</div>}
         </div>
         <div className="grid gap-1.5">
           {c.can_block
             ? <Chip tone="good" icon="shield" className="justify-self-start">Trusted</Chip>
             : <Chip tone="default" icon="info" className="justify-self-start">Opinion only</Chip>}
-          <span className="text-[13px] text-muted">{c.status}</span>
+          <span className="text-sm text-muted">{c.status}</span>
         </div>
         <div className="grid gap-1.5">
           <RateMeter label="Catches failures" value={c.tpr} min={c.min_tpr}
             detail={c.fails ? `Of the ${plural(c.fails, "call")} you labelled Fail, the judges failed ${c.caught}. The tick is ${pctOf(c.min_tpr)}.` : "No call labelled Fail yet."} />
           <RateMeter label="Passes good calls" value={c.tnr} min={c.min_tnr}
             detail={c.passes ? `Of the ${plural(c.passes, "call")} you labelled Pass, the judges passed ${c.cleared}. The tick is ${pctOf(c.min_tnr)}.` : "No call labelled Pass yet."} />
-          <div className="flex items-center gap-2 text-[13px] text-muted">
+          <div className="flex items-center gap-2 text-sm text-muted">
             <div className="flex-1 h-1 rounded-full bg-surface-3 overflow-hidden"><div className="grow-x h-full rounded-full bg-accent" style={{ width: `${progress * 100}%` }} /></div>
             <span className="tabular-nums">{c.labelled_calls} / {th.min_labels} labels · {c.fails} fail</span>
           </div>
         </div>
-        <div className="text-[13px] grid gap-0.5">
+        <div className="text-sm grid gap-0.5">
           {judged ? (
             <>
               <span><b className="text-good tabular-nums">{r.PASS}</b> <span className="text-ink-2">passed</span></span>
@@ -165,7 +165,7 @@ function ItemRow({ item, th, projectKey, onChange }: { item: JudgeItemRow; th: T
       </div>
       {teachable > 0 && (
         <div>
-          <button type="button" data-teach={item.id} className="text-[13px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1" onClick={() => setOpen((o) => !o)}>
+          <button type="button" data-teach={item.id} className="text-sm text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1" onClick={() => setOpen((o) => !o)}>
             <Icon name="chevron" size={13} className={cx("transition-transform", open && "rotate-90")} />
             Teach the judges{item.disagreements.length ? ` · ${plural(item.disagreements.length, "call")} where they disagreed with you` : ""}{item.examples.length ? ` · ${plural(item.examples.length, "example")} in use` : ""}
           </button>
@@ -194,14 +194,14 @@ function Teach({ item, projectKey, onChange }: { item: JudgeItemRow; projectKey:
   };
   return (
     <div className="mt-2 grid gap-2">
-      <Notice className="text-[13px]">
+      <Notice className="text-sm">
         An example shows the judges how you want this item judged, with no training needed. Adding or removing one changes the
         item's wording, so its trust is measured again on new labels. If the judges keep getting it wrong, a clearer line in
         the <a href={projectHref(projectKey, "/setup/judges")}>judges' policy</a> often helps more.
       </Notice>
       {item.examples.map((e, i) => (
-        <div key={`ex-${i}`} data-example={i} className="rounded-lg border border-accent/40 bg-accent-soft/30 p-2.5 text-[13px] grid gap-1">
-          <div className="flex items-center gap-2 flex-wrap"><Chip tone="accent" icon="sparkles" className="text-[13px]">example in use</Chip>
+        <div key={`ex-${i}`} data-example={i} className="rounded-lg border border-accent/40 bg-accent-soft/30 p-2.5 text-sm grid gap-1">
+          <div className="flex items-center gap-2 flex-wrap"><Chip tone="accent" icon="sparkles" className="text-sm">example in use</Chip>
             <b>Correct result: {VOTE_LABEL[e.answer]}</b></div>
           <div className="text-ink-2 break-words">{e.said}</div>
           {e.why && <div className="text-muted">Why: {e.why}</div>}
@@ -218,7 +218,7 @@ function Teach({ item, projectKey, onChange }: { item: JudgeItemRow; projectKey:
 function DisagreementRow({ d, busy, onUse }: { d: Disagreement; busy: boolean; onUse: (why: string) => void }) {
   const [why, setWhy] = useState(d.note);
   return (
-    <div data-disagreement={d.key} className="rounded-lg border border-line p-2.5 text-[13px] grid gap-1.5">
+    <div data-disagreement={d.key} className="rounded-lg border border-line p-2.5 text-sm grid gap-1.5">
       <div className="flex items-center gap-2 flex-wrap">
         <b>You said {VOTE_LABEL[d.label]}</b>
         <span className="text-muted">the judges said {d.judges === "NEEDS_REVIEW" ? "different things" : d.judges ? VOTE_LABEL[d.judges as keyof typeof VOTE_LABEL] || d.judges : "nothing usable"}</span>
@@ -228,7 +228,7 @@ function DisagreementRow({ d, busy, onUse }: { d: Disagreement; busy: boolean; o
         <div key={j} className="text-muted"><b className="font-semibold">{JUDGE_NAME[j as keyof typeof JUDGE_NAME] || j}:</b> {r}</div>
       ))}
       <div className="flex items-center gap-2 flex-wrap">
-        <input className="flex-1 min-w-[200px] h-8 rounded-lg border border-line-strong bg-surface px-2.5 text-[13px]" value={why}
+        <input className="flex-1 min-w-50 h-8 rounded-lg border border-line-strong bg-surface px-2.5 text-sm" value={why}
           placeholder="Why is that the right answer? (optional)" onChange={(e) => setWhy(e.target.value)} />
         <Button size="sm" variant="primary" icon="sparkles" busy={busy} onClick={() => onUse(why)}>Use as an example</Button>
       </div>

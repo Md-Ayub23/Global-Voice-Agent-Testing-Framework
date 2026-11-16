@@ -37,23 +37,23 @@ export function PrintReport({ project, runId }: { project: Project; runId: strin
   const sm = run.summary;
   const bugs = sm.agent_options?.bugs || "";
   return (
-    <div id="print-report" className="grid gap-5 pt-4 print:pt-0 print:gap-4 max-w-[1040px]">
+    <div id="print-report" className="grid gap-5 pt-4 print:pt-0 print:gap-4 max-w-260">
       <div className="flex flex-wrap items-center gap-2.5 print:hidden">
         <Button variant="ghost" icon="back" href={back}>Back to the run</Button>
         <span className="flex-1" />
-        <span className="text-[13px] text-muted">Pick "Save as PDF" as the printer in the next window.</span>
+        <span className="text-sm text-muted">Pick "Save as PDF" as the printer in the next window.</span>
         <Button variant="primary" icon="printer" id="save-pdf" onClick={() => window.print()}>Save as PDF</Button>
       </div>
 
       <header className="flex flex-wrap items-end gap-x-6 gap-y-2 pb-4 border-b border-line">
-        <div className="flex items-center gap-3 flex-1 min-w-[260px]">
-          <img src="/static/logo.svg" alt="" className="size-9 rounded-[9px]" />
+        <div className="flex items-center gap-3 flex-1 min-w-65">
+          <img src="/static/logo.svg" alt="" className="size-9 rounded-lg" />
           <div>
-            <div className="text-[13px] font-medium text-muted">Vocto · Release readiness report</div>
-            <h1 className="text-[22px] font-bold tracking-[-.02em] leading-tight">{project.name} · {modeTitle(rd.mode.id)} test</h1>
+            <div className="text-sm font-medium text-muted">Vocto · Release readiness report</div>
+            <h1 className="text-xl font-bold tracking-[-.02em] leading-tight">{project.name} · {modeTitle(rd.mode.id)} test</h1>
           </div>
         </div>
-        <dl className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-[13px]">
+        <dl className="grid grid-cols-[auto_auto] gap-x-3 gap-y-0.5 text-sm">
           <dt className="text-muted">Run</dt><dd className="font-mono">{runId}</dd>
           <dt className="text-muted">Tested</dt><dd>{fmtDate(sm.started_at)} · {rd.channel === "voice" ? "Voice" : "Text"}</dd>
         </dl>
@@ -70,7 +70,7 @@ export function PrintReport({ project, runId }: { project: Project; runId: strin
       <MetricsCard r={rd} />
       <CoverageCard r={rd} />
       <MethodCard r={rd} />
-      <footer className="text-[13px] text-muted pt-2 border-t border-line">
+      <footer className="text-sm text-muted pt-2 border-t border-line">
         Made by Vocto from run {runId}. Every finding links back to the calls it came from in the Vocto dashboard.
       </footer>
     </div>

@@ -24,13 +24,13 @@ const BTN_VARIANT: Record<Variant, string> = {
   ghost: "bg-transparent text-ink border-transparent hover:bg-[var(--glass-strong)]",
 };
 const BTN_SIZE: Record<Size, string> = {
-  sm: "h-[30px] text-[13px] rounded-full",
-  md: "h-9 text-[14px] rounded-full",
-  lg: "h-11 text-[15px] rounded-full",
+  sm: "h-7.5 text-sm rounded-full",
+  md: "h-9 text-base rounded-full",
+  lg: "h-11 text-md rounded-full",
 };
 // Padding lives apart from the size so an icon-only button never gets two competing px- classes.
 const BTN_PAD: Record<Size, string> = { sm: "px-3", md: "px-4", lg: "px-6" };
-const ICON_ONLY: Record<Size, string> = { sm: "w-[30px] px-0", md: "w-9 px-0", lg: "w-11 px-0" };
+const ICON_ONLY: Record<Size, string> = { sm: "w-7.5 px-0", md: "w-9 px-0", lg: "w-11 px-0" };
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant;
@@ -67,7 +67,7 @@ export function Button({ variant = "default", size = "md", icon, iconOnly, href,
 
 export function Card({ className, children, flush, ...rest }: { className?: string; children: ReactNode; flush?: boolean } & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div className={cx("glass rounded-[20px] min-w-0", flush ? "p-0" : "p-5", className)} {...rest}>
+    <div className={cx("glass rounded-3xl min-w-0", flush ? "p-0" : "p-5", className)} {...rest}>
       {children}
     </div>
   );
@@ -77,22 +77,60 @@ export function CardHead({ title, sub, children, level = 3, className }: { title
   const H = level === 2 ? "h2" : "h3";
   return (
     <div className={cx("flex items-center gap-x-2.5 gap-y-1 mb-3.5 flex-wrap", className)}>
-      <H className={cx("grow min-w-0 font-semibold tracking-[-.01em]", level === 2 ? "text-[16px]" : "text-[15px]")}>{title}</H>
-      {sub != null && <span className="text-muted text-[13px]">{sub}</span>}
+      <H className={cx("grow min-w-0 card-title", level === 2 && "text-lg")}>{title}</H>
+      {sub != null && <span className="text-muted text-sm">{sub}</span>}
       {children}
     </div>
   );
 }
 
-export function PageHead({ title, sub, children }: { title: ReactNode; sub?: ReactNode; children?: ReactNode }) {
+// Every page opens the same way: an optional way back, the title, one line on what the page is for, and the
+// page's own actions on the right. Titles are one size everywhere (the type scale in index.css).
+export function PageHead({ title, sub, back, meta, children, className }: {
+  title: ReactNode; sub?: ReactNode; back?: { href: string; label: string }; meta?: ReactNode; children?: ReactNode; className?: string;
+}) {
   return (
-    <div className="flex items-end gap-4 mt-2 mb-5 flex-wrap">
-      <div className="flex-1 min-w-[min(100%,340px)]">
-        {typeof title === "string" ? <h1 className="text-[28px] font-bold tracking-[-.03em] leading-tight text-balance">{title}</h1> : title}
-        {sub && <div className="mt-1 text-muted text-[14.5px] max-w-[760px]">{sub}</div>}
+    <div className={cx("mt-2 mb-6", className)} data-page-head>
+      {back && (
+        <a href={back.href} id="page-back" className="inline-flex items-center gap-1 mb-2 text-sm text-muted hover:text-ink hover:no-underline">
+          <Icon name="back" size={14} />{back.label}
+        </a>
+      )}
+      <div className="flex items-start gap-x-4 gap-y-3 flex-wrap">
+        <div className="flex-1 min-w-[min(100%,320px)]">
+          {typeof title === "string" ? <h1 className="page-title">{title}</h1> : title}
+          {sub && <div className="mt-1.5 text-muted text-base max-w-[760px]">{sub}</div>}
+          {meta && <div className="mt-2.5 flex flex-wrap items-center gap-2 text-sm text-muted">{meta}</div>}
+        </div>
+        {children && <div className="flex flex-wrap items-center gap-2 sm:pt-1 min-w-0 max-w-full">{children}</div>}
+      </div>
+    </div>
+  );
+}
+
+// A titled group of cards on a page: the one heading style between cards.
+export function Section({ title, sub, action, children, className, id }: {
+  title: ReactNode; sub?: ReactNode; action?: ReactNode; children: ReactNode; className?: string; id?: string;
+}) {
+  return (
+    <section id={id} className={cx("mt-8 first:mt-0", className)}>
+      <div className="flex items-baseline gap-x-3 gap-y-1 mb-3 flex-wrap">
+        <h2 className="section-title grow">{title}</h2>
+        {sub != null && <span className="text-sm text-muted">{sub}</span>}
+        {action}
       </div>
       {children}
-    </div>
+    </section>
+  );
+}
+
+// Only people who may change things get working controls: a viewer sees the same page with its form fields,
+// buttons and switches turned off (links and tabs still work). The server refuses the change anyway.
+export function ReadOnly({ when, children }: { when: boolean; children: ReactNode }) {
+  return (
+    <fieldset disabled={when} className="contents min-w-0 border-0 p-0 m-0" data-readonly={when || undefined}>
+      {children}
+    </fieldset>
   );
 }
 
@@ -110,7 +148,7 @@ export function Badge({ status, label, className }: { status: string | null | un
   const [t, , text] = statusInfo(status);
   const [cls, dot] = BADGE_TONE[t];
   return (
-    <span className={cx("inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[13px] font-semibold whitespace-nowrap", cls, className)}>
+    <span className={cx("inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-sm font-semibold whitespace-nowrap", cls, className)}>
       {status === "running" ? <Spinner size={10} /> : <i className={cx("size-1.5 rounded-full flex-none", dot)} />}
       {label ?? text}
     </span>
@@ -132,7 +170,7 @@ const CHIP_TONE: Record<ChipTone, [string, string]> = {
 export function Chip({ tone = "default", icon, children, className, title }: { tone?: ChipTone; icon?: IconName; children: ReactNode; className?: string; title?: string }) {
   const [cls, ic] = CHIP_TONE[tone];
   return (
-    <span title={title} className={cx("inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-[13px] font-medium border whitespace-nowrap max-w-full min-w-0", cls, className)}>
+    <span title={title} className={cx("inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-sm font-medium border whitespace-nowrap max-w-full min-w-0", cls, className)}>
       {icon && <Icon name={icon} size={12} className={cx("flex-none", ic)} />}
       <span className="truncate min-w-0">{children}</span>
     </span>
@@ -149,7 +187,7 @@ export function Notice({ tone = "info", icon, children, className }: { tone?: ke
   const [bg, ic] = NOTICE_TONE[tone];
   const fallback: IconName = tone === "good" ? "check" : tone === "info" ? "info" : "alert";
   return (
-    <div data-notice={tone} className={cx("flex gap-2.5 items-start px-4 py-3 rounded-[14px] text-[13px] text-ink border border-[color-mix(in_srgb,currentColor_0%,transparent)]", bg, className)}>
+    <div data-notice={tone} className={cx("flex gap-2.5 items-start px-4 py-3 rounded-2xl text-sm text-ink border border-[color-mix(in_srgb,currentColor_0%,transparent)]", bg, className)}>
       <Icon name={icon || fallback} size={17} className={cx("flex-none mt-px", ic)} />
       <div className="min-w-0 flex-1">{children}</div>
     </div>
@@ -190,15 +228,15 @@ export function Progress({ value, running }: { value: number; running?: boolean 
 // ---- inputs ----------------------------------------------------------------------------------
 
 export const inputCls =
-  "h-10 w-full px-3.5 rounded-[12px] border border-line-strong bg-[var(--glass-strong)] text-ink text-[14px] outline-none shadow-soft transition-[border-color,box-shadow] duration-200 ease-out-soft " +
+  "h-10 w-full px-3.5 rounded-xl border border-line-strong bg-[var(--glass-strong)] text-ink text-base outline-none shadow-soft transition-[border-color,box-shadow] duration-200 ease-out-soft " +
   "hover:border-[color-mix(in_oklab,var(--ink)_32%,transparent)] focus:border-accent hover:focus:border-accent focus:bg-surface focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--accent)_16%,transparent)] disabled:opacity-60";
 
 export function Field({ label, hint, children, className }: { label: ReactNode; hint?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <label className={cx("grid content-start gap-1.5 font-medium text-[13px] min-w-0", className)}>
+    <label className={cx("grid content-start gap-1.5 font-medium text-sm min-w-0", className)}>
       {label}
       {children}
-      {hint && <span className="font-normal text-muted text-[13px]">{hint}</span>}
+      {hint && <span className="font-normal text-muted text-sm">{hint}</span>}
     </label>
   );
 }
@@ -207,7 +245,7 @@ export function Seg<T extends string>({ value, options, onChange, className, id 
   value: T; options: { value: T; label: ReactNode; icon?: IconName }[]; onChange: (v: T) => void; className?: string; id?: string;
 }) {
   return (
-    <div id={id} className={cx("inline-flex max-w-full overflow-x-auto p-[3px] gap-[2px] bg-surface-2 border border-line rounded-lg scrollbar-thin", className)}>
+    <div id={id} className={cx("inline-flex max-w-full overflow-x-auto p-0.75 gap-0.5 bg-surface-2 border border-line rounded-lg scrollbar-thin", className)}>
       {options.map((o) => (
         <button
           key={o.value}
@@ -215,7 +253,7 @@ export function Seg<T extends string>({ value, options, onChange, className, id 
           data-v={o.value}
           onClick={() => onChange(o.value)}
           className={cx(
-            "flex-none inline-flex items-center gap-[7px] px-2.5 py-1 rounded-md text-[13px] font-medium whitespace-nowrap cursor-pointer transition-[background-color,color,box-shadow] duration-150",
+            "flex-none inline-flex items-center gap-1.75 px-2.5 py-1 rounded-md text-sm font-medium whitespace-nowrap cursor-pointer transition-[background-color,color,box-shadow] duration-150",
             o.value === value ? "bg-surface text-ink shadow-[0_1px_2px_rgba(17,17,19,.08),0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink",
           )}
         >
@@ -234,8 +272,8 @@ export function Switch({ checked, onChange, label, id }: { checked: boolean; onC
       <span
         aria-hidden="true"
         className={cx(
-          "relative w-[38px] h-[22px] rounded-full flex-none transition-colors duration-200 peer-focus-visible:outline-2 peer-focus-visible:outline-accent",
-          "after:absolute after:top-[3px] after:left-[3px] after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform after:duration-200",
+          "relative w-9.5 h-5.5 rounded-full flex-none transition-colors duration-200 peer-focus-visible:outline-2 peer-focus-visible:outline-accent",
+          "after:absolute after:top-0.75 after:left-0.75 after:size-4 after:rounded-full after:bg-white after:shadow after:transition-transform after:duration-200",
           checked ? "bg-accent after:translate-x-4" : "bg-line-strong",
         )}
       />
@@ -261,7 +299,7 @@ export function Choice({ on, off, radio, onClick, children, className, title, ..
         if (!off && (e.key === " " || e.key === "Enter")) { e.preventDefault(); onClick?.(); }
       }}
       className={cx(
-        "flex gap-3 items-start px-3.5 py-3 border rounded-[12px] bg-surface transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out-soft active:scale-[.985] outline-none",
+        "flex gap-3 items-start px-3.5 py-3 border rounded-xl bg-surface transition-[border-color,background-color,box-shadow,transform] duration-150 ease-out-soft active:scale-[.985] outline-none",
         "focus-visible:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_30%,transparent)]",
         off ? "opacity-55 cursor-not-allowed border-line active:scale-100" : "cursor-pointer",
         on && !off ? "border-accent bg-[color-mix(in_srgb,var(--accent-soft)_55%,var(--surface))] shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_14%,transparent)]" : !off && "border-line hover:border-line-strong",
@@ -293,10 +331,10 @@ function useSlider(activeKey: string) {
   }, [activeKey]);
   return { box, bar };
 }
-const TAB_CLS = "relative px-3 py-2.5 text-[14px] font-medium cursor-pointer whitespace-nowrap transition-colors hover:no-underline inline-flex items-center gap-1.5";
+const TAB_CLS = "relative px-3 py-2.5 text-base font-medium cursor-pointer whitespace-nowrap transition-colors hover:no-underline inline-flex items-center gap-1.5";
 function Slider({ bar }: { bar: { left: number; width: number } | null }) {
   // The current tab: a cobalt-to-teal bar that springs to the clicked tab (it jumps under reduced motion).
-  return bar ? <span aria-hidden="true" className="absolute -bottom-px h-[3px] rounded-full bg-[linear-gradient(90deg,var(--accent),var(--accent-2))] transition-[left,width] duration-300 ease-[var(--spring)]" style={{ left: bar.left, width: bar.width }} /> : null;
+  return bar ? <span aria-hidden="true" className="absolute -bottom-px h-0.75 rounded-full bg-[linear-gradient(90deg,var(--accent),var(--accent-2))] transition-[left,width] duration-300 ease-[var(--spring)]" style={{ left: bar.left, width: bar.width }} /> : null;
 }
 
 export function Tabs<T extends string>({ value, tabs, onChange, className }: { value: T; tabs: { value: T; label: ReactNode }[]; onChange: (v: T) => void; className?: string }) {
@@ -330,13 +368,13 @@ export function LinkTabs({ value, tabs, className }: { value: string; tabs: { va
 }
 
 export function Kbd({ children }: { children: ReactNode }) {
-  return <span className="font-mono text-[13px] px-[5px] py-px border border-line-strong border-b-2 rounded-[5px]">{children}</span>;
+  return <span className="font-mono text-sm px-1.25 py-px border border-line-strong border-b-2 rounded-sm">{children}</span>;
 }
 
 export function EmptyState({ title, text, icon = "layers", action }: { title: string; text?: string; icon?: IconName; action?: ReactNode }) {
   return (
     <div className="text-center px-5 py-12 text-muted animate-fade">
-      <span className="mx-auto mb-3 size-12 rounded-[16px] grid place-items-center bg-[linear-gradient(135deg,var(--accent-soft),color-mix(in_srgb,var(--accent-2)_14%,transparent))] text-accent"><Icon name={icon} size={22} strokeWidth={1.8} /></span>
+      <span className="mx-auto mb-3 size-12 rounded-2xl grid place-items-center bg-[linear-gradient(135deg,var(--accent-soft),color-mix(in_srgb,var(--accent-2)_14%,transparent))] text-accent"><Icon name={icon} size={22} strokeWidth={1.8} /></span>
       <h3 className="text-ink font-semibold mb-1">{title}</h3>
       {text && <div>{text}</div>}
       {action && <div className="mt-3.5">{action}</div>}
@@ -344,12 +382,32 @@ export function EmptyState({ title, text, icon = "layers", action }: { title: st
   );
 }
 
-export function Skeleton({ height = 420, className }: { height?: number; className?: string }) {
+// Loading placeholders, shaped like what is coming so the page doesn't jump when it arrives.
+export function Bone({ className, style }: { className?: string; style?: React.CSSProperties }) {
+  return <span aria-hidden="true" style={style} className={cx("block rounded-lg animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]", className)} />;
+}
+// A whole page loading (no height): a title, a row of tiles and two cards. With a height: one block that size.
+export function Skeleton({ height, className }: { height?: number; className?: string }) {
+  if (height != null) return <Bone className={cx("mt-5 rounded-2xl", className)} style={{ height }} />;
   return (
-    <div
-      className={cx("rounded-lg mt-5 animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]", className)}
-      style={{ height }}
-    />
+    <div className={cx("mt-2 animate-fade", className)} role="status" aria-label="Loading">
+      <Bone className="h-7 w-[min(320px,60%)]" />
+      <Bone className="h-4 w-[min(520px,85%)] mt-3" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-7">
+        {[0, 1, 2, 3].map((i) => <Bone key={i} className="h-[92px] rounded-3xl" />)}
+      </div>
+      <Bone className="h-[260px] rounded-3xl mt-4" />
+      <Bone className="h-[160px] rounded-3xl mt-4" />
+    </div>
+  );
+}
+// A table loading: a header line and a few rows.
+export function TableSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="glass rounded-3xl p-4 grid gap-3" role="status" aria-label="Loading">
+      <Bone className="h-3 w-1/3" />
+      {Array.from({ length: rows }, (_, i) => <Bone key={i} className="h-9 rounded-xl" style={{ opacity: 1 - i * 0.12 }} />)}
+    </div>
   );
 }
 
@@ -361,13 +419,13 @@ export function Divider() {
 export function Table({ head, children, compact }: { head?: ReactNode[]; children: ReactNode; compact?: boolean }) {
   return (
     <div className="overflow-x-auto scrollbar-thin">
-      <table className={cx("w-full border-separate border-spacing-0", compact ? "[&_td]:px-2.5 [&_td]:py-[7px]" : "[&_td]:px-3 [&_td]:py-2.5",
+      <table className={cx("w-full border-separate border-spacing-0", compact ? "[&_td]:px-2.5 [&_td]:py-1.75" : "[&_td]:px-3 [&_td]:py-2.5",
         "[&_td]:border-b [&_td]:border-line [&_td]:align-middle [&_tr:last-child_td]:border-b-0")}>
         {head && (
           <thead>
             <tr>
               {head.map((h, i) => (
-                <th key={i} className="text-left text-[12.5px] font-normal tracking-[.04em] uppercase text-muted px-3 py-2.5 border-b border-line whitespace-nowrap">
+                <th key={i} className="text-left text-xs font-normal tracking-[.04em] uppercase text-muted px-3 py-2.5 border-b border-line whitespace-nowrap">
                   {h}
                 </th>
               ))}
@@ -383,10 +441,10 @@ export const rowLink = "cursor-pointer transition-colors hover:bg-surface-2";
 
 export function Legend({ items }: { items: [string, string][] }) {
   return (
-    <div className="flex gap-3.5 flex-wrap text-[13px] text-ink-2">
+    <div className="flex gap-3.5 flex-wrap text-sm text-ink-2">
       {items.map(([color, label]) => (
         <span key={label}>
-          <i className="inline-block size-2.5 rounded-[3px] mr-1.5 -mb-px" style={{ background: color }} />
+          <i className="inline-block size-2.5 rounded-sm mr-1.5 -mb-px" style={{ background: color }} />
           {label}
         </span>
       ))}
@@ -396,7 +454,7 @@ export function Legend({ items }: { items: [string, string][] }) {
 
 export function Cmd({ children, action, pre }: { children: ReactNode; action?: ReactNode; pre?: boolean }) {
   return (
-    <div className="flex items-start gap-2 font-mono text-[13px] bg-surface-2 border border-line rounded-[12px] px-2.5 py-[9px] text-ink-2">
+    <div className="flex items-start gap-2 font-mono text-sm bg-surface-2 border border-line rounded-xl px-2.5 py-2.25 text-ink-2">
       <span className={cx("flex-1 min-w-0", pre ? "whitespace-pre-wrap break-words" : "break-all")}>{children}</span>
       {action}
     </div>

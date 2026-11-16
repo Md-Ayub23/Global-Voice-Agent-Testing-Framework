@@ -109,16 +109,16 @@ export function TestSettingsTab({ detail, reload }: TabProps) {
           <Table compact head={["Metric", "Good", "Warn", "Blocks"]}>
             {(system?.metrics || []).map((m) => (
               <tr key={m.id} data-metric={m.id}>
-                <td className="min-w-[220px]">
-                  <b>{m.title}</b>{m.voice_only && <span className="text-muted text-[13px]"> · voice</span>}
-                  <div className="text-muted text-[13px]">{m.about}</div>
-                  <div className="text-muted text-[13px]">{m.unit === "%" ? "percent" : m.unit} · {m.better === "higher" ? "higher is better" : "lower is better"}{m.default_good != null ? ` · default ${bandWords({ ...m, good: m.default_good, warn: m.default_warn })}` : ""}</div>
+                <td className="min-w-55">
+                  <b>{m.title}</b>{m.voice_only && <span className="text-muted text-sm"> · voice</span>}
+                  <div className="text-muted text-sm">{m.about}</div>
+                  <div className="text-muted text-sm">{m.unit === "%" ? "percent" : m.unit} · {m.better === "higher" ? "higher is better" : "lower is better"}{m.default_good != null ? ` · default ${bandWords({ ...m, good: m.default_good, warn: m.default_warn })}` : ""}</div>
                 </td>
-                <td className="w-[130px]"><Num id={`metric-${m.id}-good`} value={own(m.id).good as number} placeholder={metricPh(m, "good")} min={0}
+                <td className="w-32.5"><Num id={`metric-${m.id}-good`} value={own(m.id).good as number} placeholder={metricPh(m, "good")} min={0}
                   onChange={(v) => setMetric(m.id, "good", v)} /></td>
-                <td className="w-[130px]"><Num id={`metric-${m.id}-warn`} value={own(m.id).warn as number} placeholder={metricPh(m, "warn")} min={0}
+                <td className="w-32.5"><Num id={`metric-${m.id}-warn`} value={own(m.id).warn as number} placeholder={metricPh(m, "warn")} min={0}
                   onChange={(v) => setMetric(m.id, "warn", v)} /></td>
-                <td className="w-[90px]">
+                <td className="w-22.5">
                   <label><Switch id={`metric-${m.id}-blocks`} checked={!!(own(m.id).blocks ?? base(m.id).blocks)} label=""
                     onChange={(v) => setMetric(m.id, "blocks", v)} /></label>
                 </td>
@@ -137,20 +137,20 @@ export function TestSettingsTab({ detail, reload }: TabProps) {
           <Table compact head={["Change", "Limit", "Blocks"]}>
             {REGRESSION.map(([k, title, about, limits]) => (
               <tr key={k} data-gate={k}>
-                <td className="min-w-[240px]"><b>{title}</b><div className="text-muted text-[13px]">{about}</div></td>
-                <td className="min-w-[200px]">
+                <td className="min-w-60"><b>{title}</b><div className="text-muted text-sm">{about}</div></td>
+                <td className="min-w-50">
                   {limits.length ? (
                     <div className="flex gap-2">
                       {limits.map(([f, unit]) => (
-                        <label key={f} className="flex items-center gap-1.5 text-[13px] text-muted">
-                          <span className="w-[88px]"><Num id={`gate-${k}-${f}`} min={0} value={gateOwn(k)[f] as number}
+                        <label key={f} className="flex items-center gap-1.5 text-sm text-muted">
+                          <span className="w-22"><Num id={`gate-${k}-${f}`} min={0} value={gateOwn(k)[f] as number}
                             placeholder={String(gateBase(k)[f])} onChange={(v) => setGate(k, f, v)} /></span>{unit}
                         </label>
                       ))}
                     </div>
-                  ) : <span className="text-muted text-[13px]">any</span>}
+                  ) : <span className="text-muted text-sm">any</span>}
                 </td>
-                <td className="w-[90px]"><label><Switch id={`gate-${k}-blocks`} checked={!!gateVal(k, "blocks")} label=""
+                <td className="w-22.5"><label><Switch id={`gate-${k}-blocks`} checked={!!gateVal(k, "blocks")} label=""
                   onChange={(v) => setGate(k, "blocks", v)} /></label></td>
               </tr>
             ))}

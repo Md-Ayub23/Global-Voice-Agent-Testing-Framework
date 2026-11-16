@@ -867,7 +867,8 @@ def _verdict(decision, findings, bugs: str | None, mode_id: str = "full") -> dic
     blocking = [f for f in findings if f["blocks"]]
     problems = [f for f in findings if f["status"] == "problem" and not f["blocks"]]
     to_check = [f for f in findings if f["status"] in ("needs_review", "opinion")]
-    note = (" Bugs were switched on on purpose for this run, so \"Not ready\" means Vocto caught them."
+    caught = "Failed" if mode_id in FOCUSED_PASS else "Not ready"
+    note = (f" Bugs were switched on on purpose for this run, so \"{caught}\" means Vocto caught them."
             if bugs else "")
     if mode_id in FOCUSED_PASS:
         note += f" This run tested {modes.mode(mode_id)['title'].lower()} only: run the Release check before a release."
@@ -884,7 +885,9 @@ def _verdict(decision, findings, bugs: str | None, mode_id: str = "full") -> dic
     if code == "NO_GO":
         n = len(blocking) or 1
         first = blocking[0]["title"] if blocking else decision["reasons"][0]["message"]
-        return {"level": "not_ready", "code": code, "headline": f"Not ready: {_plural(n, 'blocking issue')}",
+        # A test type that checks one thing failed; only the Release check and Regression speak of release.
+        word = "Failed" if mode_id in FOCUSED_PASS else "Not ready"
+        return {"level": "not_ready", "code": code, "headline": f"{word}: {_plural(n, 'blocking issue')}",
                 "line": f"Fix first: {first[0].lower() + first[1:] if first else ''}." + note}
     reason = decision["reasons"][0]["message"] if decision.get("reasons") else ""
     return {"level": "not_enough_evidence", "code": code, "headline": LEVELS["not_enough_evidence"],

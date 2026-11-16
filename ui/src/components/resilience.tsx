@@ -78,11 +78,11 @@ export function RefusalsCard({ projectKey, project, file }: { projectKey: string
       <CardHead level={2} title="How your tools say no" sub="used by the Already taken, Payment declined and Out of stock drills on Run">
         <Button size="sm" icon="sparkles" busy={busy === "write"} onClick={draft} id="refusals-write">Write with AI</Button>
       </CardHead>
-      <p className="text-[13px] text-ink-2 mb-3">A refusal drill makes the tool answer with a business “no” instead of crashing. Answers shaped like your real API test the agent better than Vocto's plain one. Claude drafts them from each tool's description; check them before you save. Untouched cards use Vocto's plain answer.</p>
+      <p className="text-sm text-ink-2 mb-3">A refusal drill makes the tool answer with a business “no” instead of crashing. Answers shaped like your real API test the agent better than Vocto's plain one. Claude drafts them from each tool's description; check them before you save. Untouched cards use Vocto's plain answer.</p>
       <div className="grid gap-3">
         {data.tools.map((tool) => (
           <div key={tool} className="grid gap-2">
-            <div className="font-mono text-[13px] font-semibold">{tool}</div>
+            <div className="font-mono text-sm font-semibold">{tool}</div>
             <div className="grid gap-2 grid-cols-1 lg:grid-cols-3">
               {data.kinds.map((k) => {
                 const c = current(tool, k);
@@ -92,11 +92,11 @@ export function RefusalsCard({ projectKey, project, file }: { projectKey: string
                 return (
                   <div key={k.id} className="rounded-lg border border-line p-2.5 grid gap-1.5 content-start" data-refusal={`${tool}:${k.id}`}>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <b className="text-[13px] font-semibold flex-1">{k.title}</b>
+                      <b className="text-sm font-semibold flex-1">{k.title}</b>
                       {c?.from === "ai-writer" && <Chip tone="accent" icon="sparkles">AI draft</Chip>}
                       {!c && <Chip>Vocto's plain answer</Chip>}
                     </div>
-                    <label className="text-[13px] text-muted flex items-center gap-2">Status
+                    <label className="text-sm text-muted flex items-center gap-2">Status
                       <input type="number" className="w-20 rounded-md border border-line bg-surface px-1.5 py-0.5 text-ink" value={c?.status || k.status} min={400} max={599}
                         onChange={(e) => set({ status: Number(e.target.value) || k.status })} />
                     </label>

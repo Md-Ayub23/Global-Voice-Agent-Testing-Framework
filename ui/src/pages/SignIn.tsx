@@ -22,14 +22,14 @@ export function SignIn({ setup, done }: { setup: boolean; done: (u: User) => voi
   };
   return (
     <div className="min-h-screen grid place-items-center px-4 py-10">
-      <div className="w-full max-w-[400px] animate-rise">
+      <div className="w-full max-w-100 animate-rise">
         <div className="flex items-center gap-2.5 justify-center mb-6">
-          <img src="/static/logo.svg" alt="" className="size-[36px] rounded-[11px]" />
-          <b className="text-[22px] tracking-[-.03em]">Vocto</b>
+          <img src="/static/logo.svg" alt="" className="size-9 rounded-xl" />
+          <b className="text-xl tracking-[-.03em]">Vocto</b>
         </div>
         <Card>
-          <h1 className="text-[18px] font-bold mb-1">{setup ? "Create the admin account" : "Sign in"}</h1>
-          <p className="text-ink-2 text-[13.5px] mb-4">
+          <h1 className="text-lg font-bold mb-1">{setup ? "Create the admin account" : "Sign in"}</h1>
+          <p className="text-ink-2 text-sm mb-4">
             {setup ? "This is the first visit to this Vocto. The account you make now can add the rest of your team."
               : "Use the account your Vocto admin gave you."}
           </p>
@@ -60,7 +60,7 @@ export function SignIn({ setup, done }: { setup: boolean; done: (u: User) => voi
             </Button>
           </form>
         </Card>
-        {!setup && <p className="text-center text-muted text-[13px] mt-4">Forgot your password? Ask your Vocto admin to reset it. A locked-out admin can run <code className="font-mono">vatf users reset-password</code> on the server.</p>}
+        {!setup && <p className="text-center text-muted text-sm mt-4">Forgot your password? Ask your Vocto admin to reset it. A locked-out admin can run <code className="font-mono">vatf users reset-password</code> on the server.</p>}
       </div>
     </div>
   );

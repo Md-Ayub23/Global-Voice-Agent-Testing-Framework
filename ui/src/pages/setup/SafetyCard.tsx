@@ -102,7 +102,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
       <Block title="Safety tests" icon="shield"
         sub={<>Calls that try to make the agent go wrong: questions outside its job, pushing for passwords, prompt tricks, made-up facts, other people's data, abuse and more. They are written for this agent from its industry ({domainLabel(page.industry === "generic" ? "" : page.industry) || "general"}), its tools and its policy, and run when you tick <b>Include safety tests</b> on New run.</>}
         aside={last ? (
-          <a href={runHref({ run_id: last.run_id, project_key: projectKey })} className="inline-flex items-center gap-2 text-[13px]">
+          <a href={runHref({ run_id: last.run_id, project_key: projectKey })} className="inline-flex items-center gap-2 text-sm">
             <Badge status={last.decision} /> last run: {last.passed} of {last.calls} safe
           </a>
         ) : undefined}>
@@ -114,7 +114,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
             <div className="flex items-center gap-3 flex-wrap">
               <Seg id="safety-intensity" value={s.intensity} onChange={(v) => write({ intensity: v })}
                 options={INTENSITIES.map((i) => ({ value: i.value, label: i.label }))} />
-              <span id="safety-count" className="text-[13px] text-ink-2">
+              <span id="safety-count" className="text-sm text-ink-2">
                 <b className="text-ink tabular-nums">{on.length}</b> attack calls × {repeats} = <b className="text-ink tabular-nums">{on.length * repeats}</b> calls
                 {live ? <span className="text-muted"> ({live} with an AI attacker, live runs only)</span> : null}
               </span>
@@ -144,10 +144,10 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
                   <div key={p.id} data-pack={p.id} className={cx("rounded-lg border p-2.5 grid gap-1.5", s.packs.has(p.id) ? "border-accent/50 bg-accent-soft/40" : "border-line")}>
                     <Check checked={s.packs.has(p.id)} onChange={(v) => togglePack(p.id, v)}
                       label={<span className="inline-flex items-center gap-1.5 flex-wrap">{p.title}
-                        {p.id !== "own" && <Chip className="text-[13px]">{count} of {byPack(p.id).length}</Chip>}
-                        {yours > 0 && <Chip tone="accent" className="text-[13px]">{yours} of yours</Chip>}</span>}
+                        {p.id !== "own" && <Chip className="text-sm">{count} of {byPack(p.id).length}</Chip>}
+                        {yours > 0 && <Chip tone="accent" className="text-sm">{yours} of yours</Chip>}</span>}
                       hint={p.what} />
-                    <button type="button" data-add-question={p.id} className="text-[13px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start ml-6"
+                    <button type="button" data-add-question={p.id} className="text-sm text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start ml-6"
                       onClick={() => addQuestion(p.id)}>
                       <Icon name="plus" size={12} /> Add your own question
                     </button>
@@ -169,7 +169,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
                 <Field label="Tools that need it first" hint="Default: every other tool that changes data or takes personal details.">
                   <div className="grid gap-1" id="safety-guarded">
                     {page.tools.filter((t) => t.name !== (verify || page.identity?.verify)).map((t) => (
-                      <Check key={t.name} checked={guarded.includes(t.name)} label={<span className="font-mono text-[12.5px]">{t.name}</span>}
+                      <Check key={t.name} checked={guarded.includes(t.name)} label={<span className="font-mono text-xs">{t.name}</span>}
                         onChange={(v) => write({ identity: { ...ident, guarded: v ? [...guarded, t.name] : guarded.filter((g) => g !== t.name) } })} />
                     ))}
                   </div>
@@ -184,7 +184,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
                 <Field label="Lookup tools that carry it">
                   <div className="grid gap-1" id="safety-poison-tools">
                     {readTools.map((t) => (
-                      <Check key={t} checked={poisonTools.includes(t)} label={<span className="font-mono text-[12.5px]">{t}</span>}
+                      <Check key={t} checked={poisonTools.includes(t)} label={<span className="font-mono text-xs">{t}</span>}
                         onChange={(v) => { const next = v ? [...poisonTools, t] : poisonTools.filter((x) => x !== t); if (next.length) write({ poison: { ...poison, tools: next.length === readTools.length ? undefined : next } as Obj }); }} />
                     ))}
                   </div>
@@ -216,7 +216,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
             {!canaries.filter(Boolean).length && <Help>Without planted secrets, leaks are still caught when the agent says something shaped like a password, key or card number.</Help>}
           </Block>
           <Block title="Every attack call">
-            <button type="button" id="safety-attacks" className="text-[13px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start" onClick={() => setOpen((o) => !o)}>
+            <button type="button" id="safety-attacks" className="text-sm text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1 justify-self-start" onClick={() => setOpen((o) => !o)}>
               <Icon name="chevron" size={13} className={cx("transition-transform", open && "rotate-90")} />
               {open ? "Hide" : "Show"} the {page.attacks.length} calls and what the caller says
             </button>
@@ -224,7 +224,7 @@ function SafetyForm({ detail, reload, page, projectKey }: TabProps & { page: Saf
               <div className="grid gap-4">
                 {page.packs.filter((p) => s.packs.has(p.id)).map((p) => (
                   <div key={p.id} className="grid gap-1.5">
-                    <div className="text-[13px] font-semibold text-ink-2">{p.title}</div>
+                    <div className="text-sm font-semibold text-ink-2">{p.title}</div>
                     {byPack(p.id).map((a) => <AttackRow key={a.id} a={a} s={s} liveOnly={page.live_only} onToggle={toggleAttack} />)}
                   </div>
                 ))}
@@ -251,13 +251,13 @@ function AttackRow({ a, s, liveOnly, onToggle }: { a: SafetyAttack; s: SafetyDra
     <div data-attack={a.id} className={cx("rounded-lg border border-line p-2.5", !on && "opacity-70")}>
       <Check checked={!s.skip.has(a.id) && !tooHard} onChange={(v) => !tooHard && onToggle(a.id, v)}
         label={<span className="inline-flex items-center gap-1.5 flex-wrap">{a.title}
-          {a.adaptive && <Chip tone="accent" icon="sparkles" className="text-[13px]">AI attacker, live only</Chip>}
-          {a.custom && <Chip tone="accent" className="text-[13px]">yours</Chip>}
-          {a.poisoned && <Chip className="text-[13px]">hidden in your data</Chip>}
-          {a.voice_only && <Chip icon="mic" className="text-[13px]" title="On a text run the background words are sent with the caller's, as speech recognition would hear them">voice in the background</Chip>}
-          {a.language && <Chip className="text-[13px]">{a.language}</Chip>}
-          {a.owasp?.map((o) => <Chip key={o} className="text-[13px] font-mono" title="OWASP Top 10 for LLM applications (2025)">{o}</Chip>)}
-          {why && <span className="text-[13px] font-normal text-muted">{why}</span>}</span>}
+          {a.adaptive && <Chip tone="accent" icon="sparkles" className="text-sm">AI attacker, live only</Chip>}
+          {a.custom && <Chip tone="accent" className="text-sm">yours</Chip>}
+          {a.poisoned && <Chip className="text-sm">hidden in your data</Chip>}
+          {a.voice_only && <Chip icon="mic" className="text-sm" title="On a text run the background words are sent with the caller's, as speech recognition would hear them">voice in the background</Chip>}
+          {a.language && <Chip className="text-sm">{a.language}</Chip>}
+          {a.owasp?.map((o) => <Chip key={o} className="text-sm font-mono" title="OWASP Top 10 for LLM applications (2025)">{o}</Chip>)}
+          {why && <span className="text-sm font-normal text-muted">{why}</span>}</span>}
         hint={a.lines.length ? (
           <span className="grid gap-0.5">{a.lines.map((l, i) => <span key={i}>{a.adaptive ? l : `“${l}”`}</span>)}</span>
         ) : undefined} />
@@ -278,7 +278,7 @@ function QuestionCard({ i, q, packs, off, onChange, onRemove, langs }: {
           <Field label="Name" hint="Empty: the first caller line."><Text value={q.title} placeholder="Asks for a repeat prescription without seeing a doctor" onChange={(v) => onChange({ title: v })} /></Field>
           <Field label="Caller's language"><Select value={q.language || ""} options={[["", "The agent's"], ...langs.map((l) => [l.id, l.name] as [string, string])]} onChange={(v) => onChange({ language: v || undefined })} /></Field>
         </Grid>
-        {q.from?.startsWith("ai-writer") && <Chip tone="accent" icon="sparkles" className="text-[13px] mt-6">written by AI</Chip>}
+        {q.from?.startsWith("ai-writer") && <Chip tone="accent" icon="sparkles" className="text-sm mt-6">written by AI</Chip>}
         <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove question" className="mt-6" onClick={onRemove} />
       </div>
       <Field label="What the caller says" hint="One line per turn; the agent answers each one.">
@@ -353,17 +353,17 @@ function AttackWriter({ projectKey, file, page, onAdd }: { projectKey: string; f
             {drafts.map((d) => (
               <div key={d.n} data-draft={d.n} className="rounded-lg border border-line p-3 grid gap-1.5">
                 <div className="flex items-start gap-2 flex-wrap">
-                  <div className="flex-1 min-w-[200px]">
+                  <div className="flex-1 min-w-50">
                     <Check checked={picked.has(d.n)} onChange={(v) => { const n = new Set(picked); if (v) n.add(d.n); else n.delete(d.n); setPicked(n); }}
                       label={<b className="font-medium">{d.question.title}</b>} />
                   </div>
                   <Chip>{packTitleOf(page, d.question.pack || "own")}</Chip>
                   {d.question.language && <Chip>{page.languages.find((l) => l.id === d.question.language)?.name || d.question.language}</Chip>}
                 </div>
-                <div className="grid gap-0.5 text-[13px] text-ink-2 pl-6">{(d.question.lines || []).map((l, i) => <span key={i}>“{l}”</span>)}</div>
-                {d.question.safe_answer && <p className="text-[13px] text-ink-2 pl-6"><span className="text-muted">Safe answer:</span> {d.question.safe_answer}</p>}
-                {!!d.question.never_say?.length && <p className="text-[13px] text-ink-2 pl-6"><span className="text-muted">Must never say:</span> {d.question.never_say.join(" · ")}</p>}
-                {d.why && <p className="text-[13px] text-muted pl-6">{d.why}</p>}
+                <div className="grid gap-0.5 text-sm text-ink-2 pl-6">{(d.question.lines || []).map((l, i) => <span key={i}>“{l}”</span>)}</div>
+                {d.question.safe_answer && <p className="text-sm text-ink-2 pl-6"><span className="text-muted">Safe answer:</span> {d.question.safe_answer}</p>}
+                {!!d.question.never_say?.length && <p className="text-sm text-ink-2 pl-6"><span className="text-muted">Must never say:</span> {d.question.never_say.join(" · ")}</p>}
+                {d.why && <p className="text-sm text-muted pl-6">{d.why}</p>}
                 {d.problems.length > 0 && <Notice tone="warn">{d.problems.join("; ")}</Notice>}
               </div>
             ))}

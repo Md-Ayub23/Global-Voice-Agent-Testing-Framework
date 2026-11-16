@@ -7,13 +7,12 @@ export type Options = Record<string, string>;
 
 export interface System {
   version: string;
-  python: string;
-  platform: string;
-  root: string;
-  runs_dir: string;
+  /** Admins only. */
+  python?: string;
+  platform?: string;
   default_model: string;
   api_key: { set: boolean; hint: string | null; source: string | null };
-  models: { folder: string; piper_voices: string[]; whisper: { name: string; bytes: number }[]; bytes: number };
+  models: { piper_voices: string[]; whisper: { name: string; bytes: number }[]; bytes: number };
   active_job: Job | null;
   accents?: { id: string; label: string; voice: string }[];
   /** The languages Vocto's caller speaks (languages.py), each with its own voices. */

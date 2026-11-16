@@ -1036,12 +1036,13 @@ def system(root: Path, runs: Path) -> dict[str, Any]:
             if m and d.is_dir():
                 whisper.append({"name": m.group(1), "bytes": _size(d)})
     return {
+        # No folder paths: the browser never needs them, and they say where Vocto lives on the server.
         "version": __version__, "python": platform.python_version(), "platform": platform.platform(terse=True),
-        "root": str(root), "runs_dir": str(runs), "default_model": DEFAULT_MODEL,
+        "default_model": DEFAULT_MODEL,
         "api_key": {"set": bool(key), "hint": f"…{key[-4:]}" if key and len(key) > 8 else None,
                     "source": "shell" if os.environ.get("ANTHROPIC_API_KEY") and not _dotenv_key(root) else
                     (".env" if key else None)},
-        "models": {"folder": str(models), "piper_voices": piper, "whisper": whisper,
+        "models": {"piper_voices": piper, "whisper": whisper,
                    "bytes": _size(models) if models.is_dir() else 0},
         # Phase 5: what the Callers, Test cases, Pass rules and Run tests forms offer.
         "accents": accent_list(), "languages": language_list(), "conditions": preset_list(), "sweep_conditions": sweep_list(), "drill_failures": failure_list(), "metrics": metric_list(),

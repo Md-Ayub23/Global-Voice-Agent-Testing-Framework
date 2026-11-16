@@ -5,12 +5,12 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { Card, CardHead, Notice } from "./ui";
 import { cx } from "../lib/format";
-import { AREA_STATUS, LEVEL, TONE_BAR, TONE_SOFT, TONE_TEXT, severityOf, type LevelTone } from "../lib/modes";
+import { AREA_STATUS, LEVEL, TONE_BAR, TONE_SOFT, TONE_TEXT, severityOf, type LevelTone, FOCUSED } from "../lib/modes";
 import type { ConditionResult, Finding, MetricLine, Proof, Readiness, ScoreRow } from "../lib/types";
 
 function Pill({ tone, icon, children, className }: { tone: LevelTone; icon?: Parameters<typeof Icon>[0]["name"]; children: ReactNode; className?: string }) {
   return (
-    <span className={cx("inline-flex items-center gap-1 h-[22px] px-2 rounded-md text-[13px] font-semibold whitespace-nowrap", TONE_SOFT[tone], className)}>
+    <span className={cx("inline-flex items-center gap-1 h-5.5 px-2 rounded-md text-sm font-semibold whitespace-nowrap", TONE_SOFT[tone], className)}>
       {icon && <Icon name={icon} size={12} strokeWidth={2.5} />}{children}
     </span>
   );
@@ -27,17 +27,17 @@ export function VerdictBanner({ r, actions, note }: { r: Readiness; actions?: Re
   ];
   return (
     <div id="readiness-verdict" data-level={r.verdict.level}
-      className="relative overflow-hidden rounded-[20px] px-4 sm:px-6 py-5 glass animate-reveal print:animate-none">
+      className="relative overflow-hidden rounded-3xl px-4 sm:px-6 py-5 glass animate-reveal print:animate-none">
       <div className={cx("absolute left-0 inset-y-0 w-1", TONE_BAR[lv.tone])} />
       <div className="flex flex-wrap items-start gap-5">
         <div className="flex items-start gap-4 flex-[1_1_360px] min-w-0">
-          <div className={cx("size-12 rounded-[12px] grid place-items-center flex-none", TONE_SOFT[lv.tone])}>
+          <div className={cx("size-12 rounded-xl grid place-items-center flex-none", TONE_SOFT[lv.tone])}>
             <Icon name={lv.icon} size={26} strokeWidth={2.4} />
           </div>
           <div className="min-w-0">
-            <div className="text-[13px] font-medium text-muted">Release readiness · {r.mode.title}</div>
-            <div className={cx("text-[24px] sm:text-[28px] font-bold tracking-[-.03em] leading-[1.15] mt-0.5", TONE_TEXT[lv.tone])}>{r.verdict.headline}</div>
-            <div className="mt-1.5 text-[14px] text-ink-2 max-w-[720px]">{r.verdict.line}</div>
+            <div className="text-sm font-medium text-muted">{FOCUSED.includes(r.mode.id) ? `${r.mode.title} result` : `Release readiness · ${r.mode.title}`}</div>
+            <div className={cx("text-xl sm:text-2xl font-bold tracking-[-.03em] leading-[1.15] mt-0.5", TONE_TEXT[lv.tone])}>{r.verdict.headline}</div>
+            <div className="mt-1.5 text-base text-ink-2 max-w-180">{r.verdict.line}</div>
             <div className="flex flex-wrap gap-1.5 mt-3">
               {chips.filter(([n]) => n > 0).map(([n, label, tone]) => <Pill key={label} tone={tone}>{n} {label}</Pill>)}
               {chips.every(([n]) => !n) && r.verdict.level !== "no_result" && <Pill tone="good" icon="check">No findings</Pill>}
@@ -59,8 +59,8 @@ export function ExecutiveSummary({ r, skipVerdict }: { r: Readiness; skipVerdict
       <CardHead level={2} title="Executive summary" sub={r.mode.question} />
       <ul className="grid gap-2">
         {lines.map((l, i) => (
-          <li key={i} className="flex gap-2.5 items-start text-[13.5px] leading-[1.5]">
-            <span className="mt-[7px] size-1.5 rounded-full bg-ink-2 flex-none" />
+          <li key={i} className="flex gap-2.5 items-start text-sm leading-[1.5]">
+            <span className="mt-1.75 size-1.5 rounded-full bg-ink-2 flex-none" />
             <span className="min-w-0">{l}</span>
           </li>
         ))}
@@ -74,19 +74,19 @@ export function ExecutiveSummary({ r, skipVerdict }: { r: Readiness; skipVerdict
 function ScoreTile({ row }: { row: ScoreRow }) {
   const st = AREA_STATUS[row.status];
   return (
-    <div data-area={row.area} className="glass rounded-[20px] p-4 flex flex-col gap-1.5 min-w-0 break-inside-avoid">
+    <div data-area={row.area} className="glass rounded-3xl p-4 flex flex-col gap-1.5 min-w-0 break-inside-avoid">
       <div className="flex items-center gap-2">
-        <span className="flex-1 min-w-0 text-[13px] font-semibold text-ink-2 truncate">{row.title}</span>
+        <span className="flex-1 min-w-0 text-sm font-semibold text-ink-2 truncate">{row.title}</span>
         <Pill tone={st.tone} icon={st.icon}>{st.label}</Pill>
       </div>
-      <div className="text-[15px] font-semibold tracking-[-.01em] leading-snug">{row.value}</div>
+      <div className="text-md font-semibold tracking-[-.01em] leading-snug">{row.value}</div>
       {row.percent != null && (
         <div className="h-1.5 rounded-full bg-surface-3 overflow-hidden" aria-hidden="true">
           <div className={cx("grow-x h-full rounded-full", TONE_BAR[st.tone])} style={{ width: `${Math.round(row.percent * 100)}%` }} />
         </div>
       )}
-      {row.detail && <div className="text-[13px] text-muted">{row.detail}</div>}
-      {row.range && <div className="text-[13px] text-muted" data-range title="How sure: the real rate is very likely in this range (95% Wilson interval)">{row.range}</div>}
+      {row.detail && <div className="text-sm text-muted">{row.detail}</div>}
+      {row.range && <div className="text-sm text-muted" data-range title="How sure: the real rate is very likely in this range (95% Wilson interval)">{row.range}</div>}
     </div>
   );
 }
@@ -96,8 +96,8 @@ export function Scorecard({ r }: { r: Readiness }) {
   return (
     <div id="scorecard">
       <div className="flex items-baseline gap-2 mb-2.5">
-        <h2 className="font-semibold text-[15px] tracking-[-.01em]">Scorecard</h2>
-        <span className="text-muted text-[13px]">each area on its own · no overall score, so one serious problem can't be averaged away</span>
+        <h2 className="section-title">Scorecard</h2>
+        <span className="text-muted text-sm">each area on its own · no overall score, so one serious problem can't be averaged away</span>
       </div>
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(220px,1fr))] print:grid-cols-3">
         {r.scorecard.map((row) => <ScoreTile key={row.area} row={row} />)}
@@ -111,8 +111,8 @@ export function Scorecard({ r }: { r: Readiness }) {
 function ProofLine({ p, callHref }: { p: Proof; callHref?: (testId: string, seq?: number | null) => string }) {
   const href = callHref?.(p.test_id, p.seq);
   return (
-    <div className="flex gap-2.5 items-start text-[13px] py-1.5 border-t border-line first:border-t-0 break-inside-avoid">
-      <Icon name="quote" size={13} className="mt-[3px] text-muted flex-none" />
+    <div className="flex gap-2.5 items-start text-sm py-1.5 border-t border-line first:border-t-0 break-inside-avoid">
+      <Icon name="quote" size={13} className="mt-0.75 text-muted flex-none" />
       <div className="min-w-0 flex-1">
         {p.quote ? (
           <div><span className="font-semibold capitalize text-ink-2">{p.who || "call"}{p.at ? ` at ${p.at}` : ""}: </span>
@@ -120,15 +120,15 @@ function ProofLine({ p, callHref }: { p: Proof; callHref?: (testId: string, seq?
         ) : <div className="text-ink-2">{p.note || "See the call"}</div>}
         {p.quote && p.note && <div className="text-muted">{p.note}</div>}
       </div>
-      {href ? <a href={href} className="font-mono text-[13px] text-muted whitespace-nowrap hover:text-accent print:hidden">{p.test_id.slice(-9)} <Icon name="arrow" size={11} className="inline" /></a>
-        : <span className="font-mono text-[13px] text-muted whitespace-nowrap">{p.test_id.slice(-9)}</span>}
+      {href ? <a href={href} className="font-mono text-sm text-muted whitespace-nowrap hover:text-accent print:hidden">{p.test_id.slice(-9)} <Icon name="arrow" size={11} className="inline" /></a>
+        : <span className="font-mono text-sm text-muted whitespace-nowrap">{p.test_id.slice(-9)}</span>}
     </div>
   );
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="grid gap-x-4 gap-y-0.5 sm:grid-cols-[150px_minmax(0,1fr)] text-[13px]">
+    <div className="grid gap-x-4 gap-y-0.5 sm:grid-cols-[150px_minmax(0,1fr)] text-sm">
       <dt className="text-muted font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
@@ -141,24 +141,24 @@ export function FindingCard({ f, open: start, callHref, print }: { f: Finding; o
   const shown = open || print;
   return (
     <div data-finding={f.id} data-status={f.status}
-      className={cx("border rounded-[18px] glass break-inside-avoid min-w-0", f.blocks ? "border-[color-mix(in_srgb,var(--bad)_35%,var(--line))]" : "border-line")}>
+      className={cx("border rounded-2xl glass break-inside-avoid min-w-0", f.blocks ? "border-[color-mix(in_srgb,var(--bad)_35%,var(--line))]" : "border-line")}>
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={shown}
         className="w-full flex items-start gap-3 p-3.5 text-left cursor-pointer print:cursor-default">
-        <span className="font-mono text-[13px] text-muted mt-[3px] w-6 flex-none">{f.id}</span>
+        <span className="font-mono text-sm text-muted mt-0.75 w-6 flex-none">{f.id}</span>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
             <Pill tone={sev.tone} icon={sev.icon}>{sev.label}</Pill>
-            <b className="text-[14px]">{f.title}</b>
+            <b className="text-base">{f.title}</b>
           </div>
-          <div className="text-[13px] text-muted mt-1 flex flex-wrap gap-x-2">
+          <div className="text-sm text-muted mt-1 flex flex-wrap gap-x-2">
             <span>{f.area_title}</span><span>·</span><span>{f.how_often.text}</span>
-            {f.tests.length > 0 && <><span>·</span><span className="truncate max-w-[420px]">{f.tests.length === 1 ? f.tests[0].title : `${f.tests.length} test cases`}</span></>}
+            {f.tests.length > 0 && <><span>·</span><span className="truncate max-w-105">{f.tests.length === 1 ? f.tests[0].title : `${f.tests.length} test cases`}</span></>}
           </div>
         </div>
         <Icon name="chevron" size={15} className={cx("text-muted mt-1 transition-transform print:hidden", shown && "rotate-90")} />
       </button>
       {shown && (
-        <div className="px-3.5 pb-3.5 pl-[50px] grid gap-2.5">
+        <div className="px-3.5 pb-3.5 pl-12.5 grid gap-2.5">
           <dl className="grid gap-2">
             <Row label="What happened">{f.what}</Row>
             {f.expected && <Row label="What should happen">{f.expected}</Row>}
@@ -166,15 +166,15 @@ export function FindingCard({ f, open: start, callHref, print }: { f: Finding; o
             {f.fix && <Row label="Where to look">{f.fix}</Row>}
             {f.tests.length > 1 && <Row label="Test cases">{f.tests.map((t) => `${t.title} (${t.calls})`).join(" · ")}</Row>}
           </dl>
-          {f.caution && <Notice tone="warn" icon="info" className="text-[13px]">{f.caution}</Notice>}
+          {f.caution && <Notice tone="warn" icon="info" className="text-sm">{f.caution}</Notice>}
           {f.proofs.length > 0 && (
             <div className="rounded-lg bg-surface-2 px-3 py-1.5">
-              <div className="text-[13px] font-medium text-muted pt-1 pb-0.5">Proof from the calls</div>
+              <div className="text-sm font-medium text-muted pt-1 pb-0.5">Proof from the calls</div>
               {f.proofs.map((p, i) => <ProofLine key={i} p={p} callHref={callHref} />)}
             </div>
           )}
           {f.calls.length > f.proofs.length && callHref && (
-            <div className="text-[13px] text-muted flex flex-wrap gap-x-2 gap-y-1 print:hidden">
+            <div className="text-sm text-muted flex flex-wrap gap-x-2 gap-y-1 print:hidden">
               All calls with this finding:
               {f.calls.slice(0, 20).map((t) => <a key={t} href={callHref(t)} className="font-mono">{t.slice(-9)}</a>)}
               {f.calls.length > 20 && <span>+{f.calls.length - 20} more</span>}
@@ -211,7 +211,7 @@ export function FindingsList({ r, callHref, print }: { r: Readiness; callHref?: 
             <div className="flex flex-wrap gap-1.5 mb-3" role="tablist">
               {filters.filter(([v, , n]) => n > 0 || v === "all").map(([v, label, n]) => (
                 <button key={v} type="button" role="tab" aria-selected={filter === v} onClick={() => setFilter(v)} data-filter={v}
-                  className={cx("h-[26px] px-2.5 rounded-md text-[13px] font-medium border transition-colors cursor-pointer",
+                  className={cx("h-6.5 px-2.5 rounded-md text-sm font-medium border transition-colors cursor-pointer",
                     filter === v ? "bg-ink text-surface border-ink" : "bg-surface text-ink-2 border-line hover:border-line-strong")}>
                   {label} <span className="tabular-nums opacity-70">{n}</span>
                 </button>
@@ -220,10 +220,10 @@ export function FindingsList({ r, callHref, print }: { r: Readiness; callHref?: 
           )}
           <div className="grid gap-2">
             {shown.map((f, i) => <FindingCard key={f.id} f={f} open={i < 2 && f.status === "problem"} callHref={callHref} print={print} />)}
-            {!shown.length && <div className="text-muted text-[13px]">Nothing in this group.</div>}
+            {!shown.length && <div className="text-muted text-sm">Nothing in this group.</div>}
           </div>
           {r.counts.opinions > 0 && (
-            <div className="text-[13px] text-muted mt-3">
+            <div className="text-sm text-muted mt-3">
               Judges' opinions come from AI judges that aren't trusted for this agent yet (too few calls labelled by a person). They never change the verdict.
             </div>
           )}
@@ -250,18 +250,18 @@ export function MetricsCard({ r }: { r: Readiness }) {
       <div className="grid gap-5 md:grid-cols-2 print:grid-cols-2">
         {groups.map(([g, rows]) => (
           <div key={g} className="break-inside-avoid">
-            <div className="text-[13px] font-medium text-muted mb-1.5">{g}</div>
+            <div className="text-sm font-medium text-muted mb-1.5">{g}</div>
             <div className="grid">
               {rows.map((x) => (
                 <div key={x.title} className="flex items-baseline gap-3 py-1.5 border-t border-line first:border-t-0">
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-medium flex items-center gap-1.5">
+                    <div className="text-sm font-medium flex items-center gap-1.5">
                       {x.band && <i className={cx("size-1.5 rounded-full flex-none", BAND_DOT[x.band])} title={x.band} />}{x.title}
                     </div>
-                    {x.note && <div className="text-[13px] text-muted">{x.note}</div>}
-                    {x.range && <div className="text-[13px] text-muted" data-range>How sure: {x.range}</div>}
+                    {x.note && <div className="text-sm text-muted">{x.note}</div>}
+                    {x.range && <div className="text-sm text-muted" data-range>How sure: {x.range}</div>}
                   </div>
-                  <div className="text-[14px] font-semibold tabular-nums whitespace-nowrap">{x.value}</div>
+                  <div className="text-base font-semibold tabular-nums whitespace-nowrap">{x.value}</div>
                 </div>
               ))}
             </div>
@@ -293,9 +293,9 @@ export function MethodCard({ r }: { r: Readiness }) {
   return (
     <Card id="method">
       <CardHead level={2} title="How this test was run" />
-      <dl className="grid gap-x-6 gap-y-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 print:grid-cols-3 text-[13px]">
+      <dl className="grid gap-x-6 gap-y-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 print:grid-cols-3 text-sm">
         {r.method.map((m) => (
-          <div key={m.label}><dt className="text-muted text-[13px]">{m.label}</dt><dd className="font-medium break-words">{m.value}</dd></div>
+          <div key={m.label}><dt className="text-muted text-sm">{m.label}</dt><dd className="font-medium break-words">{m.value}</dd></div>
         ))}
       </dl>
     </Card>
@@ -321,17 +321,17 @@ export function ConditionsCard({ r, callHref }: { r: Readiness; callHref?: (test
           return (
             <div key={c.key} className="grid gap-x-4 gap-y-1 py-2.5 border-t border-line first:border-t-0 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_auto] items-center" data-condition={c.key}>
               <div className="min-w-0">
-                <div className="font-medium text-[13.5px]">{c.title}</div>
-                {c.lines.length > 0 && c.lines.join(", ") !== c.title && <div className="text-[13px] text-muted truncate" title={c.lines.join(", ")}>{c.lines.join(", ")}</div>}
+                <div className="font-medium text-sm">{c.title}</div>
+                {c.lines.length > 0 && c.lines.join(", ") !== c.title && <div className="text-sm text-muted truncate" title={c.lines.join(", ")}>{c.lines.join(", ")}</div>}
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2.5">
                   <div className="h-2 flex-1 rounded-full bg-surface-3 overflow-hidden" role="img" aria-label={`${c.title}: ${c.result}`}>
                     <div className={cx("grow-x h-full rounded-full", TONE_BAR[tone])} style={{ width: `${Math.round((c.pass_rate ?? 0) * 100)}%` }} />
                   </div>
-                  <span className="text-[13px] tabular-nums whitespace-nowrap">{c.result}</span>
+                  <span className="text-sm tabular-nums whitespace-nowrap">{c.result}</span>
                 </div>
-                <div className="text-[13px] text-muted mt-0.5">
+                <div className="text-sm text-muted mt-0.5">
                   {[c.understanding, c.p50 ? `typical answer ${c.p50}` : "", c.failed_tests.length ? `failed: ${c.failed_tests.slice(0, 3).join(", ")}${c.failed_tests.length > 3 ? "…" : ""}` : ""].filter(Boolean).join(" · ")}
                   {c.proof && callHref && <> · <a className="text-accent print:hidden" href={callHref(c.proof)}>see a failed call</a></>}
                 </div>
@@ -359,17 +359,17 @@ export function FailuresCard({ r, callHref }: { r: Readiness; callHref?: (testId
           return (
             <div key={c.key} className="grid gap-x-4 gap-y-1 py-2.5 border-t border-line first:border-t-0 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_auto] items-center" data-failure={c.key}>
               <div className="min-w-0">
-                <div className="font-medium text-[13.5px]">{c.title}</div>
-                <div className="text-[13px] text-muted" title={c.expected}>{c.about}</div>
+                <div className="font-medium text-sm">{c.title}</div>
+                <div className="text-sm text-muted" title={c.expected}>{c.about}</div>
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2.5">
                   <div className="h-2 flex-1 rounded-full bg-surface-3 overflow-hidden" role="img" aria-label={`${c.title}: ${c.result}`}>
                     <div className={cx("grow-x h-full rounded-full", TONE_BAR[tone])} style={{ width: `${Math.round((c.pass_rate ?? 0) * 100)}%` }} />
                   </div>
-                  <span className="text-[13px] tabular-nums whitespace-nowrap">{c.result}</span>
+                  <span className="text-sm tabular-nums whitespace-nowrap">{c.result}</span>
                 </div>
-                <div className="text-[13px] text-muted mt-0.5">
+                <div className="text-sm text-muted mt-0.5">
                   {[c.ended, c.failed_tests.length ? `failed: ${c.failed_tests.slice(0, 3).join(", ")}${c.failed_tests.length > 3 ? "…" : ""}` : ""].filter(Boolean).join(" · ")}
                   {c.proof && callHref && <> · <a className="text-accent print:hidden" href={callHref(c.proof)}>see a failed call</a></>}
                 </div>

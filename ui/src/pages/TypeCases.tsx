@@ -86,7 +86,7 @@ export function TypeCases({ project, type, edit }: { project: Project; type: Cas
   return (
     <div className="grid gap-4" id="type-cases">
       <div className="flex items-center gap-3 flex-wrap">
-        <p className="flex-1 min-w-[240px] text-[13px] text-ink-2">
+        <p className="flex-1 min-w-60 text-sm text-ink-2">
           {mine.length ? `${mine.length} ${MODE_TITLE[type]} test case${mine.length === 1 ? "" : "s"}.` : `No ${MODE_TITLE[type]} test cases yet.`}
           {about.adds && extra > 0 && <> A run {about.adds} ({extra}).</>}
         </p>
@@ -111,7 +111,7 @@ export function TypeCases({ project, type, edit }: { project: Project; type: Cas
           <Table head={["Test case", "Caller", "What it tests", "Matters", "Runs in", ""]}>
             {mine.map((s) => (
               <tr key={s.id} className={rowLink} data-scenario={s.id} onClick={() => navigate(`${here}?${qs({ edit: s.file })}`)}>
-                <td className="min-w-[260px]"><b className="font-medium block">{s.title}</b><span className="text-muted text-[13px] font-mono">{s.id}</span></td>
+                <td className="min-w-65"><b className="font-medium block">{s.title}</b><span className="text-muted text-sm font-mono">{s.id}</span></td>
                 <td className="text-ink-2 whitespace-nowrap">{s.style === "scripted" ? "Scripted lines" : s.persona || "—"}</td>
                 <td className="text-ink-2">{what(s, type)}</td>
                 <td className={cx("whitespace-nowrap", s.criticality === "critical" ? "text-ink font-medium" : "text-ink-2")}>{s.criticality === "critical" ? "Critical" : s.criticality === "exploratory" ? "Exploratory" : "Normal"}</td>

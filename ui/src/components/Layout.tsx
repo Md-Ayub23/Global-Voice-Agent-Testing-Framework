@@ -3,7 +3,7 @@
 // (one page per test type, each with a status dot), its results, and its settings at the bottom.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
-import { useAuth } from "../lib/auth";
+import { can, useAuth } from "../lib/auth";
 import { useApp, useLoad } from "../lib/app";
 import { cx } from "../lib/format";
 import { connectionWords, mainProfile, projectByKey, projectHref, projectOfJob } from "../lib/links";
@@ -60,6 +60,7 @@ function currentTheme(): "light" | "dark" {
 
 function ProjectSwitcher({ projectKey }: { projectKey: string }) {
   const { projects } = useApp();
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const current = projectByKey(projects, projectKey);
@@ -76,27 +77,29 @@ function ProjectSwitcher({ projectKey }: { projectKey: string }) {
   return (
     <div ref={box} className="relative">
       <button type="button" id="project-switcher" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-        className="w-full flex items-center gap-2.5 p-2 rounded-[14px] border border-[var(--glass-line)] bg-surface shadow-[0_6px_16px_-12px_rgb(30_45_100/.45)] hover:border-line-strong transition-colors text-left cursor-pointer">
+        className="w-full flex items-center gap-2.5 p-2 rounded-2xl border border-[var(--glass-line)] bg-surface shadow-[0_6px_16px_-12px_rgb(30_45_100/.45)] hover:border-line-strong transition-colors text-left cursor-pointer">
         <ProjectAvatar kind={kindOf(current)} size={28} />
         <span className="flex-1 min-w-0">
-          <b className="block text-[13px] font-semibold leading-tight truncate">{current?.name || projectKey}</b>
-          <span className="block text-[13px] text-muted truncate">{main ? connectionWords(main, current?.example) : "Not connected"}</span>
+          <b className="block text-sm font-semibold leading-tight truncate">{current?.name || projectKey}</b>
+          <span className="block text-sm text-muted truncate">{main ? connectionWords(main, current?.example) : "Not connected"}</span>
         </span>
         <Icon name="updown" size={15} className="text-muted flex-none" />
       </button>
       {open && (
-        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 bg-surface border border-line rounded-[16px] shadow-pop p-1.5 animate-rise max-h-[60vh] overflow-auto">
-          <div className="px-2 pt-1 pb-1.5 text-[13px] font-medium text-muted">Switch agent</div>
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 bg-surface border border-line rounded-2xl shadow-pop p-1.5 animate-rise max-h-[60vh] overflow-auto">
+          <div className="px-2 pt-1 pb-1.5 text-sm font-medium text-muted">Switch agent</div>
           {(projects || []).map((p) => (
             <a key={p.key} href={projectHref(p.key)} className={cx("flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface-2 hover:no-underline text-ink",
               p.key === projectKey && "bg-surface-2")}>
               <ProjectAvatar kind={kindOf(p)} size={22} />
-              <span className="flex-1 min-w-0 truncate text-[13px] font-medium">{p.name}</span>
+              <span className="flex-1 min-w-0 truncate text-sm font-medium">{p.name}</span>
               {p.key === projectKey && <Icon name="check" size={14} className="text-accent" />}
             </a>
           ))}
-          <div className="h-px bg-line my-1.5" />
-          <a href="#/projects/new" className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-2 hover:no-underline text-ink-2 text-[13px]"><Icon name="plus" size={15} />New agent</a>
+          {can(user, "editor") && <>
+            <div className="h-px bg-line my-1.5" />
+            <a href="#/projects/new" className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-surface-2 hover:no-underline text-ink-2 text-sm"><Icon name="plus" size={15} />New agent</a>
+          </>}
         </div>
       )}
     </div>
@@ -145,19 +148,19 @@ export function Layout({ section, projectKey, children }: { section: string; pro
   const live = !!activeJob && jobProject?.key === projectKey;
   // The test types' dots: reloaded when a run starts or ends.
   const { data: modes } = useLoad(() => (projectKey ? api.get<ModeBrief[]>(`/api/project/${projectKey}/modes`) : Promise.resolve(null)),
-    [projectKey, activeJob?.id, activeJob?.status]);
+    [projectKey, activeJob?.id, activeJob?.status], { keep: true });
   const link = (n: NavItem) => (
     <a key={n.key} href={n.href} data-nav={n.key} aria-current={section === n.key ? "page" : undefined} title={n.title}
-      className={cx("relative z-1 flex items-center gap-2.5 px-3 h-[34px] rounded-[12px] text-[13.5px] transition-colors duration-200 hover:no-underline",
+      className={cx("relative z-1 flex items-center gap-2.5 px-3 h-8.5 rounded-xl text-sm transition-colors duration-200 hover:no-underline",
         section === n.key ? "text-ink font-semibold" : "text-ink-2 hover:text-ink hover:bg-[var(--glass-strong)]")}>
       {n.icon && <Icon name={n.icon} size={16} className={section === n.key ? "text-accent" : "text-muted"} />}
       <span className="truncate">{n.label}</span>
       {n.key === "results" && live && <LiveDot className="ml-auto" />}
-      {n.dot && <i className={cx("ml-auto size-[7px] rounded-full flex-none", n.dot)} />}
+      {n.dot && <i className={cx("ml-auto size-1.75 rounded-full flex-none", n.dot)} />}
     </a>
   );
   const heading = (title: string) => (
-    <div className="px-3 pt-4 pb-1 text-[13px] text-muted font-semibold">{title}</div>
+    <div className="px-3 pt-4 pb-1 text-sm text-muted font-semibold">{title}</div>
   );
 
   return (
@@ -165,19 +168,19 @@ export function Layout({ section, projectKey, children }: { section: string; pro
       {navOpen && <div className="fixed inset-0 z-10 bg-black/30 md:hidden animate-fade" onClick={() => setNavOpen(false)} />}
       <aside
         className={cx(
-          "print:hidden fixed md:sticky top-0 md:top-3 left-0 bottom-0 z-20 md:z-5 h-screen md:h-[calc(100vh-24px)] w-[268px] md:w-auto md:ml-3 flex flex-col px-3 py-4 glass md:rounded-[22px] max-md:!bg-surface overflow-y-auto scrollbar-thin",
+          "print:hidden fixed md:sticky top-0 md:top-3 left-0 bottom-0 z-20 md:z-5 h-screen md:h-[calc(100vh-24px)] w-67 md:w-auto md:ml-3 flex flex-col px-3 py-4 glass md:rounded-3xl max-md:!bg-surface overflow-y-auto scrollbar-thin",
           "transition-transform duration-200 ease-out-soft md:translate-x-0",
           navOpen ? "translate-x-0 shadow-pop md:shadow-none" : "-translate-x-full",
         )}
       >
         <a href="#/" className="flex items-center gap-2.5 px-2 pt-0.5 pb-4 text-ink hover:no-underline">
-          <img src="/static/logo.svg" alt="" className="size-[30px] rounded-[10px] shadow-[0_6px_14px_-8px_var(--accent)]" />
-          <b className="text-[17px] leading-none tracking-[-.03em] font-bold">Vocto</b>
+          <img src="/static/logo.svg" alt="" className="size-7.5 rounded-xl shadow-[0_6px_14px_-8px_var(--accent)]" />
+          <b className="text-lg leading-none tracking-[-.03em] font-bold">Vocto</b>
         </a>
         <SlidingNav section={section}>
           {projectKey ? (
             <>
-              <a href="#/" className="flex items-center gap-1.5 px-2 pb-2.5 text-[13px] text-muted hover:text-ink hover:no-underline" id="all-agents">
+              <a href="#/" className="flex items-center gap-1.5 px-2 pb-2.5 text-sm text-muted hover:text-ink hover:no-underline" id="all-agents">
                 <Icon name="back" size={13} />All agents
               </a>
               <ProjectSwitcher projectKey={projectKey} />
@@ -196,9 +199,11 @@ export function Layout({ section, projectKey, children }: { section: string; pro
                   {heading("Your agents")}
                   <nav className="flex flex-col gap-px" aria-label="Agents">
                     {projects.map((p) => link({ href: projectHref(p.key), key: `agent:${p.key}`, label: p.name }))}
-                    <a href="#/projects/new" className="flex items-center gap-2.5 px-3 h-[34px] rounded-[12px] text-[13.5px] text-accent-ink hover:bg-[var(--glass-strong)] hover:no-underline">
-                      <Icon name="plus" size={15} />New agent
-                    </a>
+                    {can(user, "editor") && (
+                      <a href="#/projects/new" className="flex items-center gap-2.5 px-3 h-8.5 rounded-xl text-sm text-accent-ink hover:bg-[var(--glass-strong)] hover:no-underline">
+                        <Icon name="plus" size={15} />New agent
+                      </a>
+                    )}
                   </nav>
                 </>
               )}
@@ -210,7 +215,7 @@ export function Layout({ section, projectKey, children }: { section: string; pro
             {link({ href: projectHref(projectKey, "/setup/rules"), key: "agent-settings", label: "Agent settings", icon: "sliders" })}
           </nav>
         )}
-        <div className="mt-auto pt-4 px-2.5 text-[13px] text-muted grid gap-2">
+        <div className="mt-auto pt-4 px-2.5 text-sm text-muted grid gap-2">
           <div className="flex items-center">
             {offline ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-bad-soft text-bad font-bold"><Icon name="alert" size={13} />Server stopped</span>
@@ -221,10 +226,10 @@ export function Layout({ section, projectKey, children }: { section: string; pro
             ) : null}
           </div>
           {user && (
-            <div className="flex items-center gap-2 -mx-1 px-1 py-1 rounded-[12px]" id="user-menu">
+            <div className="flex items-center gap-2 -mx-1 px-1 py-1 rounded-xl" id="user-menu">
               <a href="#/account" className="flex items-center gap-2 min-w-0 flex-1 text-ink hover:no-underline" title="Your account">
-                <span className="size-[26px] rounded-full grid place-items-center bg-accent-soft text-accent-ink text-[11.5px] font-bold flex-none">{(user.name || user.username).slice(0, 2).toUpperCase()}</span>
-                <span className="min-w-0 leading-tight"><b className="block truncate text-[13px]">{user.name || user.username}</b><span className="text-muted text-[12px]">{user.role}</span></span>
+                <span className="size-6.5 rounded-full grid place-items-center bg-accent-soft text-accent-ink text-2xs font-bold flex-none">{(user.name || user.username).slice(0, 2).toUpperCase()}</span>
+                <span className="min-w-0 leading-tight"><b className="block truncate text-sm">{user.name || user.username}</b><span className="text-muted text-2xs">{user.role}</span></span>
               </a>
               <Button variant="ghost" size="sm" iconOnly icon="logout" title="Sign out" aria-label="Sign out" id="sign-out" onClick={() => void signOut()} />
             </div>
@@ -242,7 +247,7 @@ export function Layout({ section, projectKey, children }: { section: string; pro
         <header className={cx("print:hidden sticky top-0 z-4 flex items-center gap-3 px-4 md:px-8 h-14 border-b transition-[background-color,border-color] duration-200",
           scrolled ? "glass !border-x-0 !border-t-0 !rounded-none !shadow-none border-b-[var(--line)]" : "bg-transparent border-transparent")}>
           <Button variant="ghost" iconOnly icon="menu" className="md:hidden" aria-label="Menu" onClick={() => setNavOpen((o) => !o)} />
-          <div className="flex items-center gap-2 text-muted text-[13px] min-w-0">
+          <div className="flex items-center gap-2 text-muted text-sm min-w-0">
             {crumbs.map((c, i) =>
               i === crumbs.length - 1 ? (
                 <b key={i} className="text-ink font-semibold truncate">{c.label}</b>
@@ -254,16 +259,22 @@ export function Layout({ section, projectKey, children }: { section: string; pro
             )}
           </div>
           <span className="flex-1" />
+          {!can(user, "editor") && (
+            <span id="view-only" title="You can read every page and report. Ask your Vocto admin for editor access to run tests or change settings."
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-surface-2 text-ink-2 text-sm font-semibold whitespace-nowrap">
+              <Icon name="lock" size={13} />View only
+            </span>
+          )}
           {activeJob && (
             <a href={jobProject ? projectHref(jobProject.key, `/live/${activeJob.id}`) : "#/"} id="active-pill"
-              className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-soft text-accent-ink text-[13px] font-semibold whitespace-nowrap hover:no-underline animate-rise">
+              className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-soft text-accent-ink text-sm font-semibold whitespace-nowrap hover:no-underline animate-rise">
               <LiveDot /><span className="hidden sm:inline">{activeJob.status === "queued" ? "Run waiting to start" : activeJob.kind === "exit-check" ? "Exit check running" : "Run in progress"}{jobProject ? ` · ${jobProject.name}` : ""}</span>
               <span className="sm:hidden">Live</span>
             </a>
           )}
 
         </header>
-        <main ref={mainRef} className="route-in px-4 md:px-8 pt-2 pb-16 max-w-[1360px] w-full mx-auto print:p-0 print:max-w-none">{children}</main>
+        <main ref={mainRef} className="route-in px-4 md:px-8 pt-2 pb-16 max-w-340 w-full mx-auto print:p-0 print:max-w-none">{children}</main>
       </div>
     </div>
   );
@@ -289,7 +300,7 @@ function SlidingNav({ section, children }: { section: string; children: ReactNod
   return (
     <div ref={box} className="relative">
       {mark && (
-        <span aria-hidden="true" className={cx("absolute left-0 right-0 rounded-[12px] bg-surface shadow-[0_6px_16px_-10px_rgb(30_45_100/.45)] transition-[top] duration-300 ease-[var(--spring)]",)} style={{ top: mark.top, height: mark.height }}>
+        <span aria-hidden="true" className={cx("absolute left-0 right-0 rounded-xl bg-surface shadow-[0_6px_16px_-10px_rgb(30_45_100/.45)] transition-[top] duration-300 ease-[var(--spring)]",)} style={{ top: mark.top, height: mark.height }}>
                   </span>
       )}
       {children}

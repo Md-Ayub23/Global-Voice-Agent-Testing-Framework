@@ -27,7 +27,7 @@ export function Ring({ value, size = 56, stroke = 4, toneName }: { value: number
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
           strokeDasharray={c} strokeDashoffset={offset} />
       </svg>
-      <b className="absolute inset-0 grid place-items-center text-[13px] font-semibold tabular-nums">{value == null ? "—" : `${Math.round(v * 100)}%`}</b>
+      <b className="absolute inset-0 grid place-items-center text-sm font-semibold tabular-nums">{value == null ? "—" : `${Math.round(v * 100)}%`}</b>
     </div>
   );
 }
@@ -42,7 +42,7 @@ const tickLabel = (t: number) => (t >= 1000 ? `${(t / 1000).toFixed(t % 1000 ? 1
 
 // Response time per agent answer in one call (voice): verdict.metrics.latency_turns.
 export function LatencyBars({ rows, limits, width = 560 }: { rows: LatencyTurn[] | undefined; limits: Limits | null; width?: number }) {
-  if (!rows || !rows.length) return <div className="text-muted text-[13px]">No answers were timed in this call.</div>;
+  if (!rows || !rows.length) return <div className="text-muted text-sm">No answers were timed in this call.</div>;
   const W = width, H = Math.round(Math.max(170, W * 0.42)), L = 44, R = 10, T = 16, B = 26;
   const narrow = (W - L - R) / rows.length < 58;
   const max = niceMax(Math.max(...rows.map((r) => r.ms ?? 0), limits?.p95 || 0, 1) * 1.08);
@@ -97,7 +97,7 @@ export function LatencyDots({ calls, limits, runId, width = 760 }: { calls: Call
       byScenario.get(c.scenario_id)!.push({ ...r, test_id: c.test_id, repeat: c.repeat });
     }
   }
-  if (!byScenario.size) return <div className="text-muted text-[13px]">No answers were timed.</div>;
+  if (!byScenario.size) return <div className="text-muted text-sm">No answers were timed.</div>;
   const names = [...byScenario.keys()];
   const all = names.flatMap((n) => byScenario.get(n)!.map((r) => r.ms as number));
   const max = niceMax(Math.max(...all, limits?.p95 || 0) * 1.05);
@@ -149,15 +149,15 @@ function StripTile({ run }: { run: RunSummary }) {
   const bg = { good: "bg-good", bad: "bg-bad", warn: "bg-warn", neutral: "bg-line-strong", run: "bg-accent" }[t];
   return (
     <a href={runHref(run)} aria-label={statusLabel(s)} {...tip}
-      className={`flex-1 max-w-[18px] min-w-1 overflow-hidden h-full rounded grid place-items-center text-white transition-[filter] duration-150 hover:brightness-110 ${bg}`}>
+      className={`flex-1 max-w-4.5 min-w-1 overflow-hidden h-full rounded grid place-items-center text-white transition-[filter] duration-150 hover:brightness-110 ${bg}`}>
       <Icon name={t === "good" ? "check" : t === "bad" ? "x" : t === "warn" ? "alert" : "minus"} size={10} strokeWidth={3} />
     </a>
   );
 }
 export function DecisionStrip({ runs }: { runs: RunSummary[] }) {
   const list = runs.slice(0, 40).reverse();
-  if (!list.length) return <div className="text-muted text-[13px]">No runs yet.</div>;
-  return <div className="flex gap-1 items-end h-[34px]">{list.map((r) => <StripTile key={r.run_id} run={r} />)}</div>;
+  if (!list.length) return <div className="text-muted text-sm">No runs yet.</div>;
+  return <div className="flex gap-1 items-end h-8.5">{list.map((r) => <StripTile key={r.run_id} run={r} />)}</div>;
 }
 
 // Stereo recording (left caller, right agent) as two lanes, with a playhead synced to an <audio>.
@@ -235,23 +235,23 @@ export function Waveform({ runId, testId, audio, events }: { runId: string; test
     };
   }, [data, audio]);
 
-  if (error) return <div className="text-muted text-[13px] p-3.5">{error}</div>;
-  if (!data) return <div className="h-[120px] rounded-[12px] animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]" />;
+  if (error) return <div className="text-muted text-sm p-3.5">{error}</div>;
+  if (!data) return <div className="h-30 rounded-xl animate-skeleton bg-linear-90 from-surface-2 via-surface-3 to-surface-2 bg-size-[200%_100%]" />;
   const lanes = Object.keys(data.channels);
   return (
     <div
       ref={box}
-      className="relative rounded-[12px] bg-surface-2 border border-line overflow-hidden cursor-pointer"
+      className="relative rounded-xl bg-surface-2 border border-line overflow-hidden cursor-pointer"
       onClick={(e) => {
         if (!audio) return;
         const r = e.currentTarget.getBoundingClientRect();
         audio.currentTime = (((e.clientX - r.left) / r.width) * data.duration_ms) / 1000;
       }}
     >
-      <canvas ref={canvas} className="block w-full h-[120px]" />
+      <canvas ref={canvas} className="block w-full h-30" />
       <div ref={head} className="absolute inset-y-0 left-0 w-0.5 bg-accent pointer-events-none shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_20%,transparent)]" />
       {lanes.map((name, i) => (
-        <span key={name} className="absolute left-2.5 text-[13px] font-bold px-1.5 py-px rounded-[5px] bg-surface"
+        <span key={name} className="absolute left-2.5 text-sm font-bold px-1.5 py-px rounded-sm bg-surface"
           style={{ top: 6 + i * 60, color: name === "caller" ? "var(--caller)" : "var(--agent)" }}>
           {name === "caller" ? "Caller (left)" : name === "agent" ? "Agent (right)" : name}
         </span>

@@ -704,7 +704,7 @@ class Orchestrator:
     # ---- one conversation, text or voice ------------------------------------
     def _limits(self, scenario: Mapping[str, Any]) -> tuple[int, float]:
         limits = self.profile.get("limits", {})
-        max_turns = (len(scenario["turns"]) if scenario["style"] == "scripted"
+        max_turns = (len(scenario.get("turns") or []) if scenario["style"] == "scripted"
                      else scenario["caller"].get("max_turns", limits.get("max_turns", 30)))
         return max_turns, time.monotonic() + limits.get("max_call_seconds", 300)
 
@@ -723,11 +723,11 @@ class Orchestrator:
                     "level": "info", "code": "call_part_ended", "call": k - 1, "ended_by": ended_by,
                     "message": f"Call {k - 1} ended: {reason or ended_by}."}, turn=turn)
                 await asyncio.sleep(calls.gap_s(scenario, k))
+                own = scenario["returning"][k - 2].get("title")   # the returning entry's own name, if it has one
                 writer.emit("harness", "harness_event", {
                     "level": "info", "code": "next_call", "call": k, "first_turn": turn + 1,
                     "remembered": sorted(remembered),
-                    "message": f"Call {k}: the same caller rings again" + (f" ({leg['title']})" if leg.get("title") else "")
-                               + "."}, turn=turn + 1)
+                    "message": f"Call {k}: the same caller rings again" + (f" ({own})" if own else "") + "."}, turn=turn + 1)
             caller = self._caller(leg, meta)
             leg_ctx = ctx if k == 1 else replace(ctx, scenario=leg)     # the agent hears of each call as it is
             if self.mode == "voice":
@@ -1080,10 +1080,13 @@ class Orchestrator:
             if conv.line.error:
                 raise conv.line.error
             await asyncio.sleep(0.03)
-        spans = rec.agent_spans(conv._heard_to + 1, rec.now_sample())
+        # Only speech that starts inside the quiet window counts: the loop polls, so "now" can be a little past
+        # the deadline on a busy machine, and the agent talking after the caller is back isn't a check-in.
+        now = rec.now_sample()
+        spans = [sp for sp in rec.agent_spans(conv._heard_to + 1, min(now, deadline)) if sp[0] < deadline]
         spoke = spans[0][0] if spans else None
-        if spoke is None and rec.agent_playing():
-            spoke = rec.now_sample()
+        if spoke is None and now < deadline and rec.agent_playing():
+            spoke = now
         end = spoke if spoke is not None else max(deadline, start)
         data: dict[str, Any] = {"kind": "silence", "text": "", "quiet_ms": cond.behaviour.quiet_ms,
                                 "agent_spoke_after_ms": rec.ms(spoke - start) if spoke is not None else None,
@@ -1224,10 +1227,11 @@ class Orchestrator:
 
     def _caller(self, scenario: Mapping[str, Any], meta: Mapping[str, str]):
         if scenario["style"] == "scripted":
-            lines = [t["caller"] for t in scenario["turns"]]
+            script = scenario.get("turns") or []          # none on a voicemail: it only records
+            lines = [t["caller"] for t in script]
             # Voice: a line with a recording is played from it (recordings.py); text sends the words.
-            audio = [t.get("audio") if self.mode == "voice" else None for t in scenario["turns"]]
-            back = [t.get("background") for t in scenario["turns"]]
+            audio = [t.get("audio") if self.mode == "voice" else None for t in script]
+            back = [t.get("background") for t in script]
             turns = self._follow_up_turns(scenario)
             if not turns:
                 return ScriptedCaller(lines, audio, back)

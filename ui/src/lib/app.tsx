@@ -79,14 +79,33 @@ export function useCrumbs(crumbs: Crumb[] | null) {
 }
 
 // Loads data for a page: { data, error, reload }. `deps` re-run the load when they change.
-export function useLoad<T>(load: () => Promise<T>, deps: unknown[]): { data: T | null; error: Error | null; reload: () => void } {
-  const [state, setState] = useState<{ data: T | null; error: Error | null }>({ data: null, error: null });
+// Coming back to a page shows what it had last time at once and refreshes it underneath (stale while
+// revalidate), so moving around the app never waits on a blank skeleton twice. Only read-only views opt in
+// ({ keep: true }): a form must start from the file as it is now, never a remembered copy. The memory is keyed by the
+// loader's own code and its deps, holds the 80 most recent loads, and is cleared on sign-out.
+const memo = new Map<string, unknown>();
+const MEMO_MAX = 80;
+export const forgetLoads = () => memo.clear();
+if (typeof window !== "undefined") window.addEventListener("vocto:signed-out", forgetLoads);
+
+export function useLoad<T>(load: () => Promise<T>, deps: unknown[], opts?: { keep?: boolean }): { data: T | null; error: Error | null; reload: () => void } {
+  let key: string | null = null;
+  if (opts?.keep) { try { key = load.toString() + "|" + JSON.stringify(deps); } catch { key = null; } }
+  const [state, setState] = useState<{ data: T | null; error: Error | null }>(() => ({ data: key && memo.has(key) ? (memo.get(key) as T) : null, error: null }));
   const [tick, setTick] = useState(0);
+  const lastKey = useRef(key);
   useEffect(() => {
     let live = true;
-    setState((s) => ({ data: s.data, error: null }));
+    const cached = key && memo.has(key) ? (memo.get(key) as T) : undefined;
+    // A reload keeps what is on screen; new deps (another agent, another run) never show the old one's data.
+    const same = lastKey.current === key;
+    lastKey.current = key;
+    setState((s) => ({ data: cached !== undefined ? cached : same ? s.data : null, error: null }));
     load().then(
-      (data) => live && setState({ data, error: null }),
+      (data) => {
+        if (key) { memo.delete(key); memo.set(key, data); if (memo.size > MEMO_MAX) memo.delete(memo.keys().next().value!); }
+        if (live) setState({ data, error: null });
+      },
       (error: Error) => live && setState({ data: null, error }),
     );
     return () => { live = false; };

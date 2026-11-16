@@ -17,7 +17,7 @@ const BAND: Record<"good" | "warn" | "bad" | "none", [string, string, string]> =
 export function BandBadge({ band, blocks }: { band: Band; blocks?: boolean }) {
   const [cls, dot, word] = BAND[band || "none"];
   return (
-    <span className={cx("inline-flex items-center gap-1.5 h-[22px] px-2 rounded-md text-[13px] font-medium whitespace-nowrap", cls)}>
+    <span className={cx("inline-flex items-center gap-1.5 h-5.5 px-2 rounded-md text-sm font-medium whitespace-nowrap", cls)}>
       <i className={cx("size-1.5 rounded-full flex-none", dot)} />
       {word}{blocks && band === "bad" ? " · blocks" : ""}
     </span>
@@ -61,16 +61,16 @@ export function QualityTiles({ rows, sub = TILES_SUB }: { rows: QualityRow[]; su
       <CardHead level={2} title="Call quality" sub={sub} />
       <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(210px,1fr))]" id="quality-tiles">
         {rows.map((r) => (
-          <div key={r.id} data-metric={r.id} className="rounded-[12px] border border-line p-3.5 grid gap-1 min-w-0">
-            <div className="flex items-center gap-1.5 text-ink-2 text-[13px] font-semibold min-w-0">
+          <div key={r.id} data-metric={r.id} className="rounded-xl border border-line p-3.5 grid gap-1 min-w-0">
+            <div className="flex items-center gap-1.5 text-ink-2 text-sm font-semibold min-w-0">
               <span className="truncate">{r.title}</span>
               <Tip content={r.about}><span className="text-muted flex-none"><Icon name="info" size={12} /></span></Tip>
             </div>
-            <div className="text-[22px] font-semibold tracking-[-.02em] tabular-nums leading-[1.2]">{fmtMetric(r.value, r.unit)}</div>
+            <div className="text-xl font-semibold tracking-[-.02em] tabular-nums leading-[1.2]">{fmtMetric(r.value, r.unit)}</div>
             <div className="flex items-center gap-2 flex-wrap"><BandBadge band={r.band} blocks={r.blocks} />
               {r.blocks && <Chip icon="flag">blocks</Chip>}</div>
-            <div className="text-muted text-[13px]">{bandWords(r)}</div>
-            <div className="text-muted text-[13px]">{detailLine(r)}</div>
+            <div className="text-muted text-sm">{bandWords(r)}</div>
+            <div className="text-muted text-sm">{detailLine(r)}</div>
           </div>
         ))}
       </div>
@@ -111,7 +111,7 @@ export function CallQuality({ quality, conditions, defs }: { quality: Record<str
     <Card  id="call-quality">
       <CardHead title="Call quality" sub="this call's own numbers and bands" />
       {conditions && (
-        <div className="mb-3 text-[13px] grid gap-1">
+        <div className="mb-3 text-sm grid gap-1">
           <div><span className="text-muted">Line and voice:</span> <b>{conditions.label}</b></div>
           {!!conditions.behaviours?.length && <div className="flex flex-wrap gap-1 items-center"><span className="text-muted">Caller:</span>
             {conditions.behaviours.map((b) => <Chip key={b}>{BEHAVIOUR[b] || b}</Chip>)}</div>}
@@ -123,10 +123,10 @@ export function CallQuality({ quality, conditions, defs }: { quality: Record<str
           return (
             <div key={d.id} className="py-2 flex items-center gap-3 min-w-0">
               <div className="flex-1 min-w-0">
-                <div className="text-[13px] font-semibold truncate">{d.title}</div>
-                <div className="text-muted text-[13px]">{q.never ? "the agent never checked in" : q.note ? String(q.note) : bandWords(d)}</div>
+                <div className="text-sm font-semibold truncate">{d.title}</div>
+                <div className="text-muted text-sm">{q.never ? "the agent never checked in" : q.note ? String(q.note) : bandWords(d)}</div>
               </div>
-              <div className="tabular-nums text-[13px] font-semibold">{q.never ? "never" : fmtMetric(q.value, d.unit)}</div>
+              <div className="tabular-nums text-sm font-semibold">{q.never ? "never" : fmtMetric(q.value, d.unit)}</div>
               <BandBadge band={q.band} />
             </div>
           );

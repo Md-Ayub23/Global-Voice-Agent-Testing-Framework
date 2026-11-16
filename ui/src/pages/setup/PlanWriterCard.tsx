@@ -102,8 +102,8 @@ function Writer({ detail, reload, page, projectKey, testType, initialFocus }: Ta
       </Block>
       <Block title="Plan size">
         <div className="flex items-end gap-3 flex-wrap">
-          <label className="grid gap-1 text-[13px] text-muted w-[120px]">How many<Num id="plan-count" value={count} min={testType ? 1 : 5} max={60} step={testType ? 1 : 5} onChange={(v) => setCount(v ?? 20)} /></label>
-          <label className="grid gap-1 text-[13px] text-muted flex-1 min-w-[240px]">Anything to focus on (optional)<Text id="plan-focus" value={focus} onChange={setFocus} placeholder="e.g. refunds, callers who give a wrong order number" /></label>
+          <label className="grid gap-1 text-sm text-muted w-30">How many<Num id="plan-count" value={count} min={testType ? 1 : 5} max={60} step={testType ? 1 : 5} onChange={(v) => setCount(v ?? 20)} /></label>
+          <label className="grid gap-1 text-sm text-muted flex-1 min-w-60">Anything to focus on (optional)<Text id="plan-focus" value={focus} onChange={setFocus} placeholder="e.g. refunds, callers who give a wrong order number" /></label>
           <Button id="write-plan" variant="primary" icon="sparkles" busy={writing} disabled={!canWrite || writing} onClick={() => void write()}>
             {testType ? (plan ? "Draft again" : "Draft test cases") : plan ? "Write a new plan" : "Write the plan"}
           </Button>
@@ -115,16 +115,16 @@ function Writer({ detail, reload, page, projectKey, testType, initialFocus }: Ta
         <>
           <Block title="What Claude understood" sub={plan.analysis.summary}
             aside={<Button size="sm" variant="ghost" icon={showAnalysis ? "minus" : "plus"} onClick={() => setShowAnalysis(!showAnalysis)}>{showAnalysis ? "Hide" : "Show"}</Button>}>
-            <div className="flex gap-2 flex-wrap text-[13px]">
+            <div className="flex gap-2 flex-wrap text-sm">
               <Chip>{n(plan.analysis.intents.length, "job")}</Chip><Chip>{n(plan.analysis.rules.length, "rule")}</Chip>
               <Chip>{n(plan.analysis.slots.length, "detail")} to collect</Chip>
               {plan.analysis.unclear.length > 0 && <Chip tone="warn">{n(plan.analysis.unclear.length, "open question")}</Chip>}
             </div>
             {showAnalysis && (
-              <div id="plan-analysis" className="grid gap-3 mt-3 text-[13px]">
+              <div id="plan-analysis" className="grid gap-3 mt-3 text-sm">
                 <div><b>Jobs:</b> {plan.analysis.intents.map((i) => `${i.description} (${i.id})`).join("; ")}</div>
                 <div><b>Rules:</b><ul className="mt-1 grid gap-0.5">{plan.analysis.rules.map((r) => (
-                  <li key={r.id} className="flex gap-2"><span className="font-mono text-muted w-8">{r.id}</span><span className="flex-1">{r.text}</span><Chip className="text-[13px]">{r.kind.replace("_", " ")}</Chip></li>))}</ul></div>
+                  <li key={r.id} className="flex gap-2"><span className="font-mono text-muted w-8">{r.id}</span><span className="flex-1">{r.text}</span><Chip className="text-sm">{r.kind.replace("_", " ")}</Chip></li>))}</ul></div>
                 {plan.analysis.unclear.length > 0 && <div><b>Not said in the instructions</b> (worth asking the agent's owner):<ul className="mt-1 list-disc pl-5">{plan.analysis.unclear.map((u, i) => <li key={i}>{u}</li>)}</ul></div>}
               </div>
             )}
@@ -134,7 +134,7 @@ function Writer({ detail, reload, page, projectKey, testType, initialFocus }: Ta
             <div className="grid gap-4">
               {groups.map(({ c, tests }) => (
                 <div key={c} data-category={c}>
-                  <div className="text-[13px] font-semibold text-muted mb-1.5">{page.categories[c]} · {tests.length}</div>
+                  <div className="text-sm font-semibold text-muted mb-1.5">{page.categories[c]} · {tests.length}</div>
                   <div className="grid gap-1.5">
                     {tests.map((t) => (
                       <DraftRow key={t.id} t={t} on={picked.has(t.id)} open={open === t.id} crit={crit[t.id] || t.criticality}
@@ -150,7 +150,7 @@ function Writer({ detail, reload, page, projectKey, testType, initialFocus }: Ta
             <Button id="add-plan-tests" variant="primary" icon="plus" busy={adding} disabled={!picked.size || adding} onClick={() => void add()}>
               Add {picked.size} test case{picked.size === 1 ? "" : "s"}
             </Button>
-            <span className="text-[13px] text-muted">Personas they need are added from the library. You can edit any test afterwards.</span>
+            <span className="text-sm text-muted">Personas they need are added from the library. You can edit any test afterwards.</span>
           </div>
         </>
       )}
@@ -164,12 +164,12 @@ function DraftRow({ t, on, open, crit, onToggle, onOpen, onCrit }: {
   const sc = t.scenario as Record<string, any>;
   const blocked = t.problems.length > 0 || t.accepted;
   return (
-    <div data-draft={t.id} className={cx("rounded-[12px] border", on ? "border-accent/60 bg-accent-soft/30" : "border-line")}>
+    <div data-draft={t.id} className={cx("rounded-xl border", on ? "border-accent/60 bg-accent-soft/30" : "border-line")}>
       <div className="flex items-center gap-3 p-2.5 flex-wrap">
         <input type="checkbox" aria-label={`Add ${t.title}`} className="accent-[var(--accent)]" checked={on && !blocked} disabled={blocked} onChange={(e) => onToggle(e.target.checked)} />
-        <button type="button" className="flex-1 min-w-[200px] text-left cursor-pointer" onClick={onOpen}>
+        <button type="button" className="flex-1 min-w-50 text-left cursor-pointer" onClick={onOpen}>
           <span className="font-semibold">{t.title}</span>
-          <span className="block text-[13px] text-muted">{KIND_LABEL(t.kind)} · caller: {t.persona}{t.persona_new ? " (from library)" : ""}{t.rules.length ? ` · tests ${t.rules.map((r) => r.id).join(", ")}` : ""}</span>
+          <span className="block text-sm text-muted">{KIND_LABEL(t.kind)} · caller: {t.persona}{t.persona_new ? " (from library)" : ""}{t.rules.length ? ` · tests ${t.rules.map((r) => r.id).join(", ")}` : ""}</span>
         </button>
         {t.accepted && <Chip tone="good" icon="check">added</Chip>}
         {t.duplicate_of && !t.accepted && <Chip tone="warn" title={`Close to ${t.duplicate_of}`}>looks like an existing test</Chip>}
@@ -177,12 +177,12 @@ function DraftRow({ t, on, open, crit, onToggle, onOpen, onCrit }: {
         {sc.setup?.faults && <Chip tone="tool">breaks {sc.setup.faults[0].tool}</Chip>}
         {sc.outcome && <Chip tone="tool">{String(sc.outcome.expected).replace("_", " ")}</Chip>}
         {sc.modes?.includes("voice") && !sc.modes?.includes("text") && <Chip icon="mic">voice only</Chip>}
-        <select aria-label="Criticality" className="text-[13px] bg-transparent border border-line rounded-md px-1.5 py-0.5" value={crit} disabled={blocked} onChange={(e) => onCrit(e.target.value)}>
+        <select aria-label="Criticality" className="text-sm bg-transparent border border-line rounded-md px-1.5 py-0.5" value={crit} disabled={blocked} onChange={(e) => onCrit(e.target.value)}>
           {CRIT.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
       {open && (
-        <div className="px-4 pb-3 grid gap-2 text-[13px] border-t border-line pt-2.5">
+        <div className="px-4 pb-3 grid gap-2 text-sm border-t border-line pt-2.5">
           <div>{t.why}</div>
           {t.rules.map((r) => <div key={r.id} className="text-ink-2"><span className="font-mono text-muted">{r.id}</span> {r.text}</div>)}
           <div><b>The caller is told:</b> {sc.caller?.goal}</div>
@@ -190,8 +190,8 @@ function DraftRow({ t, on, open, crit, onToggle, onOpen, onCrit }: {
             <div className="text-ink-2"><b>Details:</b> {Object.entries(sc.caller.facts).map(([k, v]) => `${k}: ${v}`).join(", ")}</div>)}
           {sc.outcome && <div className="text-ink-2"><b>Database check:</b> {sc.outcome.record ? `${plural(sc.outcome.record.expect_count, "record")} in ${sc.outcome.record.probe}${sc.outcome.record.expect_fields ? ` with ${Object.entries(sc.outcome.record.expect_fields).map(([k, v]) => `${k} = ${v}`).join(", ")}` : ""}` : `only what the agent says about ${sc.outcome.action.tool}`}</div>}
           {(sc.checks || []).map((c: any) => <div key={c.id} className="text-ink-2"><Icon name={c.type === "judge" ? "scale" : "tool"} size={13} className="inline mr-1" />{c.type === "judge" ? c.intent : c.description}</div>)}
-          {t.notes.map((n, i) => <div key={i} className="text-muted text-[13px]"><Icon name="info" size={13} className="inline mr-1" />{n}</div>)}
-          {t.problems.map((p, i) => <div key={i} className="text-bad text-[13px]">{p}</div>)}
+          {t.notes.map((n, i) => <div key={i} className="text-muted text-sm"><Icon name="info" size={13} className="inline mr-1" />{n}</div>)}
+          {t.problems.map((p, i) => <div key={i} className="text-bad text-sm">{p}</div>)}
         </div>
       )}
     </div>
@@ -217,9 +217,9 @@ export function PersonaLibrary({ projectKey, onAdded, detail }: { projectKey: st
         {data.library.map((p: LibraryPersona) => (
           <Choice key={p.id} data-library={p.id} on={picked.has(p.id) || p.added} off={p.added}
             onClick={() => setPicked((s) => { const n = new Set(s); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })}>
-            <div className="font-semibold flex items-center gap-2">{p.title}{p.added && <Chip className="text-[13px]">in this project</Chip>}</div>
-            <div className="text-ink-2 text-[13px]">{p.description}</div>
-            <div className="text-muted text-[13px] mt-1">{p.speech.accent ? `${p.speech.accent} accent` : p.speech.tts_voice?.replace("-medium", "")} · speed {p.speech.speaking_rate}
+            <div className="font-semibold flex items-center gap-2">{p.title}{p.added && <Chip className="text-sm">in this project</Chip>}</div>
+            <div className="text-ink-2 text-sm">{p.description}</div>
+            <div className="text-muted text-sm mt-1">{p.speech.accent ? `${p.speech.accent} accent` : p.speech.tts_voice?.replace("-medium", "")} · speed {p.speech.speaking_rate}
               {p.behaviour.interrupts ? " · interrupts" : ""}{p.behaviour.backchannels ? " · says mm-hm" : ""}{p.behaviour.noises ? " · coughs" : ""}{p.behaviour.pauses_mid_sentence ? " · pauses" : ""}
               {p.behaviour.goes_quiet ? " · goes quiet" : ""}{p.speech.volume_db ? ` · ${p.speech.volume_db} dB` : ""}</div>
           </Choice>

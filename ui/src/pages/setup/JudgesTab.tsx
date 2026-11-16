@@ -66,7 +66,7 @@ function JudgesForm({ detail, reload, catalog, suggested, defaults }: TabProps &
   const tiebreak = j.tiebreak !== false;
   const group = (title: string, items: RubricItem[], note?: string) => (
     <div className="grid gap-1.5" key={title}>
-      <div className="flex items-center gap-2 text-[13px] font-semibold text-ink-2">{title}{note && <span className="font-normal text-muted">{note}</span>}</div>
+      <div className="flex items-center gap-2 text-sm font-semibold text-ink-2">{title}{note && <span className="font-normal text-muted">{note}</span>}</div>
       <div className="grid gap-2 sm:grid-cols-2">
         {items.map((it) => (
           <div key={it.id} data-item={it.id} className={cx("rounded-lg border p-2.5", chosen.has(it.id) ? "border-accent/50 bg-accent-soft/40" : "border-line")}>
@@ -103,7 +103,7 @@ function JudgesForm({ detail, reload, catalog, suggested, defaults }: TabProps &
             {group("Every agent", catalog.universal)}
             {suggested && catalog.packs[suggested] && group(packLabel(suggested), catalog.packs[suggested], "suggested for this agent's industry")}
             <div>
-              <button type="button" id="other-packs" className="text-[13px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1" onClick={() => setShowOther((s) => !s)}>
+              <button type="button" id="other-packs" className="text-sm text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1" onClick={() => setShowOther((s) => !s)}>
                 <Icon name="chevron" size={13} className={cx("transition-transform", showOther && "rotate-90")} />
                 Other industries{otherOn ? ` (${otherOn} on)` : ""}
               </button>

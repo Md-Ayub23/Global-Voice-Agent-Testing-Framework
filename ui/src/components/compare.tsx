@@ -53,8 +53,8 @@ export function CompareCounts({ cmp, ab }: { cmp: Comparison; ab?: boolean }) {
     <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))]" id="compare-counts">
       {tiles.map(([label, count, cls]) => (
         <Card key={label} className="py-3">
-          <div className="text-[13px] font-medium text-muted">{label}</div>
-          <div className={`text-[24px] font-semibold tabular-nums leading-tight mt-0.5 ${cls}`}>{count}</div>
+          <div className="text-sm font-medium text-muted">{label}</div>
+          <div className={`text-xl font-semibold tabular-nums leading-tight mt-0.5 ${cls}`}>{count}</div>
         </Card>
       ))}
     </div>
@@ -107,17 +107,17 @@ export function ChangesList({ cmp, callHref, showSame, ab, keepRunId }: { cmp: C
         return (
           <tr key={`${c.kind}-${c.id}`} data-change={c.direction}>
             <td className="whitespace-nowrap"><Chip tone={d.tone} icon={d.icon}>{(ab && AB_DIRECTION[c.direction]) || d.label}</Chip></td>
-            <td className="min-w-[260px]">
-              <div className="text-[13px] font-medium text-muted">{KIND[c.kind]}</div>
+            <td className="min-w-65">
+              <div className="text-sm font-medium text-muted">{KIND[c.kind]}</div>
               <b>{href ? <a href={href}>{c.title}</a> : c.title}</b>
-              <div className="text-[13px] text-ink-2">{c.message}</div>
+              <div className="text-sm text-ink-2">{c.message}</div>
               {keepRunId && c.kind === "test" && c.direction === "better" && !c.id.startsWith("safety.") && (
                 <div className="mt-1.5"><KeepTestButton runId={keepRunId} scenarioId={c.id} /></div>
               )}
             </td>
             <td className="tabular-nums whitespace-nowrap">{c.band_before ? <>{value(c.before, c)} <span className="text-muted">({c.band_before})</span></> : value(c.before, c)}</td>
             <td className="tabular-nums whitespace-nowrap">{c.band_after ? <>{value(c.after, c)} <span className="text-muted">({c.band_after})</span></> : value(c.after, c)}</td>
-            {!ab && <td>{c.blocks ? <Badge status="FAIL" label="blocks" /> : <span className="text-muted text-[13px]">no</span>}</td>}
+            {!ab && <td>{c.blocks ? <Badge status="FAIL" label="blocks" /> : <span className="text-muted text-sm">no</span>}</td>}
           </tr>
         );
       })}

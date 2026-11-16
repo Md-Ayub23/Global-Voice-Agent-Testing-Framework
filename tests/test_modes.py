@@ -6,11 +6,11 @@ import http.client
 import io
 import json
 import threading
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
+from vatf.web.httpbase import BoundedHTTPServer
 from vatf import modes, readiness
 from vatf.cli import main
 from vatf.util import read_json
@@ -103,7 +103,7 @@ def test_a_caught_bug_gives_not_ready_with_proof_and_a_csv(tmp_path):
     run_dir = _only_run(tmp_path)
     rep = readiness.build(run_dir)
     assert rep["verdict"]["level"] == "not_ready"
-    assert rep["verdict"]["headline"].startswith("Not ready: ")
+    assert rep["verdict"]["headline"].startswith("Failed: ")   # a single test type fails; it does not judge the release
     assert "Bugs were switched on" in rep["verdict"]["line"]
     blocking = [f for f in rep["findings"] if f["blocks"]]
     assert blocking and rep["counts"]["blocking"] == len(blocking)
@@ -145,7 +145,7 @@ def test_the_run_form_passes_the_mode_on(tmp_path):
 @pytest.fixture
 def server(tmp_path):
     app = App(ROOT, tmp_path / "runs")
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    httpd = BoundedHTTPServer(("127.0.0.1", 0), make_handler(app))
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
     yield httpd.server_address[1]

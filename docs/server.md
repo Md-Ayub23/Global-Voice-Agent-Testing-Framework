@@ -35,7 +35,8 @@ uv run python -m vatf serve --host 0.0.0.0 --port 8765
 ## HTTPS (needed)
 
 Vocto speaks plain HTTP. Put a TLS proxy in front and set `VOCTO_SECURE_COOKIES=1`, so the sign-in
-cookie is only sent over HTTPS. With Caddy:
+cookie is only sent over HTTPS. Set `VOCTO_TRUSTED_PROXIES` to the proxy's address too, or every user
+shares the proxy's address and its sign-in limit (10 a minute). With Caddy:
 
 ```
 vocto.example.com {
@@ -49,6 +50,7 @@ vocto.example.com {
 |---|---|---|
 | `VOCTO_ALLOWED_HOSTS` | this machine's names | host names the server answers to, comma-separated (`*` = any, when the proxy checks) |
 | `VOCTO_SECURE_COOKIES` | off | send the sign-in cookie only over HTTPS |
+| `VOCTO_TRUSTED_PROXIES` | none | the HTTPS proxy's address or network (e.g. `127.0.0.1` or `172.16.0.0/12` for Docker), so sign-in limits and the audit log see each user's own address (from `X-Forwarded-For`) instead of the proxy's |
 | `VOCTO_SESSION_DAYS` / `VOCTO_SESSION_IDLE_HOURS` | 14 / 72 | longest a sign-in lasts / signed out after this long unused |
 | `VOCTO_LOGIN_PER_MINUTE` | 10 | sign-in attempts per address a minute (an account also locks for 15 minutes after 5 wrong passwords) |
 | `VOCTO_URL_POLICY` | `server` | typed-in agent URLs may not reach the server itself (docs/security.md) |

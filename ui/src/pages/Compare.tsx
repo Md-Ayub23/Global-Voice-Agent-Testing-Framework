@@ -22,7 +22,7 @@ export function ComparePage({ project, query }: { project: Project; query: URLSe
   const { data, error } = useLoad(() => Promise.all([
     api.get<RunSummary[]>(`/api/runs?project=${encodeURIComponent(project.key)}`),
     Promise.all(project.profiles.map((p) => api.get<BaselinePage>(`/api/project/${project.key}/baseline?file=${encodeURIComponent(p.file)}`).catch(() => null))),
-  ]), [project.key]);
+  ]), [project.key], { keep: true });
   const runs = (data?.[0] || []).filter((r) => r.decision);
   const bases = Object.fromEntries((data?.[1] || []).filter(Boolean).map((p) => [p!.file, p!.baseline?.run_id || null]));
   const b = query.get("b") || runs[0]?.run_id || "";
@@ -76,16 +76,16 @@ export function ComparePage({ project, query }: { project: Project; query: URLSe
           <Card flush>
             <CardHead level={2} title={ab ? "Where the versions differ" : "What changed"}
               sub={ab ? "tests that passed with one version and failed with the other, and numbers that differ by more than their limit"
-                : cmp.blocking ? `${plural(cmp.blocking, "change")} would block a release` : "Nothing set to block got worse"} className="px-[18px] pt-4 mb-2" />
+                : cmp.blocking ? `${plural(cmp.blocking, "change")} would block a release` : "Nothing set to block got worse"} className="px-4.5 pt-4 mb-2" />
             <ChangesList cmp={cmp} ab={!!ab} />
           </Card>
           <Card flush>
-            <CardHead level={2} title="Side by side" className="px-[18px] pt-4 mb-2" />
+            <CardHead level={2} title="Side by side" className="px-4.5 pt-4 mb-2" />
             <Table head={ab ? ["", "Version A", "Version B"] : ["", "Before", "Now"]}>
               <tr>
                 <td><b>Run</b></td>
                 {[cmp.runs.a, cmp.runs.b].map((r) => (
-                  <td key={r.run_id}><a href={runHref({ run_id: r.run_id, project_key: project.key })} className="font-mono text-[13px]">{r.run_id}</a>
+                  <td key={r.run_id}><a href={runHref({ run_id: r.run_id, project_key: project.key })} className="font-mono text-sm">{r.run_id}</a>
                     <div className="mt-1"><Badge status={r.decision} /></div></td>
                 ))}
               </tr>
@@ -103,7 +103,7 @@ export function ComparePage({ project, query }: { project: Project; query: URLSe
                   {(["a", "b"] as const).map((k) => {
                     const c = cost(k);
                     return <td key={k} className="tabular-nums">{c ? (c.per_task != null ? moneyIn(c.per_task, c.currency) : "no task done") : "no prices set"}
-                      {c && <div className="text-muted text-[13px]">{c.tasks_done} of {c.task_calls} done · {moneyIn(c.per_call, c.currency)} per call</div>}</td>;
+                      {c && <div className="text-muted text-sm">{c.tasks_done} of {c.task_calls} done · {moneyIn(c.per_call, c.currency)} per call</div>}</td>;
                   })}
                 </tr>
               )}
@@ -112,9 +112,9 @@ export function ComparePage({ project, query }: { project: Project; query: URLSe
                 const d = dirOf(sid);
                 return (
                   <tr key={sid} data-test={sid}>
-                    <td className="min-w-[220px]"><b>{(tb || ta).title || shortScenario(sid)}</b>
+                    <td className="min-w-55"><b>{(tb || ta).title || shortScenario(sid)}</b>
                       {d && (d !== "same" || ab) && <span className="ml-2"><Chip tone={DIRECTION[d].tone}>{(ab && AB_DIRECTION[d]) || DIRECTION[d].label}</Chip></span>}
-                      <div className="text-muted text-[13px] font-mono">{sid}</div></td>
+                      <div className="text-muted text-sm font-mono">{sid}</div></td>
                     <td className="tabular-nums">{ta ? `${ta.passed}/${ta.k} passed` : "—"}</td>
                     <td className="tabular-nums">{tb ? `${tb.passed}/${tb.k} passed` : "—"}</td>
                   </tr>
@@ -161,9 +161,9 @@ function ABCard({ project }: { project: Project }) {
   return (
     <Card className="mb-4" id="ab-card">
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex-1 min-w-[240px]">
+        <div className="flex-1 min-w-60">
           <div className="font-semibold">Test two versions (A/B)</div>
-          <div className="text-ink-2 text-[13px]">Run the same tests on two versions of this agent, for example the live one and a new prompt or model, and see which does better: tests passed, answer times, call quality and cost per task.</div>
+          <div className="text-ink-2 text-sm">Run the same tests on two versions of this agent, for example the live one and a new prompt or model, and see which does better: tests passed, answer times, call quality and cost per task.</div>
         </div>
         {!open && <Button id="ab-open" icon="compare" onClick={() => setOpen(true)}>Set up an A/B test</Button>}
       </div>
@@ -194,7 +194,7 @@ function ABCard({ project }: { project: Project }) {
           <div className="flex gap-2.5 items-center flex-wrap">
             <Button id="ab-start" variant="primary" icon="play" disabled={busy || sameVersion || !!activeJob} onClick={() => void start()}>Run both versions</Button>
             <Button variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
-            <span className="text-muted text-[13px]">Every test case of the channel runs with A, then with B. Then this page shows B against A.</span>
+            <span className="text-muted text-sm">Every test case of the channel runs with A, then with B. Then this page shows B against A.</span>
           </div>
         </div>
       )}

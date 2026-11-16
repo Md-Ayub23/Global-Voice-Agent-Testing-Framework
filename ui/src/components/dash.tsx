@@ -55,11 +55,11 @@ export function KpiStrip({ items, id }: { items: { label: ReactNode; value: Reac
   return (
     <div id={id} className="grid grid-cols-2 lg:grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3">
       {items.map((it, i) => (
-        <div key={i} className="glass rounded-[20px] px-[18px] py-4 min-w-0">
-          <div className="text-muted text-[13px] font-medium truncate">{it.label}</div>
-          <div className="text-[30px] font-bold tracking-[-.035em] tabular-nums leading-tight mt-1"><CountUp value={it.value} /></div>
+        <div key={i} className="glass rounded-3xl px-4.5 py-4 min-w-0">
+          <div className="text-muted text-sm font-medium truncate">{it.label}</div>
+          <div className="text-2xl font-bold tracking-[-.035em] tabular-nums leading-tight mt-1.5"><CountUp value={it.value} /></div>
           {it.foot != null && (
-            <div className="text-ink-2 text-[13px] mt-0.5 flex items-center gap-1.5 min-w-0">
+            <div className="text-ink-2 text-sm mt-0.5 flex items-center gap-1.5 min-w-0">
               {it.tone && <i className={cx("size-1.5 rounded-full flex-none", it.tone === "good" ? "bg-good" : it.tone === "warn" ? "bg-warn" : "bg-bad")} />}
               <span className="truncate">{it.foot}</span>
             </div>
@@ -75,13 +75,13 @@ export function Kpi({ icon, label, value, foot, tone: t = "accent" }: {
 }) {
   const dot = { accent: "bg-accent", good: "bg-good", warn: "bg-warn", bad: "bg-bad" }[t];
   return (
-    <div className="glass rounded-[20px] px-4 py-3.5 grid gap-1 min-w-0">
-      <div className="flex items-center gap-2 text-ink-2 text-[13px]">
-        <Icon name={icon} size={14} className="text-muted" />{label}
-        <i className={cx("ml-auto size-1.5 rounded-full", dot)} />
+    <div className="glass rounded-3xl px-4.5 py-4 min-w-0">
+      <div className="flex items-center gap-2 text-muted text-sm font-medium min-w-0">
+        <Icon name={icon} size={14} className="flex-none" /><span className="truncate">{label}</span>
+        <i className={cx("ml-auto size-1.5 rounded-full flex-none", dot)} />
       </div>
-      <div className="text-[28px] font-bold tracking-[-.035em] tabular-nums leading-[1.15] mt-1"><CountUp value={value} /></div>
-      {foot && <div className="text-muted text-[13px]">{foot}</div>}
+      <div className="text-2xl font-bold tracking-[-.035em] tabular-nums leading-tight mt-1.5"><CountUp value={value} /></div>
+      {foot && <div className="text-ink-2 text-sm mt-0.5">{foot}</div>}
     </div>
   );
 }
@@ -113,10 +113,10 @@ function DayColumn({ d, x, slot, y0, scale, bar }: { d: DecisionDay; x: number; 
   const segs = SERIES.filter((s) => (d[s.key] as number) > 0);
   return (
     <TipG content={(
-      <div className="grid gap-1 min-w-[150px]">
+      <div className="grid gap-1 min-w-37.5">
         <b>{new Date(`${d.day}T12:00:00Z`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}</b>
         {total ? SERIES.map((s) => (d[s.key] as number) > 0 && (
-          <div key={s.key} className="flex items-center gap-2"><i className="size-2.5 rounded-[3px]" style={{ background: s.color }} />
+          <div key={s.key} className="flex items-center gap-2"><i className="size-2.5 rounded-sm" style={{ background: s.color }} />
             <span className="flex-1 text-ink-2">{s.label}</span><b className="tabular-nums">{d[s.key]}</b></div>
         )) : <span className="text-muted">No runs</span>}
       </div>
@@ -176,8 +176,8 @@ export function ActivityChart({ days }: { days: DecisionDay[] }) {
           <text key={d.day} x={i === days.length - 1 ? W - 2 : left + i * slot + slot / 2} y={H - 5} textAnchor={i === days.length - 1 ? "end" : "middle"}>{i === days.length - 1 ? "Today" : dayLabel(d.day)}</text>
         ))}
       </svg>
-      <div className="flex gap-3.5 flex-wrap text-[13px] text-ink-2 mt-2">
-        {SERIES.map((s) => <span key={s.key}><i className="inline-block size-2.5 rounded-[3px] mr-1.5 -mb-px" style={{ background: s.color }} />{s.label}</span>)}
+      <div className="flex gap-3.5 flex-wrap text-sm text-ink-2 mt-2">
+        {SERIES.map((s) => <span key={s.key}><i className="inline-block size-2.5 rounded-sm mr-1.5 -mb-px" style={{ background: s.color }} />{s.label}</span>)}
       </div>
     </div>
   );
@@ -187,11 +187,11 @@ export function ActivityChart({ days }: { days: DecisionDay[] }) {
 
 export function DomainBars({ rows }: { rows: { domain: string; projects: number }[] }) {
   const max = Math.max(1, ...rows.map((r) => r.projects));
-  if (!rows.length) return <div className="text-muted text-[13px]">No projects yet.</div>;
+  if (!rows.length) return <div className="text-muted text-sm">No projects yet.</div>;
   return (
     <div className="grid gap-2.5">
       {rows.map((r) => (
-        <div key={r.domain} className="grid grid-cols-[110px_minmax(0,1fr)_28px] items-center gap-3 text-[13px]">
+        <div key={r.domain} className="grid grid-cols-[110px_minmax(0,1fr)_28px] items-center gap-3 text-sm">
           <span className="text-ink-2 truncate" title={domainLabel(r.domain)}>{domainLabel(r.domain)}</span>
           <span className="h-2.5 rounded-r-[4px] bg-surface-3 overflow-hidden">
             <span className="grow-x block h-full rounded-r-[4px] bg-accent" style={{ width: `${(r.projects / max) * 100}%` }} />
@@ -210,15 +210,15 @@ function HistoryTile({ d }: { d: Decision }) {
   const tip = useTip(statusLabel(d));
   const bg = { good: "bg-good", bad: "bg-bad", warn: "bg-warn", neutral: "bg-line-strong", run: "bg-accent" }[t];
   return (
-    <span {...tip} aria-label={statusLabel(d)} className={cx("size-[15px] rounded-[4px] grid place-items-center text-white flex-none", bg)}>
+    <span {...tip} aria-label={statusLabel(d)} className={cx("size-3.75 rounded-sm grid place-items-center text-white flex-none", bg)}>
       <Icon name={t === "good" ? "check" : t === "bad" ? "x" : "alert"} size={9} strokeWidth={3.4} />
     </span>
   );
 }
 
 export function MiniHistory({ items, empty = "No runs yet" }: { items: Decision[]; empty?: string }) {
-  if (!items.length) return <span className="text-muted text-[13px]">{empty}</span>;
-  return <span className="inline-flex gap-[3px] items-center">{items.map((d, i) => <HistoryTile key={i} d={d} />)}</span>;
+  if (!items.length) return <span className="text-muted text-sm">{empty}</span>;
+  return <span className="inline-flex gap-0.75 items-center">{items.map((d, i) => <HistoryTile key={i} d={d} />)}</span>;
 }
 
 export function When({ iso }: { iso: string | null | undefined }) {
@@ -268,7 +268,7 @@ export function RunLine({ points, max, fmt, tick, limit, limitLabel, onOpen, hei
         {drawn.length > 1 && <path d={path} pathLength={1} className="line-draw" fill="none" stroke="url(#aur-line)" strokeWidth={2.25} strokeLinejoin="round" strokeLinecap="round" />}
         {drawn.map(({ p, i }) => (
           <TipG key={p.run_id} content={(
-            <div className="grid gap-0.5 min-w-[140px]"><b>{fmt(p.value as number)}</b>
+            <div className="grid gap-0.5 min-w-35"><b>{fmt(p.value as number)}</b>
               <span className="text-ink-2">{p.label}</span><span className="text-muted">{p.at ? fmtDate(p.at) : ""}</span></div>
           )}>
             <circle cx={x(i)} cy={y(p.value as number)} r={9} fill="transparent" className={onOpen ? "cursor-pointer" : undefined}

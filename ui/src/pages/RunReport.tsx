@@ -10,7 +10,9 @@ import { SHAPE_LABEL, fmtSeconds } from "../lib/load";
 import { EvRef, Hero, OptionChips, heroToneOf } from "../components/runbits";
 import { Help } from "../components/form";
 import { TypeAnalysis } from "../components/typereport";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, Legend, Notice, Skeleton, Table, Tabs, rowLink } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, EmptyState, Legend, Notice, PageHead, Skeleton, Table, Tabs, rowLink } from "../components/ui";
+import { modeHref } from "../components/modecards";
+import { useCanEdit } from "../lib/auth";
 import { api } from "../lib/api";
 import { useCrumbs, useLoad, useApp } from "../lib/app";
 import { modeLabel, projectHref, runHref } from "../lib/links";
@@ -22,7 +24,7 @@ import { PACK_TITLES } from "../lib/safety";
 import type { BaselinePage, CallBrief, DecisionDoc, LoadPage, Project, Readiness, RunDetail, SafetyResult } from "../lib/types";
 import { AnalysisCard } from "../components/analysis";
 import { ConditionsCard, CoverageCard, FailuresCard, ExecutiveSummary, FindingsList, MethodCard, MetricsCard, Scorecard, VerdictBanner, isReadiness } from "../components/readiness";
-import { modeTitle } from "../lib/modes";
+import { levelShort, modeTitle } from "../lib/modes";
 
 // The width of an element, kept up to date as the window resizes (for SVG charts drawn to fit).
 // The element appears only after the data loads, so this is a callback ref, not useRef.
@@ -44,7 +46,7 @@ function ScoreCard({ ring, label, children }: { ring: ReactNode; label: string; 
     <Card className="flex items-center gap-3.5">
       {ring}
       <div className="min-w-0">
-        <div className="text-ink-2 font-semibold text-[13px]">{label}</div>
+        <div className="text-ink-2 font-semibold text-sm">{label}</div>
         {children}
       </div>
     </Card>
@@ -57,21 +59,21 @@ function CallsTable({ calls, runId, voice, running }: { calls: CallBrief[]; runI
       {calls.map((c) => (
         <tr key={c.test_id} className={rowLink} data-href={runHref({ run_id: runId }, `/calls/${c.test_id}`)} onClick={() => navigate(runHref({ run_id: runId }, `/calls/${c.test_id}`))}>
           <td>{c.status ? <Badge status={c.status} /> : <Badge status={running ? "running" : "interrupted"} />}</td>
-          <td className="min-w-[220px]">
+          <td className="min-w-55">
             <b>{shortScenario(c.scenario_id)}</b>{" "}
             <span className="text-muted">· repeat {c.repeat}{c.attempt > 1 ? ` · attempt ${c.attempt}` : ""}</span>
-            {c.headline && <div className="text-[13px] text-ink-2">{c.headline}</div>}
+            {c.headline && <div className="text-sm text-ink-2">{c.headline}</div>}
             {c.failed_checks?.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1">{c.failed_checks.map((x) => <Chip key={x} tone="bad">{x}</Chip>)}</div>
             )}
             {(c.needs_you?.length ?? 0) > 0 && (
-              <div className="flex flex-wrap items-center gap-1 mt-1 text-[13px] text-muted">
-                Needs you (the judges split):{c.needs_you!.map((x) => <Chip key={x} tone="warn" icon="help" className="text-[13px]">{x}</Chip>)}
+              <div className="flex flex-wrap items-center gap-1 mt-1 text-sm text-muted">
+                Needs you (the judges split):{c.needs_you!.map((x) => <Chip key={x} tone="warn" icon="help" className="text-sm">{x}</Chip>)}
               </div>
             )}
             {(c.judge_flags?.length ?? 0) > 0 && (
-              <div className="flex flex-wrap items-center gap-1 mt-1 text-[13px] text-muted">
-                Judges' opinion, not trusted yet:{c.judge_flags!.map((x) => <Chip key={x} icon="info" className="text-[13px]">{x}</Chip>)}
+              <div className="flex flex-wrap items-center gap-1 mt-1 text-sm text-muted">
+                Judges' opinion, not trusted yet:{c.judge_flags!.map((x) => <Chip key={x} icon="info" className="text-sm">{x}</Chip>)}
               </div>
             )}
           </td>
@@ -79,7 +81,7 @@ function CallsTable({ calls, runId, voice, running }: { calls: CallBrief[]; runI
           <td className="tabular-nums whitespace-nowrap">{fmtDuration(c.metrics?.duration_ms)}</td>
           {voice && <td className="tabular-nums whitespace-nowrap">{fmtMs(c.metrics?.latency_p50_ms)}</td>}
           <td className="tabular-nums">{money(c.cost_usd)}</td>
-          <td className="font-mono text-[13px] text-muted">{c.test_id}</td>
+          <td className="font-mono text-sm text-muted">{c.test_id}</td>
         </tr>
       ))}
     </Table>
@@ -87,10 +89,16 @@ function CallsTable({ calls, runId, voice, running }: { calls: CallBrief[]; runI
 }
 
 export function RunReport({ project, runId }: { project: Project; runId: string }) {
-  useCrumbs([{ label: project.name, href: projectHref(project.key) },
-    { label: "All runs", href: projectHref(project.key, "/runs") }, { label: runId }]);
   const { system } = useApp();
-  const { data: run, error } = useLoad(() => api.get<RunDetail>(`/api/runs/${runId}`), [runId]);
+  const canEdit = useCanEdit();
+  const { data: run, error } = useLoad(() => api.get<RunDetail>(`/api/runs/${runId}`), [runId], { keep: true });
+  // Where this run belongs: its test type's reports (a run made before test types: All runs).
+  const runMode = run?.summary.test_mode || (run?.summary.kind === "load" ? "load" : null);
+  const home = runMode && runMode !== "monitor"
+    ? { href: modeHref(project.key, runMode, "/reports"), label: `${modeTitle(runMode)} reports`, crumb: modeTitle(runMode), crumbHref: modeHref(project.key, runMode) }
+    : { href: projectHref(project.key, "/runs"), label: "All runs", crumb: "All runs", crumbHref: projectHref(project.key, "/runs") };
+  useCrumbs([{ label: project.name, href: projectHref(project.key) },
+    { label: home.crumb, href: home.crumbHref }, { label: run ? `Run of ${fmtDate(run.summary.started_at)}` : "Run" }]);
   const profileFile = run?.summary.profile_file || "profile.yaml";
   const { data: basePage, reload: reloadBase } = useLoad(
     () => api.get<BaselinePage>(`/api/project/${project.key}/baseline?file=${encodeURIComponent(profileFile)}`).catch(() => null),
@@ -126,7 +134,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           const [test, check] = ref.split("/");
           return <EvRef key={ref} href={callLink(test)}>{test.slice(-9)}{check ? ` · ${check}` : ""}</EvRef>;
         })}
-        {(r.refs || []).length > 8 && <span className="text-muted text-[13px]">+{r.refs!.length - 8} more</span>}
+        {(r.refs || []).length > 8 && <span className="text-muted text-sm">+{r.refs!.length - 8} more</span>}
       </span>
     </span>
   ));
@@ -164,38 +172,37 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
 
   return (
     <>
-      <div className="flex items-end gap-4 mt-3 mb-6 flex-wrap">
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{modeTitle(sm.test_mode || (isLoad ? "load" : null))} test <span className="text-muted font-medium">· {modeLabel(sm.mode)}</span></h1>
-            {isLoad && info?.load && <Chip tone="accent" icon="activity">{SHAPE_LABEL[info.load.shape]} to {info.load.calls_at_once} at once</Chip>}
-            <OptionChips run={sm} />
-          </div>
-          <div className="mt-1 text-ink-2 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[13px]">{runId}</span><span className="text-muted">·</span>{fmtDate(sm.started_at)}
-            {took != null && <><span className="text-muted">·</span>took {fmtDuration(took)}</>}
-            <span className="text-muted">·</span>{plural(finals.length, "call")}
-            <span className="text-muted">·</span>framework cost {money(sm.cost_usd)}
-            {sm.pii_masked === false && <Chip tone="bad" icon="alert">not masked</Chip>}
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2.5">
-          {d && !bugs && sm.status === "finished" && (
-            <SetBaselineButton runId={runId} current={(isLoad ? loadPage?.baseline?.run_id : basePage?.baseline?.run_id) === runId}
-              onDone={isLoad ? reloadLoad : reloadBase} />
-          )}
-          {d && <Button href={projectHref(project.key, `/compare?b=${runId}`)} icon="compare">Compare</Button>}
-          {info && <Button href={projectHref(project.key, isLoad ? `/test/load?file=${encodeURIComponent(profileFile)}` : `/test/${sm.test_mode && sm.test_mode !== "monitor" ? sm.test_mode : "full"}?from=${runId}`)} icon="refresh">Run again</Button>}
-          {rd && <Button href={projectHref(project.key, `/runs/${runId}/print`)} variant="primary" icon="printer" id="pdf-report">PDF report</Button>}
-          {rd && <Button href={`/api/runs/${runId}/export.csv`} icon="download" id="csv-export">CSV</Button>}
-          {run.files["transcript.txt"] && <Button href={`/runs/${runId}/transcript.txt`} target="_blank" icon="file">Transcript</Button>}
-        </div>
-      </div>
+      <PageHead
+        back={{ href: home.href, label: home.label }}
+        title={<div className="flex flex-wrap items-center gap-2.5">
+          <h1 className="page-title">{modeTitle(runMode)} test</h1>
+          {isLoad && info?.load && <Chip tone="accent" icon="activity">{SHAPE_LABEL[info.load.shape]} to {info.load.calls_at_once} at once</Chip>}
+          <OptionChips run={sm} />
+        </div>}
+        meta={<>
+          <span>{fmtDate(sm.started_at)}</span>
+          {took != null && <><span aria-hidden="true">·</span><span>took {fmtDuration(took)}</span></>}
+          <span aria-hidden="true">·</span><span>{plural(finals.length, "call")}</span>
+          <span aria-hidden="true">·</span><span>Vocto's own cost {money(sm.cost_usd)}</span>
+          <span aria-hidden="true">·</span><span className="font-mono text-2xs" title="Run id">{runId}</span>
+          {sm.pii_masked === false && <Chip tone="bad" icon="alert">names and dates not masked</Chip>}
+        </>}
+      >
+        {canEdit && info && <Button href={projectHref(project.key, isLoad ? `/test/load?file=${encodeURIComponent(profileFile)}` : `/test/${sm.test_mode && sm.test_mode !== "monitor" ? sm.test_mode : "full"}/run?from=${runId}`)} icon="refresh" id="run-again">Run again</Button>}
+        {canEdit && d && !bugs && sm.status === "finished" && (
+          <SetBaselineButton runId={runId} current={(isLoad ? loadPage?.baseline?.run_id : basePage?.baseline?.run_id) === runId}
+            onDone={isLoad ? reloadLoad : reloadBase} />
+        )}
+        {d && <Button href={projectHref(project.key, `/compare?b=${runId}`)} icon="compare">Compare</Button>}
+        {rd && <Button href={projectHref(project.key, `/runs/${runId}/print`)} icon="printer" id="pdf-report">PDF</Button>}
+        {rd && <Button href={`/api/runs/${runId}/export.csv`} icon="download" id="csv-export">CSV</Button>}
+        {run.files["transcript.txt"] && <Button href={`/runs/${runId}/transcript.txt`} target="_blank" icon="file">Transcript</Button>}
+      </PageHead>
 
       <div className="flex flex-col gap-4">
         {rd ? (
           <>
-            <VerdictBanner r={rd} note={bugs ? <Notice tone="warn" icon="info">Bug switches were on ({bugs}) to prove Vocto catches them, so “Not ready” is the right answer here.</Notice> : undefined} />
+            <VerdictBanner r={rd} note={bugs ? <Notice tone="warn" icon="info">Bug switches were on ({bugs}) to prove Vocto catches them, so “{levelShort("not_ready", runMode)}” is the right answer here.</Notice> : undefined} />
             {rd.summary.length > 1 && <ExecutiveSummary r={rd} skipVerdict />}
             <Scorecard r={rd} />
           </>
@@ -205,7 +212,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
             eyebrow="Release decision"
             title={<>{decisionTitle(d.decision)}</>}
             actions={bugs ? (
-              <Notice tone="warn" icon="info" className="max-w-[360px]">Bug switches were on ({bugs}), so “Not ready” here means Vocto caught them.</Notice>
+              <Notice tone="warn" icon="info" className="max-w-90">Bug switches were on ({bugs}), so “Not ready” here means Vocto caught them.</Notice>
             ) : undefined}
             reasons={reasons}
           >{d.basis && <BasisLine basis={d.basis} />}</Hero>
@@ -227,25 +234,25 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
           <div className="grid gap-4 grid-cols-[repeat(auto-fit,minmax(200px,1fr))]">
             {Object.entries(d.scorecard).map(([name, s]) => (
               <ScoreCard key={name} ring={<Ring value={s.score} />} label={name[0].toUpperCase() + name.slice(1)}>
-                <div className="text-[13px] text-ink-2">{s.passed} passed · {s.failed} failed</div>
-                <div className="text-[13px] text-muted">coverage {pct(s.coverage)} of {plural(s.total, "check")}</div>
+                <div className="text-sm text-ink-2">{s.passed} passed · {s.failed} failed</div>
+                <div className="text-sm text-muted">coverage {pct(s.coverage)} of {plural(s.total, "check")}</div>
               </ScoreCard>
             ))}
             <ScoreCard label="Coverage" ring={<Ring value={d.coverage.ratio} toneName={d.coverage.ratio >= d.coverage.min_required ? "good" : "warn"} />}>
-              <div className="text-[13px] text-ink-2">{d.coverage.verified_calls} of {d.coverage.planned_calls} calls verified</div>
-              <div className="text-[13px] text-muted">needs {pct(d.coverage.min_required)}{d.coverage.error_calls ? ` · ${plural(d.coverage.error_calls, "Vocto error")}` : ""}</div>
+              <div className="text-sm text-ink-2">{d.coverage.verified_calls} of {d.coverage.planned_calls} calls verified</div>
+              <div className="text-sm text-muted">needs {pct(d.coverage.min_required)}{d.coverage.error_calls ? ` · ${plural(d.coverage.error_calls, "Vocto error")}` : ""}</div>
             </ScoreCard>
             {voice && (
               <Card className="grid gap-1">
-                <div className="flex items-center gap-2 text-ink-2 font-semibold text-[13px]"><Icon name="clock" />Response time</div>
-                <div className="text-[28px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">
+                <div className="flex items-center gap-2 text-ink-2 font-semibold text-sm"><Icon name="clock" />Response time</div>
+                <div className="text-2xl font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">
                   {fmtMs(d.latency.p50_ms)}<small className="text-sm font-semibold text-muted ml-1">p50</small>
                 </div>
-                <div className="text-muted text-[13px]">p95 {fmtMs(d.latency.p95_ms)} · limits {fmtMs(d.latency.p50_limit_ms)} / {fmtMs(d.latency.p95_limit_ms)}</div>
+                <div className="text-muted text-sm">p95 {fmtMs(d.latency.p95_ms)} · limits {fmtMs(d.latency.p50_limit_ms)} / {fmtMs(d.latency.p95_limit_ms)}</div>
                 <div className="flex items-center gap-2 mt-1.5">
                   {d.latency.within_limits == null ? <Badge status="NOT_VERIFIED" label="not timed" />
                     : d.latency.within_limits ? <Badge status="PASS" label="within limits" /> : <Badge status="FAIL" label="too slow" />}
-                  <span className="text-muted text-[13px]">{d.latency.turns_measured} answers timed</span>
+                  <span className="text-muted text-sm">{d.latency.turns_measured} answers timed</span>
                 </div>
               </Card>
             )}
@@ -289,10 +296,10 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
                 const calls = finals.filter((c) => c.scenario_id === r.scenario_id).sort((a, b) => a.repeat - b.repeat);
                 return (
                   <tr key={r.scenario_id}>
-                    <td><b>{shortScenario(r.scenario_id)}</b><div className="text-muted text-[13px] font-mono">{r.scenario_id}</div></td>
+                    <td><b>{shortScenario(r.scenario_id)}</b><div className="text-muted text-sm font-mono">{r.scenario_id}</div></td>
                     <td>{r.criticality === "critical" ? <Chip tone="bad" icon="flag">critical</Chip> : <Chip>normal</Chip>}</td>
                     <td>
-                      <div className="flex gap-[5px]">
+                      <div className="flex gap-1.25">
                         {calls.map((c) => (
                           <Tip key={c.test_id} content={<>repeat {c.repeat}: {c.status || "not judged"}<br />{c.headline || ""}</>}>
                             <a href={callLink(c.test_id)} className="hover:no-underline">
@@ -326,24 +333,24 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
         )}
 
         {shown === "calls" && <Card flush>
-          <CardHead level={2} title="Calls" sub="click a call to see the conversation, the checks and the evidence" className="px-[18px] pt-4 mb-2" />
+          <CardHead level={2} title="Calls" sub="click a call to see the conversation, the checks and the evidence" className="px-4.5 pt-4 mb-2" />
           {finals.length ? <CallsTable calls={finals} runId={runId} voice={voice} running={running} />
             : <EmptyState title="No calls" text="No call finished in this run." icon="phone" />}
         </Card>}
 
         {shown === "calls" && reruns.length > 0 && (
           <Card flush>
-            <CardHead level={2} title="Reruns after Vocto errors" sub="Vocto's own failures: rerun automatically, never blamed on the agent" className="px-[18px] pt-4 mb-2" />
+            <CardHead level={2} title="Reruns after Vocto errors" sub="Vocto's own failures: rerun automatically, never blamed on the agent" className="px-4.5 pt-4 mb-2" />
             <CallsTable calls={reruns} runId={runId} voice={voice} running={running} />
           </Card>
         )}
 
         {shown === "setup" && info && (
-          <details open className="glass rounded-[20px] p-5 group">
+          <details open className="glass rounded-3xl p-5 group">
             <summary className="cursor-pointer font-semibold flex items-center gap-2 list-none">
               <Icon name="arrow" className="transition-transform group-open:rotate-90" />How this run was set up
             </summary>
-            <dl className="mt-3 grid gap-x-6 gap-y-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 text-[13px]">
+            <dl className="mt-3 grid gap-x-6 gap-y-2.5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 text-sm">
               {([
                 ["Channel", modeLabel(info.mode)],
                 ["Caller", info.load ? (info.load.settings.caller === "claude" && !info.offline ? "Claude" : "Scripted lines and rules (free)")
@@ -364,7 +371,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
                 ["Personal data", info.pii_masked ? "Masked" : "Not masked"],
                 ["Vocto version", info.framework_version],
               ] as [string, string][]).map(([k, v]) => (
-                <div key={k}><dt className="text-muted text-[13px]">{k}</dt><dd className="font-medium break-words">{v}</dd></div>
+                <div key={k}><dt className="text-muted text-sm">{k}</dt><dd className="font-medium break-words">{v}</dd></div>
               ))}
             </dl>
           </details>
@@ -376,7 +383,7 @@ export function RunReport({ project, runId }: { project: Project; runId: string 
 
 // A small count next to a tab name.
 function Count({ n, bad }: { n: number; bad?: boolean }) {
-  return <span className={cx("ml-1 px-1.5 rounded-full text-[13px] font-semibold tabular-nums", bad ? "bg-bad-soft text-bad" : "bg-surface-3 text-ink-2")}>{n}</span>;
+  return <span className={cx("ml-1 px-1.5 rounded-full text-sm font-semibold tabular-nums", bad ? "bg-bad-soft text-bad" : "bg-surface-3 text-ink-2")}>{n}</span>;
 }
 
 // One line under the decision: which layer decided, and the judge opinions that were left out of it.
@@ -384,7 +391,7 @@ function BasisLine({ basis }: { basis: NonNullable<DecisionDoc["basis"]> }) {
   const layers = basis.decided_by.map((l) => LAYER_WORDS[l]);
   const by = layers.length > 1 ? `${layers.slice(0, -1).join(", ")} and ${layers[layers.length - 1]}` : layers[0];
   return (
-    <div id="decision-basis" className="mt-1.5 text-[13px] text-ink-2 max-w-[640px]">
+    <div id="decision-basis" className="mt-1.5 text-sm text-ink-2 max-w-160">
       Decided by {by}.
       {basis.judge_opinions > 0 && <> {basis.judge_opinions} AI judge opinion{basis.judge_opinions === 1 ? "" : "s"} from items not trusted yet
         {basis.opinions_to_label ? ` (${basis.opinions_to_label} where the judges split and want your label)` : ""} did not change this result.</>}
@@ -402,7 +409,7 @@ function HeardCard({ heard, callLink }: { heard: NonNullable<DecisionDoc["heard_
       {bad ? (
         <div className="grid gap-1.5">
           {heard.misheard.map((m, i) => (
-            <a key={i} href={callLink(m.test_id)} className="text-[13px] text-ink flex flex-wrap gap-x-2 hover:no-underline hover:bg-surface-2/60 rounded-lg px-2 py-1">
+            <a key={i} href={callLink(m.test_id)} className="text-sm text-ink flex flex-wrap gap-x-2 hover:no-underline hover:bg-surface-2/60 rounded-lg px-2 py-1">
               <span>said <b className="font-mono">{m.said}</b></span><span className="text-muted">heard as “{m.heard}”</span>
             </a>
           ))}
@@ -419,7 +426,7 @@ function JudgesCard({ judges, projectKey, relabelled }: { judges: NonNullable<De
   const n = (v: number, cls: string) => <span className={cx("tabular-nums", v ? cls : "text-muted")}>{v}</span>;
   return (
     <Card flush id="run-judges">
-      <CardHead level={2} title="AI judges" className="px-[18px] pt-4 mb-2"
+      <CardHead level={2} title="AI judges" className="px-4.5 pt-4 mb-2"
         sub={`tone, facts and scope · a trusted item's failure is a problem; the others are opinions and don't change the decision${relabelled ? " · decision updated after your labels" : ""}`}>
         <Button size="sm" variant={review ? "primary" : "ghost"} icon="tag" href={projectHref(projectKey, "/labels")}>
           {review ? `Label ${review} that need you` : "Label calls"}
@@ -428,7 +435,7 @@ function JudgesCard({ judges, projectKey, relabelled }: { judges: NonNullable<De
       <Table head={["Item", "Trust", "Passed", "Failed", "Needs you", "Didn't come up"]}>
         {judges.map((j) => (
           <tr key={j.rubric_item}>
-            <td><b>{j.title}</b><div className="text-muted text-[13px]">{j.calibration}</div></td>
+            <td><b>{j.title}</b><div className="text-muted text-sm">{j.calibration}</div></td>
             <td>{j.can_block ? <Chip tone="good" icon="shield">trusted</Chip> : <Chip icon="info">opinion only</Chip>}</td>
             <td>{n(j.passed, "text-good font-semibold")}</td>
             <td>{j.can_block ? n(j.failed, "text-bad font-semibold") : <span className={cx("tabular-nums", j.failed ? "text-ink-2 font-semibold" : "text-muted")}>{j.failed}{j.failed ? " (opinion)" : ""}</span>}</td>
@@ -461,18 +468,18 @@ function SafetyRunCard({ safety, callLink, projectKey }: { safety: SafetyResult;
         <div className="grid gap-2" id="safety-findings">
           {safety.findings.map((f, i) => (
             <a key={i} href={callLink(f.test_id)} data-finding={f.check_id}
-              className="flex items-start gap-3 p-3 border border-line rounded-[12px] hover:bg-surface-2/60 hover:no-underline transition-colors text-ink">
+              className="flex items-start gap-3 p-3 border border-line rounded-xl hover:bg-surface-2/60 hover:no-underline transition-colors text-ink">
               {f.result === "NEEDS_REVIEW" ? <Chip tone="warn" icon="help" className="font-bold">Needs you</Chip>
                 : f.result === "FAIL" && !f.can_block ? <Chip icon="info" className="font-bold">Opinion: fail</Chip>
                 : <Badge status={f.result} label={f.result === "FAIL" ? "Problem" : undefined} />}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <b className="text-[13.5px]">{f.title}</b>
-                  {f.severity === "blocker" && f.can_block && <Chip tone="bad" className="text-[13px]">blocker</Chip>}
-                  {!f.can_block && <Chip icon={f.result === "NEEDS_REVIEW" ? "help" : "info"} tone={f.result === "NEEDS_REVIEW" ? "warn" : "default"} className="text-[13px]">
+                  <b className="text-sm">{f.title}</b>
+                  {f.severity === "blocker" && f.can_block && <Chip tone="bad" className="text-sm">blocker</Chip>}
+                  {!f.can_block && <Chip icon={f.result === "NEEDS_REVIEW" ? "help" : "info"} tone={f.result === "NEEDS_REVIEW" ? "warn" : "default"} className="text-sm">
                     {f.result === "NEEDS_REVIEW" ? "needs you · a person confirms safety findings" : "judges' opinion"}</Chip>}
                 </div>
-                <div className="text-[13px] text-ink-2 mt-0.5 break-words">{f.message}</div>
+                <div className="text-sm text-ink-2 mt-0.5 break-words">{f.message}</div>
               </div>
               <Icon name="arrow" className="text-muted mt-1 flex-none" />
             </a>

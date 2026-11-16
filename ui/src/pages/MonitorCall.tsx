@@ -88,7 +88,7 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
       <div className="flex items-end gap-4 mt-2 mb-5 flex-wrap">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-[24px] font-semibold tracking-[-.025em]">Real call</h1>
+            <h1 className="page-title">Real call</h1>
             {v ? <Badge status={v.status} /> : <Badge status="interrupted" label="not scored" />}
             {v?.flagged && <Chip tone="warn" icon="flag">flagged</Chip>}
           </div>
@@ -131,7 +131,7 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
             <Table compact head={["#", "Who", "What happened"]}>
               {data.story.map((row) => (
                 <tr key={row.seq}>
-                  <td className="font-mono text-[13px] text-muted">#{row.seq}</td>
+                  <td className="font-mono text-sm text-muted">#{row.seq}</td>
                   <td className="whitespace-nowrap"><b>{row.who}</b></td>
                   <td>{row.text}</td>
                 </tr>
@@ -145,8 +145,8 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
           {sideShown === "checks" && (
             <Card >
               <CardHead title="Checks" sub={v ? `${own.filter((x) => x.result === "PASS").length} of ${own.length} passed` : undefined} />
-              <div id="checks">{v ? <ChecksList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-[13px]">This call has not been scored.</div>}</div>
-              <div className="text-muted text-[13px] mt-2">Real calls have no script, so only checks that fit any call run here; the AI judges cover the rest.</div>
+              <div id="checks">{v ? <ChecksList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-sm">This call has not been scored.</div>}</div>
+              <div className="text-muted text-sm mt-2">Real calls have no script, so only checks that fit any call run here; the AI judges cover the rest.</div>
             </Card>
           )}
           {sideShown === "judges" && v && (
@@ -154,17 +154,17 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
               <CardHead title="AI judges" sub={JUDGE_STATE[v.judges?.state] || v.judges?.state}>
                 <Button size="sm" variant="ghost" href={projectHref(project.key, "/judges")}>About</Button>
               </CardHead>
-              {v.judges?.note && <Notice className="mb-3 text-[13px]">{v.judges.note}</Notice>}
-              {judgedRan ? <JudgeList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-[13px]">The judges haven't looked at this call.</div>}
+              {v.judges?.note && <Notice className="mb-3 text-sm">{v.judges.note}</Notice>}
+              {judgedRan ? <JudgeList verdict={v} onEvidence={onEvidence} /> : <div className="text-muted text-sm">The judges haven't looked at this call.</div>}
               {judgedRan && (
                 <div className="mt-3 pt-3 border-t border-line" id="label-items">
-                  <div className="font-semibold text-[13px] mb-1">Your labels</div>
-                  <div className="text-muted text-[13px] mb-2">Were the judges right? Your answer replaces theirs on this call and teaches them which items to trust.</div>
+                  <div className="font-semibold text-sm mb-1">Your labels</div>
+                  <div className="text-muted text-sm mb-2">Were the judges right? Your answer replaces theirs on this call and teaches them which items to trust.</div>
                   {judged.map((c) => {
                     const mine = choice[c.check_id] || (c.judge?.human as Vote | undefined);
                     return (
                       <div key={c.check_id} data-item={c.check_id} className="flex items-center gap-2 flex-wrap py-1.5">
-                        <span className="flex-1 min-w-[140px] text-[13px]">{c.judge?.title || data.judge_items[c.check_id] || c.check_id}</span>
+                        <span className="flex-1 min-w-35 text-sm">{c.judge?.title || data.judge_items[c.check_id] || c.check_id}</span>
                         <div className="flex gap-1" role="radiogroup" aria-label={c.judge?.title || c.check_id}>
                           {CHOICES.map((o) => (
                             <button key={o.v} type="button" role="radio" aria-checked={mine === o.v} data-choice={o.v} title={VOTE_LABEL[o.v]}
@@ -190,12 +190,12 @@ export function MonitorCallPage({ project, callId }: { project: Project; callId:
           {sideShown === "about" && (
             <Card >
               <CardHead title="About this call" />
-              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-2 text-[13px]">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-2 text-sm">
                 <dt className="text-muted font-semibold">Length</dt><dd className="m-0">{fmtDuration(r.duration_ms ?? m.duration_ms)}</dd>
                 <dt className="text-muted font-semibold">Response p50</dt><dd className="m-0">{r.mode === "voice" ? fmtMs(m.latency_p50_ms) : "no timings in the file"}</dd>
                 <dt className="text-muted font-semibold">How it ended</dt><dd className="m-0">{r.ended_reason || "not given"}</dd>
                 <dt className="text-muted font-semibold">Caller</dt><dd className="m-0">{r.caller_hash ? <span title="The number itself is not kept">caller {r.caller_hash}</span> : "unknown"}</dd>
-                <dt className="text-muted font-semibold">Their id</dt><dd className="m-0 font-mono text-[13px] break-all">{r.external_id || "none"}</dd>
+                <dt className="text-muted font-semibold">Their id</dt><dd className="m-0 font-mono text-sm break-all">{r.external_id || "none"}</dd>
                 <dt className="text-muted font-semibold">Received</dt><dd className="m-0">{fmtDate(r.imported_at)}</dd>
                 {v?.judges?.cost_usd ? <><dt className="text-muted font-semibold">Judge cost</dt><dd className="m-0">{money(v.judges.cost_usd)}</dd></> : null}
                 {r.recording_url && <><dt className="text-muted font-semibold">Recording</dt>

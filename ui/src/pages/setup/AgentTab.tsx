@@ -106,16 +106,16 @@ function Connection({ detail, reload }: TabProps) {
       <Block title="How Vocto reaches the agent" sub="The address Vocto calls, and how it talks to the agent.">
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <Choice radio on={kind === "phone"} onClick={() => pick("phone")} data-kind="phone">
-            <b>Phone number</b><div className="text-muted text-[13px]">Vocto rings the agent's real number through your Twilio or Plivo account. Tests the whole phone line.</div>
+            <b>Phone number</b><div className="text-muted text-sm">Vocto rings the agent's real number through your Twilio or Plivo account. Tests the whole phone line.</div>
           </Choice>
           <Choice radio on={kind === "websocket_audio"} onClick={() => pick("websocket_audio")} data-kind="websocket_audio">
-            <b>Voice (phone-like)</b><div className="text-muted text-[13px]">Audio over a WebSocket. The caller really speaks and listens.</div>
+            <b>Voice (phone-like)</b><div className="text-muted text-sm">Audio over a WebSocket. The caller really speaks and listens.</div>
           </Choice>
           <Choice radio on={kind === "text_http"} onClick={() => pick("text_http")} data-kind="text_http">
-            <b>Text over HTTP</b><div className="text-muted text-[13px]">Fast, cheap runs against the same agent: no speech.</div>
+            <b>Text over HTTP</b><div className="text-muted text-sm">Fast, cheap runs against the same agent: no speech.</div>
           </Choice>
           <Choice radio on={kind === "in_repo"} off={kind !== "in_repo"} data-kind="in_repo" title="For Vocto's own practice agents">
-            <b>Built into Vocto</b><div className="text-muted text-[13px]">Vocto's own practice agents, run inside Vocto.</div>
+            <b>Built into Vocto</b><div className="text-muted text-sm">Vocto's own practice agents, run inside Vocto.</div>
           </Choice>
         </div>
         {kind === "in_repo" ? (
@@ -199,7 +199,7 @@ function Connection({ detail, reload }: TabProps) {
           label="Tool calls carry it as a header" hint={`Vocto's tool gateway adds ${str(tid.header_name) || "X-Test-Id"} to every request it forwards to the agent's tools, so the backend can store it.`} />
         <Check checked={prop.includes("session_metadata")} onChange={(v) => toggleProp("session_metadata", v)}
           label="The agent is told it when the call starts" hint="Sent in the start message's metadata (test_id), so the agent can write it in its logs." />
-        <Field label="Header name" className="max-w-[320px]">
+        <Field label="Header name" className="max-w-80">
           <Text mono value={str(tid.header_name)} placeholder="X-Test-Id" onChange={(v) => d.setDraft({ ...d.draft, test_id: { ...tid, header_name: v } })} />
         </Field>
       </Block>}
@@ -254,7 +254,7 @@ function PhoneFields({ conn, options, setConn, setOpt }: { conn: Obj; options: O
       <Field label="Public address for Vocto's phone line (optional)" hint={`${name} streams each call's audio back to Vocto. Leave it empty and Vocto opens a free Cloudflare link by itself for each run. Fill it only if your team has its own: an https:// address that forwards to port 8766 on this computer.`}>
         <Text id="phone-public" mono value={str(options.public_url)} placeholder="opened by Vocto" onChange={(v) => setOpt("public_url", v.trim())} />
       </Field>
-      <Notice tone="warn" icon="info" className="text-[13px]">
+      <Notice tone="warn" icon="info" className="text-sm">
         Every test call is a real phone call billed by {name} (and by the agent's own provider).{" "}
         {plivo ? "A free trial Plivo account may only call numbers you verified, so add credit before testing a client's number."
           : "A Twilio trial account can't be used: it plays a message and waits for a key press at the start of each call."}{" "}
@@ -313,7 +313,7 @@ function StartAgent({ detail, reload }: TabProps) {
       </Block>
       {x.on && (
         <Block title="Planted bugs" sub="Known bugs the agent can start with, one at a time, to prove Vocto catches them. The agent reads the bug's name from the variable below and changes its own code or prompts.">
-          <Field label="Variable that names the bug" className="max-w-[360px]">
+          <Field label="Variable that names the bug" className="max-w-90">
             <Text mono value={x.planted_bug_env as string} placeholder="AGENT_PLANTED_BUG" onChange={(v) => set({ planted_bug_env: v })} />
           </Field>
           <datalist id="ap-scenarios">{scenarioIds.map((id) => <option key={id} value={id} />)}</datalist>
@@ -322,7 +322,7 @@ function StartAgent({ detail, reload }: TabProps) {
               <Field label={i ? "" : "Name"}><Text mono value={b.id} placeholder="skip_confirmation" onChange={(v) => setBug(i, { id: v })} /></Field>
               <Field label={i ? "" : "What it does"}><Text value={b.title} placeholder="Places the order without confirming it" onChange={(v) => setBug(i, { title: v })} /></Field>
               <Field label={i ? "" : "Caught by scenario"}>
-                <input list="ap-scenarios" className={cx(inputCls, "font-normal font-mono text-[13px]")}
+                <input list="ap-scenarios" className={cx(inputCls, "font-normal font-mono text-sm")}
                   value={b.scenario} onChange={(e) => setBug(i, { scenario: e.target.value })} />
               </Field>
               <Field label={i ? "" : "Judge item (optional)"}><Text mono value={b.judge} placeholder="polite-professional-tone" onChange={(v) => setBug(i, { judge: v })} /></Field>

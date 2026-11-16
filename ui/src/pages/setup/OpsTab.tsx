@@ -52,13 +52,13 @@ export function OpsTab({ detail, reload, projectKey }: TabProps & { projectKey: 
       )}
       <Card>
         <Block icon="bell" title="Alerts" sub="A message after a run, to the places your team already looks. Runs with bug switches never alert. Keep the webhook address as a secret: save it under Settings › Secrets and write ${NAME} here.">
-          {alerts.length === 0 && <div className="text-muted text-[13px]">No alerts yet.</div>}
+          {alerts.length === 0 && <div className="text-muted text-sm">No alerts yet.</div>}
           {alerts.map((a, i) => {
             const set = (patch: Partial<AlertTarget>) => setAlerts(alerts.map((x, j) => (j === i ? { ...x, ...patch } : x)));
             const events = a.events || ops.default_events;
             const names = [...(a.url || "").matchAll(ENV)].map((m) => m[1]);
             return (
-              <div key={i} className="border border-line rounded-[12px] p-3.5 grid gap-3" data-alert={i}>
+              <div key={i} className="border border-line rounded-xl p-3.5 grid gap-3" data-alert={i}>
                 <Grid cols={3}>
                   <Field label="Name"><Text id={`alert-${i}-name`} value={a.name} placeholder={`alert ${i + 1}`} onChange={(v) => set({ name: v || undefined })} /></Field>
                   <Field label="Send to"><Select id={`alert-${i}-type`} value={a.type || "webhook"} options={TYPE_WORDS} onChange={(v) => set({ type: v as AlertTarget["type"] })} /></Field>
@@ -96,12 +96,12 @@ export function OpsTab({ detail, reload, projectKey }: TabProps & { projectKey: 
             {ops.agent_process && <label><Switch id="health-start" checked={!!hc.start_agent} label="Start the agent for each check" onChange={(v) => setHc({ start_agent: v || undefined })} /></label>}
           </div>
           <div>
-            <div className="font-medium text-[13px] mb-1.5">Tests to run <span className="text-muted font-normal">· none picked = the critical tests ({ops.tests.filter((t) => t.criticality === "critical").length || "all"})</span></div>
+            <div className="font-medium text-sm mb-1.5">Tests to run <span className="text-muted font-normal">· none picked = the critical tests ({ops.tests.filter((t) => t.criticality === "critical").length || "all"})</span></div>
             <div className="grid gap-2 sm:grid-cols-2">
               {ops.tests.map((t) => (
                 <Choice key={t.id} on={chosen.includes(t.id)} data-test={t.id}
                   onClick={() => setHc({ scenarios: chosen.includes(t.id) ? chosen.filter((x) => x !== t.id) : [...chosen, t.id] })}>
-                  <b className="text-[13px]">{t.title}</b>{t.criticality === "critical" && <span className="ml-1.5"><Chip tone="bad" icon="flag">critical</Chip></span>}
+                  <b className="text-sm">{t.title}</b>{t.criticality === "critical" && <span className="ml-1.5"><Chip tone="bad" icon="flag">critical</Chip></span>}
                 </Choice>
               ))}
             </div>
@@ -111,8 +111,8 @@ export function OpsTab({ detail, reload, projectKey }: TabProps & { projectKey: 
               {ops.health_runs.slice(0, 5).map((r) => (
                 <tr key={r.run_id}>
                   <td><Badge status={r.decision || r.status} /></td>
-                  <td><a href={runHref(r.project_key ? r : { ...r, project_key: projectKey })} className="font-mono text-[13px]">{r.run_id}</a> <OptionChips run={{ mode: r.mode }} /></td>
-                  <td className="text-muted text-[13px]">{ago(r.started_at)}</td>
+                  <td><a href={runHref(r.project_key ? r : { ...r, project_key: projectKey })} className="font-mono text-sm">{r.run_id}</a> <OptionChips run={{ mode: r.mode }} /></td>
+                  <td className="text-muted text-sm">{ago(r.started_at)}</td>
                 </tr>
               ))}
             </Table>
@@ -170,13 +170,13 @@ function CiCard({ ops, projectKey, file }: { ops: OpsPage; projectKey: string; f
         {error && <Notice tone="bad">{error.message}</Notice>}
         {ci && (
           <>
-            <div className="flex items-center gap-2 flex-wrap text-[13px]">
-              <Icon name="file" size={14} className="text-muted" />Save it in the agent's repository as <code className="font-mono text-[13px]">{ci.path}</code>
+            <div className="flex items-center gap-2 flex-wrap text-sm">
+              <Icon name="file" size={14} className="text-muted" />Save it in the agent's repository as <code className="font-mono text-sm">{ci.path}</code>
               <span className="flex-1" />
               <Button id="ci-copy" size="sm" icon="copy" onClick={() => void copy(ci.text)}>Copy</Button>
             </div>
-            <pre id="ci-text" className="min-w-0 w-full max-h-[420px] overflow-auto text-[13px] leading-[1.55] font-mono bg-surface-2 border border-line rounded-[12px] p-3.5 whitespace-pre">{ci.text}</pre>
-            <div className="text-[13px] text-ink-2">
+            <pre id="ci-text" className="min-w-0 w-full max-h-105 overflow-auto text-sm leading-[1.55] font-mono bg-surface-2 border border-line rounded-xl p-3.5 whitespace-pre">{ci.text}</pre>
+            <div className="text-sm text-ink-2">
               {ci.secrets.length ? <>Add {ci.secrets.map((s, i) => <span key={s}>{i ? ", " : ""}<code className="font-mono">{s}</code></span>)} as {where}.</> : "No secrets needed."}
             </div>
           </>

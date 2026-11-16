@@ -107,7 +107,8 @@ For a team, run it as a server with sign-in, roles and API keys (`vatf serve`, o
 The same things from the terminal:
 
 ```powershell
-uv run pytest                    # framework tests, offline (about 5 minutes: voice tests run calls in real time)
+uv run pytest                    # every framework test, offline (about 25 minutes: voice tests place calls in real time)
+uv run pytest -m "not slow"      # the quick check while you work (about 1 minute)
 
 # Free dry run: rule-based caller and agent, no API calls.
 uv run vatf exit-check examples/clinic --offline

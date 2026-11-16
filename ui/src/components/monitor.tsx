@@ -89,8 +89,8 @@ export function CallsPerDay({ days }: { days: MonitorDay[] }) {
             textAnchor={i === days.length - 1 ? "end" : "middle"}>{i === days.length - 1 ? "Today" : dayLabel(d.day)}</text>
         ))}
       </svg>
-      <div className="flex gap-3.5 flex-wrap text-[13px] text-ink-2 mt-2">
-        {SERIES.map((s) => <span key={s.key}><i className="inline-block size-2.5 rounded-[3px] mr-1.5 -mb-px" style={{ background: s.color }} />{s.label}</span>)}
+      <div className="flex gap-3.5 flex-wrap text-sm text-ink-2 mt-2">
+        {SERIES.map((s) => <span key={s.key}><i className="inline-block size-2.5 rounded-sm mr-1.5 -mb-px" style={{ background: s.color }} />{s.label}</span>)}
       </div>
     </div>
   );

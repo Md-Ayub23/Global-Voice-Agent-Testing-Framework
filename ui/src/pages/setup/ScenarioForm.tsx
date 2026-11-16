@@ -91,9 +91,9 @@ function CheckList({ checks, onChange, ctx, needId, prefix }: { checks: Obj[]; o
   return (
     <div className="grid gap-2.5">
       {checks.map((c, i) => (
-        <div key={i} data-check={str(c.id) || `${prefix}${i + 1}`} className="grid gap-2.5 p-3 border border-line rounded-[12px] bg-surface-2/40">
+        <div key={i} data-check={str(c.id) || `${prefix}${i + 1}`} className="grid gap-2.5 p-3 border border-line rounded-xl bg-surface-2/40">
           <div className="flex items-center gap-2 flex-wrap">
-            <Select className="w-auto min-w-[200px]" value={str(c.type)} onChange={(v) => setAt(i, "type", v)}
+            <Select className="w-auto min-w-50" value={str(c.type)} onChange={(v) => setAt(i, "type", v)}
               options={Object.entries(CHECKS).map(([k, s]) => [k, s.label] as [string, string])} />
             <Select className="w-auto" value={str(c.severity) || "major"} onChange={(v) => setAt(i, "severity", v === "major" ? undefined : v)}
               options={[["blocker", "Blocker: stops the release"], ["major", "Major"], ["minor", "Minor"]]} />
@@ -104,7 +104,7 @@ function CheckList({ checks, onChange, ctx, needId, prefix }: { checks: Obj[]; o
           </div>
           <Help>{CHECKS[str(c.type)]?.help}</Help>
           {needId && (
-            <Field label="Check id" className="max-w-[320px]"><Text mono value={str(c.id)} onChange={(v) => setAt(i, "id", slug(v).replace(/-+/g, "-"))} /></Field>
+            <Field label="Check id" className="max-w-80"><Text mono value={str(c.id)} onChange={(v) => setAt(i, "id", slug(v).replace(/-+/g, "-"))} /></Field>
           )}
           <CheckFields check={c} ctx={ctx} set={(k, v) => setAt(i, k, v)} />
           <Field label="Why it matters (optional)"><Text value={str(c.description)} onChange={(v) => setAt(i, "description", v)} /></Field>
@@ -248,7 +248,7 @@ export function ScenarioForm({ detail, file, initial, onDone, testType }: { deta
         {scripted && (
           <div className="grid gap-3">
             {turns.map((t, i) => (
-              <div key={i} className="grid gap-2.5 p-3 border border-line rounded-[12px]">
+              <div key={i} className="grid gap-2.5 p-3 border border-line rounded-xl">
                 <div className="flex items-center gap-2">
                   <Chip tone="caller">Line {i + 1}</Chip>
                   <span className="flex-1" />
@@ -266,7 +266,7 @@ export function ScenarioForm({ detail, file, initial, onDone, testType }: { deta
               </div>
             ))}
             <div><Button size="sm" icon="plus" onClick={() => put(["turns"], [...turns, { caller: "" }])}>Add line</Button></div>
-            <div className="grid gap-2.5 p-3 border border-dashed border-line-strong rounded-[12px]">
+            <div className="grid gap-2.5 p-3 border border-dashed border-line-strong rounded-xl">
               <Check checked={doc.follow_up !== false} onChange={(on) => put(["follow_up"], on ? undefined : false)}
                 label="Then Claude carries on the call"
                 hint="Live runs: after these lines, Claude listens to the agent and keeps going, the way a real caller would, for up to the turns set in Test settings. Dry runs always end with the lines." />
@@ -329,7 +329,7 @@ export function ScenarioForm({ detail, file, initial, onDone, testType }: { deta
                     put(["more_outcomes"], next.length ? next : undefined);
                   };
                   return (
-                    <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[12px]" data-step={i + 2}>
+                    <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-xl" data-step={i + 2}>
                       <Field label={`Step ${i + 2}: tool`}><Select value={str(getIn(o, ["action", "tool"]))} options={ctx.writeTools} placeholder="Pick a write tool"
                         onChange={(v) => setStep({ ...o, action: { ...asObj(o.action), tool: v } })} /></Field>
                       <Field label="Expected"><Select value={str(o.expected)} onChange={(v) => setStep({ ...o, expected: v })}
@@ -379,12 +379,12 @@ export function ScenarioForm({ detail, file, initial, onDone, testType }: { deta
         <Field label="Faults" hint="Honesty under failure: the tool breaks and the agent must not pretend it worked.">
           <div className="grid gap-2">
             {faults.map((f, i) => (
-              <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[12px]">
+              <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-xl">
                 <Field label="Tool"><Select value={str(f.tool)} options={ctx.tools} placeholder="Pick" onChange={(v) => setFault(i, "tool", v)} /></Field>
                 <Field label="Fault"><Select value={str(f.type)} onChange={(v) => setFault(i, "type", v)} options={[["timeout", "Times out"], ["http_error", "HTTP error"], ["slow", "Slow"], ["malformed_response", "Garbled answer"], ["rate_limited", "Too many requests (429)"], ["auth_expired", "Login expired (401)"]]} /></Field>
-                <Field label="On call no." className="w-[110px]"><Num value={f.on_call as number} min={1} placeholder="every" onChange={(v) => setFault(i, "on_call", v)} /></Field>
-                {f.type === "http_error" && <Field label="Status" className="w-[100px]"><Num value={f.status as number} placeholder={500} onChange={(v) => setFault(i, "status", v)} /></Field>}
-                {(f.type === "slow" || f.type === "timeout") && <Field label="Delay (ms)" className="w-[120px]"><Num value={f.delay_ms as number} placeholder={10000} onChange={(v) => setFault(i, "delay_ms", v)} /></Field>}
+                <Field label="On call no." className="w-27.5"><Num value={f.on_call as number} min={1} placeholder="every" onChange={(v) => setFault(i, "on_call", v)} /></Field>
+                {f.type === "http_error" && <Field label="Status" className="w-25"><Num value={f.status as number} placeholder={500} onChange={(v) => setFault(i, "status", v)} /></Field>}
+                {(f.type === "slow" || f.type === "timeout") && <Field label="Delay (ms)" className="w-30"><Num value={f.delay_ms as number} placeholder={10000} onChange={(v) => setFault(i, "delay_ms", v)} /></Field>}
                 <div className="pb-2"><Check checked={!!f.forward} onChange={(v) => setFault(i, "forward", v || undefined)} label="Still reaches the backend" /></div>
                 <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove fault" onClick={() => put(["setup", "faults"], faults.filter((_, j) => j !== i).length ? faults.filter((_, j) => j !== i) : undefined)} />
               </div>
@@ -411,11 +411,11 @@ export function ScenarioForm({ detail, file, initial, onDone, testType }: { deta
           <Field label="Caller cuts in">
             <div className="grid gap-2">
               {barge.map((b, i) => (
-                <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-[12px]">
-                  <Field label="Agent's turn no." className="w-[120px]"><Num value={b.agent_turn as number} min={1} onChange={(v) => setBarge(i, "agent_turn", v)} /></Field>
-                  <Field label="After (ms)" className="w-[110px]"><Num value={b.offset_ms as number} min={0} onChange={(v) => setBarge(i, "offset_ms", v)} /></Field>
-                  <Field label="Caller says" className="flex-1 min-w-[180px]"><Text value={str(b.say)} onChange={(v) => setBarge(i, "say", v)} /></Field>
-                  <Field label="Must stop within (ms)" className="w-[150px]"><Num value={b.stop_within_ms as number} placeholder={1000} onChange={(v) => setBarge(i, "stop_within_ms", v)} /></Field>
+                <div key={i} className="flex gap-2 flex-wrap items-end p-2.5 border border-line rounded-xl">
+                  <Field label="Agent's turn no." className="w-30"><Num value={b.agent_turn as number} min={1} onChange={(v) => setBarge(i, "agent_turn", v)} /></Field>
+                  <Field label="After (ms)" className="w-27.5"><Num value={b.offset_ms as number} min={0} onChange={(v) => setBarge(i, "offset_ms", v)} /></Field>
+                  <Field label="Caller says" className="flex-1 min-w-45"><Text value={str(b.say)} onChange={(v) => setBarge(i, "say", v)} /></Field>
+                  <Field label="Must stop within (ms)" className="w-37.5"><Num value={b.stop_within_ms as number} placeholder={1000} onChange={(v) => setBarge(i, "stop_within_ms", v)} /></Field>
                   <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove" onClick={() => put(["audio", "barge_in"], barge.filter((_, j) => j !== i).length ? barge.filter((_, j) => j !== i) : undefined)} />
                 </div>
               ))}
@@ -450,7 +450,7 @@ function Recording({ project, path, line, onChange }: { project: string; path: s
       {path ? (
         <div className="flex flex-wrap items-center gap-2.5" data-recording={path}>
           <audio controls preload="none" src={setupApi.recordingUrl(project, path)} className="h-8 max-w-full" />
-          <span className="font-mono text-[13px] text-muted">{path}</span>
+          <span className="font-mono text-sm text-muted">{path}</span>
           <Button size="sm" variant="ghost" icon="x" onClick={() => onChange("")}>Use Vocto's voice</Button>
         </div>
       ) : (
@@ -535,7 +535,7 @@ function Returning({ doc, put, ctx }: { doc: Obj; put: (path: (string | number)[
           const lines = asList<Obj>(p.turns);
           const isScripted = lines.length > 0;
           return (
-            <div key={i} className="grid gap-2.5 p-3 border border-line rounded-[12px]" data-call={i + 2}>
+            <div key={i} className="grid gap-2.5 p-3 border border-line rounded-xl" data-call={i + 2}>
               <div className="flex items-center gap-2">
                 <Chip tone="caller">Call {i + 2}</Chip>
                 <span className="flex-1" />

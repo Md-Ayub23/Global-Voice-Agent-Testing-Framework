@@ -3,7 +3,8 @@
 // full; src/vatf/modes.py decides which test cases each type runs.
 import { useEffect } from "react";
 import { LevelPill, fixHref, modeHref } from "../components/modecards";
-import { Button, LinkTabs, Notice, Skeleton } from "../components/ui";
+import { Button, LinkTabs, Notice, PageHead, ReadOnly, Skeleton } from "../components/ui";
+import { useCanEdit } from "../lib/auth";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { mainProfile, projectHref } from "../lib/links";
@@ -23,7 +24,7 @@ type Tab = "cases" | "run" | "reports";
 
 function useModes(project: Project) {
   const { activeJob } = useApp();
-  return useLoad(() => api.get<ProjectOverview>(`/api/project/${project.key}`).then((o) => o.modes || []), [project.key, activeJob?.status]);
+  return useLoad(() => api.get<ProjectOverview>(`/api/project/${project.key}`).then((o) => o.modes || []), [project.key, activeJob?.status], { keep: true });
 }
 
 // Safety's own "test cases" are its attack calls and custom questions (the Safety tests card).
@@ -39,6 +40,7 @@ function SafetyCases({ project }: { project: Project }) {
 export function ModePage({ project, mode, tab: asked, query }: { project: Project; mode: TestModeId; tab: "run" | "reports" | null; query: URLSearchParams }) {
   const title = MODE_TITLE[mode];
   const k = project.key;
+  const canEdit = useCanEdit();
   useCrumbs([{ label: project.name, href: projectHref(k) }, { label: title }]);
   const { data: modes, error } = useModes(project);
   // Real calls have their own pages (Results › Real calls).
@@ -61,24 +63,20 @@ export function ModePage({ project, mode, tab: asked, query }: { project: Projec
 
   return (
     <>
-      <div className="mt-2 mb-4 flex flex-wrap items-start gap-4" id="type-head" data-mode={mode}>
-        <div className="flex-1 min-w-[260px]">
-          <h1 className="text-[21px] font-semibold tracking-[-.015em] leading-tight">{title}</h1>
-          <div className="mt-1 text-ink-2 text-[13.5px] max-w-[760px]">{m.question} {m.about}</div>
-        </div>
-        <div className="flex items-center gap-3">
+      <div id="type-head" data-mode={mode}>
+        <PageHead title={title} sub={<>{m.question} {m.about}</>} className="mb-4">
           {m.latest && (
-            <a href={projectHref(k, `/runs/${m.latest.run_id}`)} className="flex items-center gap-2 hover:no-underline text-ink text-[13px]" id="mode-latest">
+            <a href={projectHref(k, `/runs/${m.latest.run_id}`)} className="flex items-center gap-2 hover:no-underline text-ink text-sm" id="mode-latest" title="Open the latest report">
               <span className="text-muted">Latest</span><LevelPill level={m.latest.level} mode={mode} />
             </a>
           )}
-          {tab !== "run" && m.available.ok && (
+          {tab !== "run" && m.available.ok && canEdit && (
             <Button id="open-run" variant="primary" icon="play" href={tabs.find((t) => t.value === "run")!.href}>{mode === "full" ? "Run the Release check" : `Run ${title}`}</Button>
           )}
-        </div>
+        </PageHead>
       </div>
       {m.checks.length > 0 && tab !== "reports" && !edit && (
-        <ul className="flex flex-wrap gap-x-5 gap-y-1 mb-4 text-[13px] text-ink-2" id="mode-checks">
+        <ul className="flex flex-wrap gap-x-5 gap-y-1 mb-4 text-sm text-ink-2" id="mode-checks">
           {m.checks.map((c) => <li key={c} className="flex items-center gap-1.5"><i className="size-1 rounded-full bg-line-strong" />{c}</li>)}
         </ul>
       )}
@@ -94,7 +92,7 @@ export function ModePage({ project, mode, tab: asked, query }: { project: Projec
         <Notice className="mb-4">The Release check runs every test case of every type, plus the safety attack calls, and writes one combined report. Run it before each release; use a single test type to look at one thing in depth.</Notice>
       )}
       {!edit && <LinkTabs value={tab} tabs={tabs} />}
-      {tab === "cases" ? (mode === "safety" ? <SafetyCases project={project} /> : isCaseType(mode) ? <TypeCases project={project} type={mode} edit={edit} /> : null)
+      {tab === "cases" ? <ReadOnly when={!canEdit}>{mode === "safety" ? <SafetyCases project={project} /> : isCaseType(mode) ? <TypeCases project={project} type={mode} edit={edit} /> : null}</ReadOnly>
         : tab === "reports" ? <History project={project} mode={mode} />
         : m.kind === "load" ? <LoadTestPage project={project} query={query} embedded />
         : <NewRun project={project} query={query} mode={mode} />}

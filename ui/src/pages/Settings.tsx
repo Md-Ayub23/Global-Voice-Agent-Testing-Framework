@@ -23,8 +23,8 @@ function AgentSettings() {
           {projects.map((p) => (
             <a key={p.key} href={projectHref(p.key, "/setup/rules")} className="group flex items-center gap-3 px-5 py-2.5 hover:bg-surface-2/70 hover:no-underline text-ink transition-colors">
               <ProjectAvatar name={p.name} k={p.key} size={28} />
-              <b className="text-[13.5px] flex-1 min-w-0 truncate">{p.name}</b>
-              <span className="text-accent-ink text-[13px] font-semibold inline-flex items-center gap-1">Pass rules <Icon name="arrow" size={13} className="transition-transform group-hover:translate-x-0.5" /></span>
+              <b className="text-sm flex-1 min-w-0 truncate">{p.name}</b>
+              <span className="text-accent-ink text-sm font-semibold inline-flex items-center gap-1">Pass rules <Icon name="arrow" size={13} className="transition-transform group-hover:translate-x-0.5" /></span>
             </a>
           ))}
         </div>
@@ -49,14 +49,14 @@ function SecretRow({ s, onSaved }: { s: Secret; onSaved: (list: Secret[]) => voi
     <div data-secret={s.name} className="grid gap-2 py-3 border-b border-line last:border-b-0">
       <div className="flex items-center gap-2.5 flex-wrap">
         <Icon name="lock" className="text-muted" />
-        <b className="font-mono text-[13px]">{s.name}</b>
+        <b className="font-mono text-sm">{s.name}</b>
         {s.set ? <Badge status="PASS" label={s.hint ? `set · ${s.hint}` : "set"} /> : <Badge status="NOT_VERIFIED" label="missing" />}
-        <span className="text-muted text-[13px] flex-1 min-w-[140px]">used by {s.projects.join(", ")}</span>
+        <span className="text-muted text-sm flex-1 min-w-35">used by {s.projects.join(", ")}</span>
         {!open && <Button size="sm" variant="ghost" onClick={() => setOpen(true)}>{s.set ? "Replace" : "Set"}</Button>}
       </div>
       {open && (
         <form className="flex gap-2 flex-wrap" onSubmit={(e) => { e.preventDefault(); void save(); }}>
-          <input className={cx(inputCls, "font-mono flex-1 min-w-[200px]")} type="password" autoComplete="off" placeholder="Value"
+          <input className={cx(inputCls, "font-mono flex-1 min-w-50")} type="password" autoComplete="off" placeholder="Value"
             value={value} onChange={(e) => setValue(e.target.value)} aria-label={`Value of ${s.name}`} />
           <Button type="submit" variant="primary" icon="save" busy={busy} disabled={busy || !value.trim()}>Save</Button>
           {s.set && <Button variant="ghost" onClick={() => { setOpen(false); setValue(""); }}>Cancel</Button>}
@@ -76,11 +76,11 @@ function Secrets() {
         {rows && rows.length > 0 && (rows.every((s) => s.set) ? <Badge status="PASS" label="all set" /> : <Badge status="NOT_VERIFIED" label={`${rows.filter((s) => !s.set).length} missing`} />)}
       </CardHead>
       <p className="text-ink-2 mb-1">
-        Write a secret in any setup field as <span className="font-mono text-[13px] bg-surface-2 px-1 rounded">{"${NAME}"}</span>, for example a token in a header. Its value is kept here, on this computer only, and never stored in the project.
+        Write a secret in any setup field as <span className="font-mono text-sm bg-surface-2 px-1 rounded">{"${NAME}"}</span>, for example a token in a header. Its value is kept here, on this computer only, and never stored in the project.
       </p>
       {error && <Notice tone="bad">{error.message}</Notice>}
       {!rows ? <Skeleton height={80} /> : rows.length ? rows.map((s) => <SecretRow key={s.name} s={s} onSaved={setList} />)
-        : <div className="text-muted text-[13px] py-3">No agent uses a secret yet.</div>}
+        : <div className="text-muted text-sm py-3">No agent uses a secret yet.</div>}
     </Card>
   );
 }
@@ -90,7 +90,7 @@ const mb = (b: number) => (b ? `${(b / 1e6).toFixed(0)} MB` : "0 MB");
 function Row({ label, children, top }: { label: string; children: ReactNode; top?: boolean }) {
   return (
     <div className={cx("flex gap-3", top ? "items-start" : "items-center")}>
-      <span className="text-muted w-[120px] flex-none">{label}</span>
+      <span className="text-muted w-30 flex-none">{label}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -136,7 +136,7 @@ export function Settings() {
             <CardHead level={2} title="Anthropic API key">{k.set ? <Badge status="PASS" label="set" /> : <Badge status="NOT_VERIFIED" label="not set" />}</CardHead>
             <p className="text-ink-2 mb-3">Real runs use Claude to play the caller and to check it stayed on script. Free dry runs need no key.</p>
             {k.set && (
-              <div className="flex items-center gap-2 text-[13px] mb-3">
+              <div className="flex items-center gap-2 text-sm mb-3">
                 <Icon name="key" /><span>Using a key ending <b className="font-mono">{k.hint || ""}</b>{k.source === "shell" ? " from this computer's environment" : ""}.</span>
               </div>
             )}
@@ -161,12 +161,12 @@ export function Settings() {
             <div className="flex flex-col gap-2">
               <Row label="Voices" top>
                 <div className="flex flex-wrap gap-1.5">
-                  {sys.models.piper_voices.length ? sys.models.piper_voices.map((v) => <Chip key={v} icon="mic">{v}</Chip>) : <span className="text-muted text-[13px]">none yet</span>}
+                  {sys.models.piper_voices.length ? sys.models.piper_voices.map((v) => <Chip key={v} icon="mic">{v}</Chip>) : <span className="text-muted text-sm">none yet</span>}
                 </div>
               </Row>
               <Row label="Hearing" top>
                 <div className="flex flex-wrap gap-1.5">
-                  {sys.models.whisper.length ? sys.models.whisper.map((w) => <Chip key={w.name} icon="ear">{w.name} · {mb(w.bytes)}</Chip>) : <span className="text-muted text-[13px]">none yet</span>}
+                  {sys.models.whisper.length ? sys.models.whisper.map((w) => <Chip key={w.name} icon="ear">{w.name} · {mb(w.bytes)}</Chip>) : <span className="text-muted text-sm">none yet</span>}
                 </div>
               </Row>
               <Row label="Disk used">{mb(sys.models.bytes)}</Row>
@@ -174,10 +174,10 @@ export function Settings() {
           </Card>
           <Card>
             <CardHead level={2} title="About" />
-            <div className="flex flex-col gap-[9px]">
+            <div className="flex flex-col gap-2.25">
               <Row label="Vocto"><b>{sys.version}</b></Row>
               <Row label="Caller model">{sys.default_model}</Row>
-              <Row label="System">Python {sys.python} · {sys.platform}</Row>
+              {sys.python && <Row label="System">Python {sys.python} · {sys.platform}</Row>}
             </div>
           </Card>
           {admin && <Secrets />}

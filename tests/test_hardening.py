@@ -17,7 +17,7 @@ from vatf.ratelimit import LLMGate, RateLimiter, TokenBucket, is_retryable, retr
 from vatf.util import file_lock, read_json, write_json, write_text_atomic
 from vatf.web import data
 from vatf.web.httpbase import BoundedHTTPServer
-from vatf.web.jobs import Job, JobManager
+from vatf.web.jobs import JobManager
 from vatf.web.server import App, make_handler
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,8 +35,8 @@ def test_atomic_write_never_leaves_half_a_file(tmp_path):
         while not stop.is_set():
             try:
                 read_json(path)
-            except ValueError:
-                bad.append(1)
+            except (ValueError, OSError) as e:      # half a file, or (Windows) refused while being replaced
+                bad.append(repr(e))
 
     t = threading.Thread(target=reader)
     t.start()
@@ -44,7 +44,8 @@ def test_atomic_write_never_leaves_half_a_file(tmp_path):
         write_json(path, {"a": i, "pad": "x" * 20000})
     stop.set()
     t.join()
-    assert not bad and read_json(path)["a"] == 299
+    assert not bad, bad[:3]
+    assert read_json(path)["a"] == 299
     assert not [p for p in tmp_path.iterdir() if p.suffix == ".tmp"]      # no temporary files left behind
 
 

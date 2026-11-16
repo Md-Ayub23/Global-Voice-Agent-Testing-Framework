@@ -7,11 +7,11 @@ import re
 import shutil
 import threading
 import time
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
+from vatf.web.httpbase import BoundedHTTPServer
 from vatf.cli import main
 from vatf.util import read_json
 from vatf.web import data
@@ -169,7 +169,7 @@ def test_exit_check_writes_summary_and_run_info(tmp_path):
 @pytest.fixture
 def server(tmp_path):
     app = App(ROOT, tmp_path / "runs")
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    httpd = BoundedHTTPServer(("127.0.0.1", 0), make_handler(app))
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
     yield httpd.server_address[1], app

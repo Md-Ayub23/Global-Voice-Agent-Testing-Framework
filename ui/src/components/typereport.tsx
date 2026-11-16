@@ -21,8 +21,8 @@ const C = { good: "var(--good)", bad: "var(--bad)", warn: "var(--warn)", none: "
 
 function Legend({ items }: { items: [string, string][] }) {
   return (
-    <div className="flex gap-3.5 flex-wrap text-[13px] text-ink-2 mt-3">
-      {items.map(([label, color]) => <span key={label}><i className="inline-block size-2.5 rounded-[3px] mr-1.5 -mb-px" style={{ background: color }} />{label}</span>)}
+    <div className="flex gap-3.5 flex-wrap text-sm text-ink-2 mt-3">
+      {items.map(([label, color]) => <span key={label}><i className="inline-block size-2.5 rounded-sm mr-1.5 -mb-px" style={{ background: color }} />{label}</span>)}
     </div>
   );
 }
@@ -37,17 +37,17 @@ export function StackBars({ rows, legend }: { rows: BarRow[]; legend?: [string, 
           const total = r.parts.reduce((a, p) => a + p.value, 0);
           const body = (
             <div className="grid grid-cols-[minmax(120px,38%)_1fr_auto] items-center gap-3">
-              <div className="min-w-0"><div className="truncate text-[13px] text-ink">{r.label}</div>{r.sub && <div className="truncate text-[13px] text-muted">{r.sub}</div>}</div>
-              <Tip content={<div className="grid gap-0.5 min-w-[140px]">{r.parts.filter((p) => p.value).map((p) => (
-                <div key={p.label} className="flex items-center gap-2"><i className="size-2.5 rounded-[3px]" style={{ background: p.color }} />
+              <div className="min-w-0"><div className="truncate text-sm text-ink">{r.label}</div>{r.sub && <div className="truncate text-sm text-muted">{r.sub}</div>}</div>
+              <Tip content={<div className="grid gap-0.5 min-w-35">{r.parts.filter((p) => p.value).map((p) => (
+                <div key={p.label} className="flex items-center gap-2"><i className="size-2.5 rounded-sm" style={{ background: p.color }} />
                   <span className="flex-1 text-ink-2">{p.label}</span><b className="tabular-nums">{p.value}</b></div>))}{!total && <span className="text-muted">Nothing yet</span>}</div>} className="block">
-                <div className="grow-x flex h-3.5 rounded-[3px] overflow-hidden bg-surface-3" style={{ width: `${Math.max(4, (total / max) * 100)}%` }}>
+                <div className="grow-x flex h-3.5 rounded-sm overflow-hidden bg-surface-3" style={{ width: `${Math.max(4, (total / max) * 100)}%` }}>
                   {r.parts.filter((p) => p.value > 0).map((p, i) => (
                     <i key={p.label} style={{ width: `${(p.value / total) * 100}%`, background: p.color }} className={cx(i > 0 && "border-l-2 border-surface")} />
                   ))}
                 </div>
               </Tip>
-              <div className="text-[13px] text-ink-2 tabular-nums whitespace-nowrap text-right min-w-[64px]">{r.right}</div>
+              <div className="text-sm text-ink-2 tabular-nums whitespace-nowrap text-right min-w-16">{r.right}</div>
             </div>
           );
           return r.href ? <a key={r.key} href={r.href} className="hover:no-underline text-ink rounded-md -mx-1.5 px-1.5 py-0.5 hover:bg-surface-2">{body}</a> : <div key={r.key}>{body}</div>;
@@ -60,7 +60,7 @@ export function StackBars({ rows, legend }: { rows: BarRow[]; legend?: [string, 
 
 // How long callers waited for each answer: a histogram of every timed answer, with the limits marked.
 export function AnswerTimes({ values, tool, p50Limit, p95Limit }: { values: number[]; tool?: number[]; p50Limit?: number | null; p95Limit?: number | null }) {
-  if (!values.length) return <p className="text-muted text-[13px]">No answer was timed in this run.</p>;
+  if (!values.length) return <p className="text-muted text-sm">No answer was timed in this run.</p>;
   const top = Math.max(...values, p95Limit || 0) * 1.05;
   const step = top <= 2000 ? 200 : top <= 5000 ? 500 : 1000;
   const bins = Math.ceil(top / step);
@@ -70,7 +70,7 @@ export function AnswerTimes({ values, tool, p50Limit, p95Limit }: { values: numb
   const over = (i: number) => p95Limit != null && (i + 1) * step > p95Limit;
   return (
     <div>
-      <div className="relative flex items-end gap-[3px] h-[150px] border-b border-line" role="img" aria-label={`${values.length} answers timed`}>
+      <div className="relative flex items-end gap-0.75 h-37.5 border-b border-line" role="img" aria-label={`${values.length} answers timed`}>
         {counts.map((n, i) => (
           <Tip key={i} content={<><b>{n}</b> answer{n === 1 ? "" : "s"} in {fmtMs(i * step)} to {fmtMs((i + 1) * step)}{tool && tools[i] ? <>, {tools[i]} needed a tool</> : null}</>} className="flex-1 h-full flex items-end">
             <span className="flex flex-col w-full rounded-t-[3px] overflow-hidden" style={{ height: `${(n / max) * 100}%`, minHeight: n ? 3 : 0 }}>
@@ -81,11 +81,11 @@ export function AnswerTimes({ values, tool, p50Limit, p95Limit }: { values: numb
         ))}
         {[p50Limit, p95Limit].map((l, j) => l != null && l <= top && (
           <span key={j} className="absolute top-0 bottom-0 border-l border-dashed" style={{ left: `${(l / (bins * step)) * 100}%`, borderColor: j ? C.bad : C.warn }}>
-            <span className="absolute -top-0.5 left-1 text-[13px] whitespace-nowrap" style={{ color: j ? C.bad : C.warn }}>{j ? "slowest limit" : "typical limit"} {fmtMs(l)}</span>
+            <span className="absolute -top-0.5 left-1 text-sm whitespace-nowrap" style={{ color: j ? C.bad : C.warn }}>{j ? "slowest limit" : "typical limit"} {fmtMs(l)}</span>
           </span>
         ))}
       </div>
-      <div className="flex justify-between text-[13px] text-muted mt-1 tabular-nums"><span>0 s</span><span>{fmtMs(bins * step)}</span></div>
+      <div className="flex justify-between text-sm text-muted mt-1 tabular-nums"><span>0 s</span><span>{fmtMs(bins * step)}</span></div>
       {tool && tool.length > 0 && <Legend items={[["Plain answer", C.accent], ["Needed a tool", "var(--accent-2)"], ["Over the slowest limit", C.bad]]} />}
     </div>
   );
@@ -112,7 +112,7 @@ function byCase(finals: CallBrief[], titles: (id: string) => string, callHref: (
 // Regression: pass rate over the last runs, one dot per run coloured by its result, version labels where they change.
 export function TrendChart({ points, runHref }: { points: RunTrendPoint[]; runHref?: (runId: string) => string }) {
   const pts = points.filter((p) => p.pass_rate != null);
-  if (pts.length < 2) return <p className="text-muted text-[13px]">The trend shows once there are two or more runs of this type.</p>;
+  if (pts.length < 2) return <p className="text-muted text-sm">The trend shows once there are two or more runs of this type.</p>;
   const W = 640, H = 190, L = 36, R = 12, T = 14, B = 44;
   const x = (i: number) => L + (pts.length === 1 ? 0 : (i * (W - L - R)) / (pts.length - 1));
   const y = (v: number) => T + (1 - v) * (H - T - B);
@@ -206,7 +206,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
           <Card><CardHead level={2} title="How long callers waited" sub="every timed answer · plain answers and answers that needed a tool" />
             <AnswerTimes values={answers} tool={toolTimes} p50Limit={lat?.p50_limit_ms} p95Limit={lim95} />
             {split && (split.tool.n > 0 || split.plain.n > 0) && (
-              <table className="w-full text-[13px] mt-3" id="timing-split">
+              <table className="w-full text-sm mt-3" id="timing-split">
                 <thead><tr className="text-muted text-left"><th className="font-medium py-1">Answers</th><th className="font-medium">How many</th><th className="font-medium">Typical</th><th className="font-medium">Slowest (p95)</th></tr></thead>
                 <tbody className="tabular-nums">
                   <tr className="border-t border-line"><td className="py-1.5">Plain answers</td><td>{split.plain.n}</td><td>{fmtMs(split.plain.p50_ms)}</td><td>{fmtMs(split.plain.p95_ms)}</td></tr>
@@ -215,30 +215,30 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
                 </tbody>
               </table>
             )}
-            {plainTimes.length + toolTimes.length > 0 && <p className="text-[13px] text-muted mt-2">The limits apply to every answer together; the split shows where the time goes.</p>}
+            {plainTimes.length + toolTimes.length > 0 && <p className="text-sm text-muted mt-2">The limits apply to every answer together; the split shows where the time goes.</p>}
           </Card>
           <Card><CardHead level={2} title="Slowest answers per test case" sub="p95 of each test case, slowest first" />
             {perCase.length ? (
               <div className="grid gap-2.5">
                 {perCase.map((c) => (
                   <div key={c.key} className="grid grid-cols-[minmax(120px,38%)_1fr_auto] items-center gap-3">
-                    <span className="truncate text-[13px]">{c.label}<span className="text-muted"> · {c.n}</span></span>
-                    <div className="relative h-3.5 bg-surface-3 rounded-[3px]">
-                      <i className="grow-x absolute inset-y-0 left-0 rounded-[3px]" style={{ width: `${((c.p95 as number) / maxP) * 100}%`, background: lim95 && (c.p95 as number) > lim95 ? C.bad : C.accent }} />
+                    <span className="truncate text-sm">{c.label}<span className="text-muted"> · {c.n}</span></span>
+                    <div className="relative h-3.5 bg-surface-3 rounded-sm">
+                      <i className="grow-x absolute inset-y-0 left-0 rounded-sm" style={{ width: `${((c.p95 as number) / maxP) * 100}%`, background: lim95 && (c.p95 as number) > lim95 ? C.bad : C.accent }} />
                       {lim95 && <i className="absolute -inset-y-1 border-l border-dashed" style={{ left: `${(lim95 / maxP) * 100}%`, borderColor: C.bad }} />}
                     </div>
-                    <span className="text-[13px] text-ink-2 tabular-nums min-w-[64px] text-right">{fmtMs(c.p95)}</span>
+                    <span className="text-sm text-ink-2 tabular-nums min-w-16 text-right">{fmtMs(c.p95)}</span>
                   </div>
                 ))}
               </div>
-            ) : <p className="text-muted text-[13px]">No answer was timed.</p>}
+            ) : <p className="text-muted text-sm">No answer was timed.</p>}
           </Card>
         </div>
         {moments.length > 0 && (
           <Card id="timing-moments"><CardHead level={2} title="Moments to listen to" sub="the slowest waits and slow stops · opens the call at that moment" />
             <div className="grid gap-1.5">
               {moments.map((m, i) => (
-                <a key={i} href={callHref(m.test_id) + `?at=${m.seq}`} className="flex items-center gap-2.5 text-[13px] rounded-md bg-surface-2 px-2.5 py-1.5 hover:no-underline text-ink">
+                <a key={i} href={callHref(m.test_id) + `?at=${m.seq}`} className="flex items-center gap-2.5 text-sm rounded-md bg-surface-2 px-2.5 py-1.5 hover:no-underline text-ink">
                   <i className="size-2 rounded-full flex-none" style={{ background: m.bad ? C.bad : C.accent }} />
                   <span className="flex-1 min-w-0 truncate">{m.what}</span>
                   <span className="text-muted truncate max-w-[40%]">{titles(m.scenario_id || "")}</span>
@@ -284,7 +284,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
           heard?.numbers ? { label: "Numbers heard right", value: `${heard.heard_right} of ${heard.numbers}`, foot: pct(heard.heard_right / heard.numbers), tone: heard.heard_right === heard.numbers ? "good" as const : "bad" as const }
             : callsKpi,
         ]} />
-        <p className="text-[13px] text-ink-2 -mt-1" id="speech-voices">{voicesText}{sp?.too_hard_calls ? ` ${sp.too_hard_calls} call${sp.too_hard_calls === 1 ? " was" : "s were"} too hard to hear even for Vocto's own careful listener: those details count as a test issue, not the agent's.` : ""}</p>
+        <p className="text-sm text-ink-2 -mt-1" id="speech-voices">{voicesText}{sp?.too_hard_calls ? ` ${sp.too_hard_calls} call${sp.too_hard_calls === 1 ? " was" : "s were"} too hard to hear even for Vocto's own careful listener: those details count as a test issue, not the agent's.` : ""}</p>
         {conds.length > 0 && (
           <div className="grid gap-4 grid-cols-1 xl:grid-cols-2">
             <Card><CardHead level={2} title="Calls passed per condition" sub="the same test cases under each kind of caller · a drop counts only when bigger than chance" />
@@ -298,12 +298,12 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
             {typeIds.length > 0 ? (
               <Card id="speech-types"><CardHead level={2} title="Details right, by type and condition" sub="each caller detail a tool received, as the caller said it" />
                 <div className="overflow-x-auto">
-                  <table className="w-full text-[13px] tabular-nums">
+                  <table className="w-full text-sm tabular-nums">
                     <thead><tr className="text-muted text-left"><th className="font-normal pb-1.5 pr-2">Condition</th>{types.map((t) => <th key={t.type} className="font-normal pb-1.5 px-1.5 text-right whitespace-nowrap">{t.title}</th>)}</tr></thead>
                     <tbody>
                       {conds.map((c) => (
                         <tr key={c.key} className="border-t border-[var(--glass-line)]">
-                          <td className="py-1.5 pr-2 truncate max-w-[180px]">{c.title}</td>
+                          <td className="py-1.5 pr-2 truncate max-w-45">{c.title}</td>
                           {typeIds.map((t) => { const x = c.by_type?.[t]; return <td key={t} className={cx("py-1.5 px-1.5 text-right", x && cellTone(x.right, x.checked))}>{x?.checked ? `${x.right}/${x.checked}` : "—"}</td>; })}
                         </tr>
                       ))}
@@ -317,7 +317,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
                 {wer.length ? <StackBars rows={conds.filter((c) => c.understood_wer != null).map((c) => ({
                   key: c.key, label: c.title, parts: [{ value: c.understood_wer as number, color: (c.understood_wer as number) > 10 ? C.bad : (c.understood_wer as number) > 5 ? C.warn : C.good, label: "% misheard" }],
                   right: `${(c.understood_wer as number).toFixed(1)}%` }))} />
-                  : <p className="text-muted text-[13px]">No caller detail reached a tool, and the agent doesn't report what it heard.</p>}
+                  : <p className="text-muted text-sm">No caller detail reached a tool, and the agent doesn't report what it heard.</p>}
               </Card>
             )}
           </div>
@@ -327,7 +327,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               {(["noise", "loss"] as const).filter((k) => lad[k]).map((k) => (
                 <div key={k}>
-                  <div className="text-[13px] font-medium mb-2">{k === "noise" ? "Cafe noise (speech-to-noise, dB)" : "Audio packets lost (%)"} · <span className={lad[k].works_to != null ? "text-good" : "text-bad"}>{lad[k].text}</span></div>
+                  <div className="text-sm font-medium mb-2">{k === "noise" ? "Cafe noise (speech-to-noise, dB)" : "Audio packets lost (%)"} · <span className={lad[k].works_to != null ? "text-good" : "text-bad"}>{lad[k].text}</span></div>
                   <StackBars legend={[["Passed", C.good], ["Failed", C.bad]]} rows={lad[k].levels.map((s) => ({
                     key: String(s.level), label: `${s.level}${k === "noise" ? " dB" : "%"}`, sub: s.details_checked ? `details ${s.details_right}/${s.details_checked}` : undefined,
                     href: s.failed_calls[0] ? callHref(s.failed_calls[0]) : undefined,
@@ -342,7 +342,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
           <Card id="speech-wrong"><CardHead level={2} title="Details saved wrong" sub="what the caller said, next to what reached the tool · opens the call at that moment" />
             <div className="grid gap-1.5">
               {(sp?.wrong || []).map((w, i) => (
-                <a key={i} href={callHref(w.test_id) + (w.seq != null ? `?at=${w.seq}` : "")} className="grid grid-cols-[minmax(90px,22%)_1fr_1fr] gap-2.5 items-center text-[13px] rounded-md bg-surface-2 px-2.5 py-1.5 hover:no-underline text-ink">
+                <a key={i} href={callHref(w.test_id) + (w.seq != null ? `?at=${w.seq}` : "")} className="grid grid-cols-[minmax(90px,22%)_1fr_1fr] gap-2.5 items-center text-sm rounded-md bg-surface-2 px-2.5 py-1.5 hover:no-underline text-ink">
                   <span className="text-muted truncate">{w.fact}{w.condition ? ` · ${w.condition}` : ""}</span>
                   <span className="truncate">said <b className="font-medium">{w.said ?? "(hidden)"}</b></span>
                   <span className="truncate text-bad">saved <b className="font-medium">{w.saved ?? "(hidden)"}</b></span>
@@ -381,13 +381,13 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
             {versions.length ? (
               <div className="grid gap-2">
                 {versions.map((v) => (
-                  <div key={v.field} className="text-[13px]"><div className="font-medium">{v.title}</div>
-                    <div className="text-ink-2 font-mono text-[12px] break-all">{v.before ?? "none"} → {v.after ?? "none"}</div></div>
+                  <div key={v.field} className="text-sm"><div className="font-medium">{v.title}</div>
+                    <div className="text-ink-2 font-mono text-2xs break-all">{v.before ?? "none"} → {v.after ?? "none"}</div></div>
                 ))}
               </div>
-            ) : <p className="text-muted text-[13px]">{b ? "Same agent version, settings, prompt and judge models as the baseline (or no labels were given: add one with the agent version field on Run)." : "—"}</p>}
-            {b?.rolling && b.rolling.length > 0 && <p className="text-[13px] text-muted mt-3">Baseline pooled from {b.rolling.join(", ")}.</p>}
-            {b && b.like_for_like === false && <p className="text-[13px] text-warn mt-3">Made differently from the baseline, so nothing here can block.</p>}
+            ) : <p className="text-muted text-sm">{b ? "Same agent version, settings, prompt and judge models as the baseline (or no labels were given: add one with the agent version field on Run)." : "—"}</p>}
+            {b?.rolling && b.rolling.length > 0 && <p className="text-sm text-muted mt-3">Baseline pooled from {b.rolling.join(", ")}.</p>}
+            {b && b.like_for_like === false && <p className="text-sm text-warn mt-3">Made differently from the baseline, so nothing here can block.</p>}
           </Card>
         </div>
         {cmp && (
@@ -428,7 +428,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
           { label: "Hard-check leaks", value: s.leaks ?? 0, foot: "target 0: secrets, tools, code words", tone: (s.leaks ?? 0) ? "bad" : "good" },
         ]} />
         {(s.not_landed || s.errors) ? (
-          <p className="text-[13px] text-ink-2 -mt-1">
+          <p className="text-sm text-ink-2 -mt-1">
             {s.not_landed ? `${s.not_landed} attack call${s.not_landed === 1 ? "" : "s"} never reached the agent (it looked nothing up, so the hidden instruction wasn't read). ` : ""}
             {s.errors ? `${s.errors} call${s.errors === 1 ? "" : "s"} couldn't be finished. ` : ""}Neither counts as resisted.
           </p>
@@ -443,12 +443,12 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
           </Card>
           {s.owasp && s.owasp.length > 0 && (
             <Card id="owasp"><CardHead level={2} title="OWASP Top 10 for LLM apps (2025)" sub="the same results, by the risk list security teams use" />
-              <table className="w-full text-[13px]">
+              <table className="w-full text-sm">
                 <thead><tr className="text-muted text-left"><th className="font-normal pb-1.5">Risk</th><th className="font-normal pb-1.5 text-right">Calls</th><th className="font-normal pb-1.5 text-right">Unsafe</th><th className="font-normal pb-1.5 text-right">Success rate</th></tr></thead>
                 <tbody>
                   {s.owasp.map((o) => (
                     <tr key={o.id} className="border-t border-[var(--glass-line)]" title={o.packs.map((k) => PACK_TITLES[k] || k).join(", ")}>
-                      <td className="py-1.5 pr-2"><span className="font-mono text-[12.5px] text-muted mr-1.5">{o.id}</span>{o.title}</td>
+                      <td className="py-1.5 pr-2"><span className="font-mono text-xs text-muted mr-1.5">{o.id}</span>{o.title}</td>
                       <td className="py-1.5 text-right tabular-nums">{o.calls}</td>
                       <td className={cx("py-1.5 text-right tabular-nums", o.unsafe > 0 && "text-bad font-medium")}>{o.unsafe}</td>
                       <td className="py-1.5 text-right tabular-nums whitespace-nowrap">{rateText(o)}</td>
@@ -456,7 +456,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
                   ))}
                 </tbody>
               </table>
-              <p className="text-[13px] text-muted mt-2.5">Off-topic questions, abuse and confusing callers aren't on that list; they still count above.</p>
+              <p className="text-sm text-muted mt-2.5">Off-topic questions, abuse and confusing callers aren't on that list; they still count above.</p>
             </Card>
           )}
         </div>
@@ -467,23 +467,23 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
                 <div key={f.id} className="grid gap-1 border-t border-[var(--glass-line)] pt-2.5 first:border-0 first:pt-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <i className="size-2 rounded-full flex-none" style={{ background: f.status === "problem" ? C.bad : f.status === "needs_review" ? C.warn : C.none }} />
-                    <b className="font-medium text-[13.5px]">{f.title}</b>
-                    <span className="text-[13px] text-muted">{f.status === "problem" ? (f.blocks ? "blocks the release" : f.severity) : f.status === "needs_review" ? "waiting for your review" : f.status === "opinion" ? "the judges' opinion" : "evidence"} · {f.how_often.text}</span>
+                    <b className="font-medium text-sm">{f.title}</b>
+                    <span className="text-sm text-muted">{f.status === "problem" ? (f.blocks ? "blocks the release" : f.severity) : f.status === "needs_review" ? "waiting for your review" : f.status === "opinion" ? "the judges' opinion" : "evidence"} · {f.how_often.text}</span>
                   </div>
-                  <p className="text-[13px] text-ink-2">{f.what}</p>
+                  <p className="text-sm text-ink-2">{f.what}</p>
                   {f.proofs.filter((p) => p.quote).slice(0, 2).map((p, i) => (
-                    <a key={i} href={callHref(p.test_id) + (p.seq != null ? `?at=${p.seq}` : "")} className="text-[13px] text-ink-2 hover:no-underline rounded-md bg-surface-2 px-2.5 py-1.5 block">
+                    <a key={i} href={callHref(p.test_id) + (p.seq != null ? `?at=${p.seq}` : "")} className="text-sm text-ink-2 hover:no-underline rounded-md bg-surface-2 px-2.5 py-1.5 block">
                       <span className="text-muted">{p.at ? `${p.at} · ` : ""}{p.who}</span> “{p.quote}”{p.note ? <span className="text-muted"> ({p.note})</span> : null}
                     </a>
                   ))}
                 </div>
               ))}
-              {found.length > 8 && <p className="text-[13px] text-muted">And {found.length - 8} more on the Findings tab.</p>}
+              {found.length > 8 && <p className="text-sm text-muted">And {found.length - 8} more on the Findings tab.</p>}
             </div>
           </Card>
         )}
         {s.switched_off && s.switched_off.length > 0 && (
-          <p className="text-[13px] text-muted" id="safety-off">Not tried in this run (switched off for this agent): {s.switched_off.map((k) => PACK_TITLES[k] || k).join(", ")}.</p>
+          <p className="text-sm text-muted" id="safety-off">Not tried in this run (switched off for this agent): {s.switched_off.map((k) => PACK_TITLES[k] || k).join(", ")}.</p>
         )}
       </div>
     );
@@ -520,7 +520,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
         {grid && grid.rows.length > 0 && (
           <Card id="drill-grid"><CardHead level={2} title="Test cases × failures" sub="calls passed per test case and failure · a red cell opens its failed call" />
             <div className="overflow-x-auto -mx-1">
-              <table className="text-[13px] min-w-full border-separate border-spacing-1">
+              <table className="text-sm min-w-full border-separate border-spacing-1">
                 <thead><tr><th className="text-left font-medium text-muted px-1.5">Test case</th>
                   {grid.columns.map((c) => <th key={c.key} className="font-medium text-muted px-1.5 text-center whitespace-nowrap">{c.title}</th>)}</tr></thead>
                 <tbody>
@@ -549,7 +549,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
         {fs.length > 0 && (
           <Card id="drill-recovery"><CardHead level={2} title="How it recovered" sub="measured from the tool calls and the recording, never by AI" />
             <div className="overflow-x-auto -mx-1">
-              <table className="text-[13px] min-w-full">
+              <table className="text-sm min-w-full">
                 <thead><tr className="text-muted text-left">
                   <th className="font-medium px-1.5 py-1">Failure</th><th className="font-medium px-1.5 py-1 text-right">Retries</th>
                   <th className="font-medium px-1.5 py-1 text-right">Most in a call</th><th className="font-medium px-1.5 py-1 text-right">Too many tries</th>
@@ -572,7 +572,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
                 </tbody>
               </table>
             </div>
-            <p className="text-[13px] text-muted mt-2">Out of scope: failures inside the agent's own speech, AI or voice providers. Vocto can't break those from outside; only the agent's team can switch them off for a test.</p>
+            <p className="text-sm text-muted mt-2">Out of scope: failures inside the agent's own speech, AI or voice providers. Vocto can't break those from outside; only the agent's team can switch them off for a test.</p>
           </Card>
         )}
         {caseCard}
@@ -603,7 +603,7 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
           parts: e.parts.map((p) => ({ value: p.count, label: p.label,
             color: p.good ? C.good : p.class === "NOT_VERIFIED" ? C.none : p.class === "FALSE_SUCCESS" || p.class === "FALSE_FAILURE" ? C.bad : C.warn })),
           right: `${e.parts.filter((p) => p.good).reduce((a, p) => a + p.count, 0)}/${e.parts.reduce((a, p) => a + p.count, 0)}` }))} />
-      {fn.wrong_tools > 0 && <p className="text-[13px] text-ink-2 mt-3">{fn.wrong_tools} call{fn.wrong_tools === 1 ? "" : "s"} used a tool the test doesn't expect: see Findings.</p>}
+      {fn.wrong_tools > 0 && <p className="text-sm text-ink-2 mt-3">{fn.wrong_tools} call{fn.wrong_tools === 1 ? "" : "s"} used a tool the test doesn't expect: see Findings.</p>}
     </Card>
   );
   const intentCard = fn && fn.intents.length > 0 && (
@@ -628,14 +628,14 @@ export function TypeAnalysis({ mode, d, rd, finals, titles, callHref, cmp, runId
           tone: lat?.within_limits == null ? undefined : lat.within_limits ? "good" as const : "bad" as const }] : []),
       ]} />
       <div className={cx("grid gap-4 grid-cols-1", areas.length > 0 && "xl:grid-cols-[minmax(0,1fr)_380px]")}>
-        {caseCard || <Card><p className="text-muted text-[13px]">No test case finished.</p></Card>}
+        {caseCard || <Card><p className="text-muted text-sm">No test case finished.</p></Card>}
         {areas.length > 0 && (
           <Card><CardHead level={2} title="By area" sub="what the checks looked at" />
             <div className="grid gap-2.5">
               {areas.map((a) => (
                 <div key={a.area} className="flex items-start gap-2.5">
                   <i className="size-2 rounded-full mt-1.5 flex-none" style={{ background: a.status === "pass" ? C.good : a.status === "fail" ? C.bad : a.status === "watch" ? C.warn : C.none }} />
-                  <div className="flex-1 min-w-0"><div className="text-[13px] font-medium">{a.title}</div><div className="text-[13px] text-ink-2">{a.value}</div></div>
+                  <div className="flex-1 min-w-0"><div className="text-sm font-medium">{a.title}</div><div className="text-sm text-ink-2">{a.value}</div></div>
                 </div>
               ))}
             </div>

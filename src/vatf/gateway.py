@@ -23,9 +23,11 @@ from __future__ import annotations
 
 import json
 import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlparse
+
+from .web.httpbase import BoundedHTTPServer
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8790
@@ -61,12 +63,12 @@ class ToolGateway:
         self.unattributed = 0                    # requests that could not be matched to a call
         self.unknown_ids = 0                     # requests naming a test id that is not in progress
         self._lock = threading.Lock()
-        self._server: ThreadingHTTPServer | None = None
+        self._server: BoundedHTTPServer | None = None
         self._thread: threading.Thread | None = None
 
     def start(self) -> "ToolGateway":
         try:
-            self._server = ThreadingHTTPServer((self.host, self.port), _handler(self))
+            self._server = BoundedHTTPServer((self.host, self.port), _handler(self))
         except OSError as e:
             raise GatewayError(f"the tool gateway could not listen on {self.host}:{self.port} ({e.strerror or e}). "
                                "Is another run going, or is something else using that port? "

@@ -11,11 +11,11 @@ import shutil
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 
+from vatf.web.httpbase import BoundedHTTPServer
 from vatf import alerts
 from vatf.cli import main
 from vatf.llm import ScriptedLLM
@@ -504,7 +504,7 @@ def web(clinic, monkeypatch):
     root, _ = clinic
     (root / ".env").write_text("", encoding="utf-8")
     app = App(root, Path("runs"))
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    httpd = BoundedHTTPServer(("127.0.0.1", 0), make_handler(app))
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
     yield root, httpd.server_address[1]

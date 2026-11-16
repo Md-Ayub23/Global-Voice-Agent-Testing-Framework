@@ -194,3 +194,53 @@ def test_password_change_and_failed_sign_ins(site):
     assert bad("POST", "/api/auth/login", {"username": "ram", "password": GOOD})[0] == 401
     failed = [e for e in app.auth.read_audit() if e["event"] == "sign_in_failed"]
     assert failed and failed[0]["username"] == "ram" and GOOD not in json.dumps(failed)
+
+
+def test_trusted_proxy_forwarded_address(site, monkeypatch):
+    port, app, _ = site
+    c = Client(port)
+    c("POST", "/api/auth/setup", {"username": "ram", "password": GOOD})
+    fwd = {"X-Forwarded-For": "6.6.6.6, 203.0.113.9"}
+    Client(port)("POST", "/api/auth/login", {"username": "ram", "password": "wrong one!"}, headers=fwd)
+    assert app.auth.read_audit()[0]["ip"] == "127.0.0.1"           # not trusted: the header is ignored
+    monkeypatch.setenv("VOCTO_TRUSTED_PROXIES", "127.0.0.0/8, nonsense")
+    from vatf.web.server import trusted_proxies
+    app.trusted_proxies = trusted_proxies()
+    Client(port)("POST", "/api/auth/login", {"username": "ram", "password": "wrong one!"}, headers=fwd)
+    assert app.auth.read_audit()[0]["ip"] == "203.0.113.9"         # the hop the proxy saw, not the client-made one
+    Client(port)("POST", "/api/auth/login", {"username": "ram", "password": "wrong one!"}, headers={"X-Forwarded-For": "junk"})
+    assert app.auth.read_audit()[0]["ip"] == "127.0.0.1"
+
+
+def test_the_browser_never_sees_server_folders_or_crash_details(site, monkeypatch):
+    """No folder path in /api/system for anyone; machine details only for an admin; a crash answers
+    with a reference, not the exception's words (which can name files)."""
+    port, app, root = site
+    admin = Client(port)
+    admin("POST", "/api/auth/setup", {"username": "ram", "password": GOOD})
+    admin("POST", "/api/auth/users", {"username": "vee", "password": GOOD, "role": "viewer"})
+    viewer = Client(port)
+    viewer("POST", "/api/auth/login", {"username": "vee", "password": GOOD})
+    for who in (admin, viewer):
+        status, sys_ = who("GET", "/api/system")
+        assert status == 200
+        text = json.dumps(sys_)
+        assert str(root) not in text and "runs_dir" not in sys_ and "root" not in sys_ and "folder" not in sys_["models"]
+    assert "platform" in admin("GET", "/api/system")[1]
+    vs = viewer("GET", "/api/system")[1]
+    assert "platform" not in vs and "python" not in vs and vs["api_key"]["hint"] is None
+
+    from vatf.web import data
+    def boom(*a, **k):
+        raise RuntimeError(f"cannot open {root}/secret/thing.yaml")
+    monkeypatch.setattr(data, "projects", boom)
+    status, out = admin("GET", "/api/projects")
+    assert status == 500 and "ref " in out["error"] and str(root) not in out["error"] and "thing.yaml" not in out["error"]
+
+
+def test_error_words_name_files_by_their_place_in_the_project(tmp_path):
+    from vatf.web.server import scrub_paths
+    root = tmp_path / "proj"
+    msg = f"bad yaml in {root}/clinic/profile.yaml and {root}"
+    out = scrub_paths(msg, root)
+    assert str(root) not in out and "clinic/profile.yaml" in out.replace("\\", "/")

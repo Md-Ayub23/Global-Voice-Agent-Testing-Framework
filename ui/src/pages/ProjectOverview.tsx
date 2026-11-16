@@ -2,7 +2,8 @@
 // done over its last runs and what is left to set up. Nothing about other agents lives here (that is Home).
 import { KpiStrip, ProjectAvatar, RunLine, When } from "../components/dash";
 import { Icon } from "../components/Icon";
-import { Badge, Button, Card, CardHead, EmptyState, LiveDot, Notice, Skeleton, Table, rowLink } from "../components/ui";
+import { Badge, Button, Card, CardHead, EmptyState, LiveDot, Notice, Skeleton, Table, rowLink, PageHead, Section } from "../components/ui";
+import { useCanEdit } from "../lib/auth";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx, fmtMs, money, pct, plural } from "../lib/format";
@@ -28,7 +29,7 @@ function StatusWords({ m }: { m: ModeBrief }) {
   const quiet = m.status === "not_run" || m.status === "unavailable";
   return (
     <span className={cx("inline-flex items-center gap-1.5 whitespace-nowrap", quiet ? "text-muted" : TONE_TEXT[st.tone])}>
-      {!quiet && <i className={cx("size-[7px] rounded-full", TONE_DOT[st.tone])} />}
+      {!quiet && <i className={cx("size-1.75 rounded-full", TONE_DOT[st.tone])} />}
       {m.status === "unavailable" ? unavailableWords(m) : st.label}
     </span>
   );
@@ -37,9 +38,10 @@ function StatusWords({ m }: { m: ModeBrief }) {
 export function ProjectOverviewPage({ project }: { project: Project }) {
   useCrumbs([{ label: project.name }]);
   const { activeJob, projects } = useApp();
-  const { data, error } = useLoad(() => api.get<ProjectOverview>(`/api/project/${project.key}`), [project.key, activeJob?.status]);
+  const canEdit = useCanEdit();
+  const { data, error } = useLoad(() => api.get<ProjectOverview>(`/api/project/${project.key}`), [project.key, activeJob?.status], { keep: true });
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
-  if (!data) return <Skeleton height={520} />;
+  if (!data) return <Skeleton />;
   const k = project.key;
   const s = data.stats;
   const conn = data.connection;
@@ -47,7 +49,6 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
   const types = TEST_TYPES.map((id) => byId.get(id)).filter((m): m is ModeBrief => !!m);
   const v = verdict(types);
   const running = activeJob && projectOfJob(activeJob, projects)?.key === k ? activeJob : null;
-  const findings = types.filter((m) => (m.status === "failed" || m.status === "watch" || m.status === "evidence") && m.top_finding && m.run_id);
   const main = mainProfile(data.project);
   const voiceTrend = data.trend.some((t) => t.p95_ms != null);
   const lim = s.latency_limits?.p95_ms ?? null;
@@ -64,91 +65,90 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
   if (s.runs && !main?.baseline) todo.push({ key: "baseline", text: "Mark a good run as the baseline, so Regression can compare with it", href: projectHref(k, "/runs"), need: "Recommended" });
   if (j && j.items > 0 && !j.labelled_calls) todo.push({ key: "judges", text: "Label a few calls, so the AI judges can be trusted to fail a run", href: projectHref(k, "/judges"), need: "Optional" });
 
-  return (
-    <>
-      <div className="flex items-start gap-4 mt-2 mb-5 flex-wrap" id="agent-head">
-        <ProjectAvatar kind={conn.kind} size={44} />
-        <div className="flex-1 min-w-[240px]">
-          <h1 className="text-[21px] font-semibold tracking-[-.015em] leading-tight">{project.name}</h1>
-          <div className="text-ink-2 mt-1 text-[13px]">
-            {domainLabel(project.domain)} · {conn.connected ? <>{conn.label}{conn.text_too ? " + text" : ""}</> : <span className="text-warn">Not connected</span>}
-            {project.example && !conn.label.startsWith("Practice") ? " · practice agent" : ""}
-          </div>
-          <div id="verdict" className={cx("mt-2 text-[13.5px] font-medium inline-flex items-center gap-2", v.tone === "neutral" ? "text-ink-2" : TONE_TEXT[v.tone])}>
-            <i className={cx("size-2 rounded-full", TONE_DOT[v.tone])} />{v.text}
-          </div>
+  const todoCard = todo.length > 0 && canEdit && (
+    <section id="setup-todo">
+      <div className="rounded-3xl glass overflow-hidden">
+        <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
+          <Icon name="plan" size={16} className="text-accent" />
+          <h2 className="card-title flex-1">Left to set up</h2>
+          <span className="text-sm text-muted">{plural(todo.length, "step")}</span>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {!conn.connected
-            ? <Button id="connect" variant="primary" icon="plug" href={projectHref(k, "/setup/connection")}>Connect agent</Button>
-            : <Button id="release-check" variant="primary" icon="play" href={projectHref(k, "/test/full")}>Release check</Button>}
+        <div className="divide-y divide-line border-t border-line">
+          {todo.map((t) => (
+            <a key={t.key} href={t.href} data-step={t.key} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 hover:no-underline text-ink">
+              <i className={cx("size-1.75 rounded-full flex-none", t.need === "Needed" ? "bg-warn" : "bg-line-strong")} />
+              <span className="flex-1 min-w-0 text-sm">{t.text}</span>
+              <span className={cx("text-sm whitespace-nowrap", t.need === "Needed" ? "text-warn font-semibold" : "text-muted")}>{t.need}</span>
+              <Icon name="chevron" size={14} className="text-muted flex-none" />
+            </a>
+          ))}
         </div>
       </div>
+    </section>
+  );
 
-      <div className="flex flex-col gap-6">
+  return (
+    <>
+      <PageHead
+        title={<div className="flex items-center gap-3.5" id="agent-head"><ProjectAvatar kind={conn.kind} size={44} /><h1 className="page-title">{project.name}</h1></div>}
+        meta={<>
+          <span>{domainLabel(project.domain)} · {conn.connected ? <>{conn.label}{conn.text_too ? " + text" : ""}</> : <span className="text-warn">Not connected</span>}
+            {project.example && !conn.label.startsWith("Practice") ? " · practice agent" : ""}</span>
+          <span id="verdict" className={cx("font-semibold inline-flex items-center gap-2", v.tone === "neutral" ? "text-ink-2" : TONE_TEXT[v.tone])}>
+            <i className={cx("size-2 rounded-full", TONE_DOT[v.tone])} />{v.text}
+          </span>
+        </>}
+      >
+        {canEdit && (!conn.connected
+          ? <Button id="connect" variant="primary" icon="plug" href={projectHref(k, "/setup/connection")}>Connect agent</Button>
+          : <Button id="release-check" variant="primary" icon="play" href={projectHref(k, "/test/full/run")}>Run release check</Button>)}
+      </PageHead>
+
+      <div className="flex flex-col gap-8">
         {running && (
           <a href={projectHref(k, `/live/${running.id}`)} id="live-banner"
-            className="flex items-center gap-3 px-4 py-3 rounded-[12px] border border-line bg-surface text-ink hover:no-underline hover:bg-surface-2">
-            <LiveDot /><b className="font-medium flex-1">{running.kind === "exit-check" ? "Exit check running" : "Test run in progress"}</b>
-            <span className="text-accent-ink font-medium text-[13px] flex items-center gap-1">Watch live <Icon name="arrow" size={14} /></span>
+            className="flex items-center gap-3 px-4 py-3 rounded-2xl glass text-ink hover:no-underline">
+            <LiveDot /><b className="font-semibold flex-1">{running.kind === "exit-check" ? "Exit check running" : "Test run in progress"}</b>
+            <span className="text-accent-ink font-semibold text-sm flex items-center gap-1">Watch live <Icon name="arrow" size={14} /></span>
           </a>
         )}
+
+        {todo.some((t) => t.need === "Needed") && todoCard}
 
         {s.runs > 0 && (
           <KpiStrip id="agent-kpis" items={[
             { label: "Test types passed", value: ran.length ? `${ran.filter((m) => m.status === "passed" || m.status === "watch").length} of ${ran.length}` : "—",
-              foot: `${types.length - ran.length} not run yet`, tone: ran.some((m) => m.status === "failed") ? "bad" : ran.length ? "good" : undefined },
+              foot: types.length - ran.length ? `${types.length - ran.length} not run yet` : "all run", tone: ran.some((m) => m.status === "failed") ? "bad" : ran.length ? "good" : undefined },
             { label: "Runs", value: s.runs, foot: `${s.calls} test calls` },
             { label: "Slowest answer (p95)", value: s.latency ? fmtMs(s.latency.p95_ms) : "—",
               foot: s.latency ? (lim ? `limit ${fmtMs(lim)}` : `typical ${fmtMs(s.latency.p50_ms)}`) : "after a voice run",
               tone: s.latency && lim && s.latency.p95_ms != null ? (s.latency.p95_ms <= lim ? "good" : "bad") : undefined },
-            { label: "Test cases", value: s.scenarios, foot: `${s.personas} caller${s.personas === 1 ? "" : "s"}` },
+            { label: "Test cases", value: s.scenarios, foot: plural(s.personas, "caller") },
             { label: "Spend", value: money(s.cost_usd), foot: "Claude, this agent" },
           ]} />
         )}
 
-        <section id="readiness">
-          <div className="flex items-baseline gap-3 mb-2.5">
-            <h2 className="font-semibold text-[15px] flex-1">Results by test type</h2>
-            <span className="text-muted text-[13px] hidden sm:inline">latest run of each</span>
-          </div>
+        <Section id="readiness" title="Results by test type" sub="the latest run of each · open a row for its test cases, runs and reports">
           <Card flush>
-            <Table head={["Test type", "Checks", "Result", "Latest finding", "Runs", "Last run"]}>
+            <Table head={["Test type", "What it checks", "Result", "Latest finding", "Runs", "Last run"]}>
               {types.map((m) => (
                 <tr key={m.id} className={rowLink} data-type={m.id} onClick={() => navigate(projectHref(k, `/test/${m.id}`))}>
-                  <td className="whitespace-nowrap"><b className="font-medium">{MODE_TITLE[m.id as TestModeId]}</b></td>
-                  <td className="text-ink-2 min-w-[220px]">{m.question}</td>
+                  <td className="whitespace-nowrap"><b className="font-semibold">{MODE_TITLE[m.id as TestModeId]}</b></td>
+                  <td className="text-ink-2 min-w-55">{m.question}</td>
                   <td>{m.run_id
-                    ? <a href={projectHref(k, `/runs/${m.run_id}`)} onClick={(e) => e.stopPropagation()} className="hover:no-underline"><StatusWords m={m} /></a>
+                    ? <a href={projectHref(k, `/runs/${m.run_id}`)} onClick={(e) => e.stopPropagation()} className="hover:no-underline" title="Open this run's report"><StatusWords m={m} /></a>
                     : <span title={m.why || undefined}><StatusWords m={m} /></span>}</td>
-                  <td className="text-ink-2 max-w-[340px]"><span className="line-clamp-2">{m.top_finding || m.headline || (m.status === "unavailable" ? m.why : "") || <span className="text-muted">—</span>}</span></td>
+                  <td className="text-ink-2 max-w-85"><span className="line-clamp-2">{m.top_finding || m.headline || (m.status === "unavailable" ? m.why : "") || <span className="text-muted">—</span>}</span></td>
                   <td className="tabular-nums text-ink-2">{m.runs || <span className="text-muted">0</span>}</td>
                   <td className="text-muted whitespace-nowrap">{m.at ? <When iso={m.at} /> : "—"}</td>
                 </tr>
               ))}
             </Table>
           </Card>
-        </section>
-
-        {findings.length > 0 && (
-          <section id="findings">
-            <CardHead level={2} title="Findings" sub="the top finding of each test type that did not pass cleanly" className="mb-2.5" />
-            <div className=" rounded-[20px] glass divide-y divide-line overflow-hidden">
-              {findings.map((m) => (
-                <a key={m.id} href={projectHref(k, `/runs/${m.run_id}`)} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-2 hover:no-underline text-ink">
-                  <i className={cx("size-[7px] rounded-full flex-none", TONE_DOT[TYPE_STATUS[m.status].tone === "good" ? "warn" : TYPE_STATUS[m.status].tone])} />
-                  <b className="font-medium whitespace-nowrap">{MODE_TITLE[m.id]}</b>
-                  <span className="text-ink-2 flex-1 min-w-0 truncate">{m.top_finding}</span>
-                  <span className="text-accent-ink text-[13px] font-medium whitespace-nowrap inline-flex items-center gap-1">Open report<Icon name="arrow" size={13} /></span>
-                </a>
-              ))}
-            </div>
-          </section>
-        )}
+        </Section>
 
         {data.trend.length > 1 && (
-          <section id="trend">
-            <CardHead level={2} title="This agent over time" sub={`last ${data.trend.length} runs · click a dot to open its report`} className="mb-2.5" />
+          <Section id="trend" title="This agent over time" sub={`last ${data.trend.length} runs · click a dot to open its report`}>
             <div className={cx("grid gap-4 grid-cols-1", voiceTrend && "lg:grid-cols-2")}>
               <Card>
                 <CardHead title="Test calls passed" />
@@ -163,20 +163,18 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
                 </Card>
               )}
             </div>
-          </section>
+          </Section>
         )}
 
-        <div className={cx("grid gap-6 items-start grid-cols-1", todo.length > 0 && "xl:grid-cols-[minmax(0,1fr)_400px]")}>
-          <section>
-            <div className="flex items-center mb-2.5"><h2 className="font-semibold text-[15px] flex-1">Recent runs</h2>
-              <Button href={projectHref(k, "/runs")} variant="ghost" size="sm">All runs <Icon name="arrow" /></Button></div>
+        <div className={cx("grid gap-6 items-start grid-cols-1", todo.length > 0 && !todo.some((t) => t.need === "Needed") && canEdit && "xl:grid-cols-[minmax(0,1fr)_400px]")}>
+          <Section title="Recent runs" action={<Button href={projectHref(k, "/runs")} variant="ghost" size="sm">All runs <Icon name="arrow" /></Button>}>
             <Card flush>
               {data.recent_runs.length ? (
                 <Table head={["Result", "Test type", "Calls", "Passed / failed", "When"]}>
                   {data.recent_runs.slice(0, 6).map((r) => (
                     <tr key={r.run_id} className={rowLink} onClick={() => navigate(runHref(r))}>
                       <td><Badge status={r.decision || r.status} label={runLabel(r)} /></td>
-                      <td>{modeTitle(r.test_mode)}{r.offline ? <span className="text-muted"> · dry run</span> : null}{r.agent_options?.bugs ? <span className="text-bad text-[13px] font-medium"> · bugs on</span> : null}</td>
+                      <td>{modeTitle(r.test_mode)}{r.offline ? <span className="text-muted"> · dry run</span> : null}{r.agent_options?.bugs ? <span className="text-bad text-sm font-medium"> · bugs on</span> : null}</td>
                       <td className="tabular-nums">{r.calls_started}{r.planned ? `/${r.planned}` : ""}</td>
                       <td className="tabular-nums whitespace-nowrap"><span className="text-good">{r.counts.PASS || 0}</span> / <span className="text-bad">{r.counts.FAIL || 0}</span></td>
                       <td className="text-muted whitespace-nowrap"><When iso={r.started_at} /></td>
@@ -190,20 +188,8 @@ export function ProjectOverviewPage({ project }: { project: Project }) {
                     : <Button variant="primary" icon="plug" href={projectHref(k, "/setup/connection")}>Connect agent</Button>} />
               )}
             </Card>
-          </section>
-          {todo.length > 0 && (
-            <section id="setup-todo">
-              <CardHead level={2} title="Left to set up" sub={`${todo.length}`} className="mb-2.5" />
-              <div className=" rounded-[20px] glass divide-y divide-line overflow-hidden">
-                {todo.map((t) => (
-                  <a key={t.key} href={t.href} data-step={t.key} className="flex items-start gap-3 px-4 py-2.5 hover:bg-surface-2 hover:no-underline text-ink">
-                    <span className="flex-1 min-w-0 text-[13px]">{t.text}</span>
-                    <span className={cx("text-[13px] whitespace-nowrap", t.need === "Needed" ? "text-warn font-medium" : "text-muted")}>{t.need}</span>
-                  </a>
-                ))}
-              </div>
-            </section>
-          )}
+          </Section>
+          {!todo.some((t) => t.need === "Needed") && todoCard}
         </div>
 
         {j && j.to_review > 0 && (

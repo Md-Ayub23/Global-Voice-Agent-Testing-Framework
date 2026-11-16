@@ -1,5 +1,6 @@
 # Vocto as a team server: `docker compose up -d`, then open http://<this server>:8765.
-# Put an HTTPS proxy in front (Caddy, nginx, a cloud load balancer) and set VOCTO_SECURE_COOKIES=1.
+# Put an HTTPS proxy in front (Caddy, nginx, a cloud load balancer), set VOCTO_SECURE_COOKIES=1 and
+# VOCTO_TRUSTED_PROXIES to the proxy's address.
 services:
   vocto:
     build: .
@@ -13,6 +14,7 @@ services:
       # The host names people type to reach Vocto (comma-separated). Required: the server refuses others.
       VOCTO_ALLOWED_HOSTS: "${VOCTO_ALLOWED_HOSTS:-localhost}"
       VOCTO_SECURE_COOKIES: "${VOCTO_SECURE_COOKIES:-0}"
+      VOCTO_TRUSTED_PROXIES: "${VOCTO_TRUSTED_PROXIES:-}"   # the HTTPS proxy's address, e.g. 172.16.0.0/12
       # Optional: the Claude key for live runs (or set it in Settings, as an admin).
       ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
       VOCTO_MAX_RUNS: "${VOCTO_MAX_RUNS:-2}"

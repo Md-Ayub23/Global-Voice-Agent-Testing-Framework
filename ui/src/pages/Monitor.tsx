@@ -8,7 +8,8 @@ import { Check, Grid, Num, Problems, SaveBar, Text } from "../components/form";
 import { Icon } from "../components/Icon";
 import { CallsPerDay, CHECK_WORDS, FlagChip, flagLabel } from "../components/monitor";
 import { QualityTiles } from "../components/quality";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, Field, LinkTabs, Notice, PageHead, Seg, Skeleton, Switch, Table, rowLink } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, EmptyState, Field, LinkTabs, Notice, PageHead, Seg, Skeleton, Switch, Table, rowLink, ReadOnly } from "../components/ui";
+import { useCanEdit } from "../lib/auth";
 import { api, qs } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
 import { cx, fmtMs, plural } from "../lib/format";
@@ -46,6 +47,7 @@ function change(now: number | null, before: number | null, unit = "%", lowerBett
 export function MonitorPageView({ project, tab, query }: { project: Project; tab: MonitorTab; query: URLSearchParams }) {
   useCrumbs([{ label: project.name, href: projectHref(project.key) }, { label: "Real calls" }]);
   const { data, error, reload } = useLoad(() => api.get<Page>(`/api/project/${project.key}/monitor`), [project.key]);
+  const canEdit = useCanEdit();
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton />;
   const at = (p = "") => projectHref(project.key, `/calls${p}`);
@@ -63,8 +65,10 @@ export function MonitorPageView({ project, tab, query }: { project: Project; tab
       ]} />
       {tab === "overview" && <Overview page={data} project={project} reload={reload} />}
       {tab === "calls" && <CallsList page={data} project={project} query={query} />}
-      {tab === "import" && <ImportTab page={data} project={project} reload={reload} />}
-      {tab === "settings" && <SettingsTab page={data} project={project} reload={reload} />}
+      <ReadOnly when={!canEdit}>
+        {tab === "import" && <ImportTab page={data} project={project} reload={reload} />}
+        {tab === "settings" && <SettingsTab page={data} project={project} reload={reload} />}
+      </ReadOnly>
     </>
   );
 }
@@ -137,26 +141,26 @@ function Overview({ page, project, reload }: { page: Page; project: Project; rel
       {page.quality.length > 0 && <QualityTiles rows={page.quality} sub={`Real calls in the last ${hours} h · worked out from turn times · bands are this agent's (Set up › Pass rules)`} />}
       <div className="grid gap-4 grid-cols-1 xl:grid-cols-2">
         <Card flush>
-          <CardHead level={2} title="Why calls were flagged" sub="most common first, recent calls" className="px-[18px] pt-4 mb-2" />
+          <CardHead level={2} title="Why calls were flagged" sub="most common first, recent calls" className="px-4.5 pt-4 mb-2" />
           {page.top_flags.length ? (
             <Table compact head={["Reason", "Calls", ""]}>
               {page.top_flags.map((f) => (
                 <tr key={`${f.kind}:${f.id}`}>
-                  <td><b>{flagLabel(f, page.metric_defs)}</b><div className="text-muted text-[13px]">{f.kind === "metric" ? "call quality" : f.kind === "check" ? "real-call check" : "AI judge"}</div></td>
+                  <td><b>{flagLabel(f, page.metric_defs)}</b><div className="text-muted text-sm">{f.kind === "metric" ? "call quality" : f.kind === "check" ? "real-call check" : "AI judge"}</div></td>
                   <td className="tabular-nums">{f.calls}</td>
                   <td className="text-right"><a href={`${projectHref(project.key, "/calls/list")}?${qs({ filter: "flagged" })}`}>See calls</a></td>
                 </tr>
               ))}
             </Table>
-          ) : <div className="px-[18px] pb-4 text-muted text-[13px]">Nothing flagged.</div>}
+          ) : <div className="px-4.5 pb-4 text-muted text-sm">Nothing flagged.</div>}
         </Card>
         <Card flush>
-          <CardHead level={2} title="By agent version" sub="when the platform says which version took the call" className="px-[18px] pt-4 mb-2" />
+          <CardHead level={2} title="By agent version" sub="when the platform says which version took the call" className="px-4.5 pt-4 mb-2" />
           {page.versions.length ? (
             <Table compact head={["Version", "Calls", "Pass rate", "Flagged", "p90"]}>
               {page.versions.map((v) => (
                 <tr key={v.version} className={rowLink} onClick={() => navigate(`${projectHref(project.key, "/calls/list")}?${qs({ version: v.version })}`)}>
-                  <td className="font-mono text-[13px]">{v.version}<div className="text-muted text-[13px] font-sans"><When iso={v.first_seen} /></div></td>
+                  <td className="font-mono text-sm">{v.version}<div className="text-muted text-sm font-sans"><When iso={v.first_seen} /></div></td>
                   <td className="tabular-nums">{v.calls}</td>
                   <td className="tabular-nums">{pctText(v.pass_rate)}</td>
                   <td className="tabular-nums">{pctText(v.flagged_pct)}</td>
@@ -164,12 +168,12 @@ function Overview({ page, project, reload }: { page: Page; project: Project; rel
                 </tr>
               ))}
             </Table>
-          ) : <div className="px-[18px] pb-4 text-muted text-[13px]">No version information in these calls. Send <span className="font-mono">agent_version</span> with each call to compare releases.</div>}
+          ) : <div className="px-4.5 pb-4 text-muted text-sm">No version information in these calls. Send <span className="font-mono">agent_version</span> with each call to compare releases.</div>}
         </Card>
       </div>
       {page.alerts.history.length > 0 && (
         <Card flush>
-          <CardHead level={2} title="Alert history" sub={page.alerts.history.length > 12 ? `latest 12 of ${page.alerts.history.length}` : undefined} className="px-[18px] pt-4 mb-2" />
+          <CardHead level={2} title="Alert history" sub={page.alerts.history.length > 12 ? `latest 12 of ${page.alerts.history.length}` : undefined} className="px-4.5 pt-4 mb-2" />
           <Table compact head={["When", "", "What"]}>
             {page.alerts.history.slice(0, 12).map((h, i) => (
               <tr key={i}><td className="whitespace-nowrap"><When iso={h.at} /></td>
@@ -199,28 +203,28 @@ function CallsList({ page, project, query }: { page: Page; project: Project; que
   };
   return (
     <Card flush>
-      <div className="flex flex-wrap items-center gap-2.5 px-[18px] pt-4 pb-3">
+      <div className="flex flex-wrap items-center gap-2.5 px-4.5 pt-4 pb-3">
         <Seg id="calls-filter" value={filter} options={FILTERS} onChange={(v) => go({ filter: v })} />
         {version && <Chip icon="tag">version {version} <button className="ml-1 cursor-pointer" aria-label="Show all versions" onClick={() => go({ version: "" })}><Icon name="x" size={12} /></button></Chip>}
         <form className="ml-auto flex gap-1.5" onSubmit={(e) => { e.preventDefault(); go({ q }); }}>
-          <Text id="calls-search" value={q} onChange={setQ} placeholder="Search words or reasons" className="w-[220px]" />
+          <Text id="calls-search" value={q} onChange={setQ} placeholder="Search words or reasons" className="w-55" />
           <Button size="sm" icon="search" type="submit">Search</Button>
         </form>
       </div>
-      {error && <Notice tone="bad" className="mx-[18px] mb-4">{error.message}</Notice>}
+      {error && <Notice tone="bad" className="mx-4.5 mb-4">{error.message}</Notice>}
       {!data ? <Skeleton height={200} /> : data.rows.length === 0 ? (
-        <div className="px-[18px] pb-5 text-muted text-[13px]">No calls match.</div>
+        <div className="px-4.5 pb-5 text-muted text-sm">No calls match.</div>
       ) : (
         <>
           <Table head={["When", "What the caller wanted", "Result", "Why", "Length"]}>
             {data.rows.map((r) => (
               <tr key={r.call_id} data-call={r.call_id} className={rowLink} onClick={() => navigate(projectHref(project.key, `/calls/${r.call_id}`))}>
                 <td className="whitespace-nowrap"><When iso={r.started_at || r.imported_at} />
-                  <div className="text-muted text-[13px]">{SOURCE[r.source] || r.source}{r.agent_version ? ` · ${r.agent_version}` : ""}</div></td>
-                <td className="max-w-[380px]"><div className="truncate">{r.summary || <span className="text-muted">(the caller said nothing)</span>}</div>
-                  {r.redacted > 0 && <div className="text-muted text-[13px]"><Icon name="shield" size={11} className="inline -mt-0.5" /> {plural(r.redacted, "personal detail")} removed</div>}</td>
+                  <div className="text-muted text-sm">{SOURCE[r.source] || r.source}{r.agent_version ? ` · ${r.agent_version}` : ""}</div></td>
+                <td className="max-w-95"><div className="truncate">{r.summary || <span className="text-muted">(the caller said nothing)</span>}</div>
+                  {r.redacted > 0 && <div className="text-muted text-sm"><Icon name="shield" size={11} className="inline -mt-0.5" /> {plural(r.redacted, "personal detail")} removed</div>}</td>
                 <td><Badge status={r.status} />
-                  {r.judge_state === "pending" && <div className="text-muted text-[13px] mt-0.5">judges waiting</div>}</td>
+                  {r.judge_state === "pending" && <div className="text-muted text-sm mt-0.5">judges waiting</div>}</td>
                 <td><div className="flex flex-wrap gap-1">{r.flags.slice(0, 2).map((f, i) => <FlagChip key={i} f={f} defs={page.metric_defs} />)}
                   {r.flags.length > 2 && <Chip>+{r.flags.length - 2}</Chip>}
                   {r.escalated && <Chip icon="user">handed over</Chip>}</div></td>
@@ -228,7 +232,7 @@ function CallsList({ page, project, query }: { page: Page; project: Project; que
               </tr>
             ))}
           </Table>
-          <div className="px-[18px] py-3 flex items-center gap-3 text-muted text-[13px]">
+          <div className="px-4.5 py-3 flex items-center gap-3 text-muted text-sm">
             Showing {data.rows.length} of {data.total}
             {data.rows.length < data.total && <Button size="sm" onClick={() => setLimit(limit + 100)}>Show more</Button>}
           </div>
@@ -279,21 +283,21 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
       <Card>
         <CardHead level={2} title="Import call files" sub="Personal data is removed in this step: only the cleaned copy is kept." />
         <div
-          className={cx("border-2 border-dashed rounded-[12px] p-8 grid place-items-center text-center gap-2 transition-colors cursor-pointer",
+          className={cx("border-2 border-dashed rounded-xl p-8 grid place-items-center text-center gap-2 transition-colors cursor-pointer",
             over ? "border-accent bg-accent-soft" : "border-line hover:border-line-strong")}
           onClick={() => input.current?.click()}
           onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
           onDrop={(e) => { e.preventDefault(); setOver(false); setFiles([...files, ...Array.from(e.dataTransfer.files)]); }}>
           <Icon name="file" size={26} className="text-muted" />
           <div className="font-semibold">Drop call files here, or click to choose</div>
-          <div className="text-muted text-[13px]">JSON, JSON lines or plain-text transcripts · up to 25 MB each</div>
+          <div className="text-muted text-sm">JSON, JSON lines or plain-text transcripts · up to 25 MB each</div>
           <input ref={input} id="import-files" type="file" multiple accept=".json,.jsonl,.ndjson,.txt" className="hidden"
             onChange={(e) => { setFiles([...files, ...Array.from(e.target.files || [])]); e.target.value = ""; }} />
         </div>
         {files.length > 0 && (
           <div className="mt-3 grid gap-1.5">
             {files.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 text-[13px]"><Icon name="file" size={14} className="text-muted" />{f.name}
+              <div key={i} className="flex items-center gap-2 text-sm"><Icon name="file" size={14} className="text-muted" />{f.name}
                 <span className="text-muted">{(f.size / 1024).toFixed(1)} KB</span>
                 <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove" onClick={() => setFiles(files.filter((_, j) => j !== i))} /></div>
             ))}
@@ -308,7 +312,7 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
                 <b>{f.name}:</b>{" "}
                 {f.error ? f.error : <>{plural(f.added, "call")} added{f.duplicates ? `, ${f.duplicates} already imported` : ""}.
                   {f.first && <> <a href={projectHref(project.key, `/calls/${f.first}`)}>Open the first</a></>}</>}
-                {f.problems?.map((p, j) => <div key={j} className="text-[13px]">{p}</div>)}
+                {f.problems?.map((p, j) => <div key={j} className="text-sm">{p}</div>)}
               </Notice>
             ))}
             {result.judging && <Notice icon="scale">The AI judges are scoring the new calls in the background.</Notice>}
@@ -318,14 +322,14 @@ function ImportTab({ page, project, reload }: { page: Page; project: Project; re
       </Card>
       <Card>
         <CardHead title="What Vocto can read" />
-        <ul className="grid gap-2 text-[13px]">
+        <ul className="grid gap-2 text-sm">
           <li><b>Vapi</b>: end-of-call reports, or calls from Vapi's API.</li>
           <li><b>Retell</b>: call_ended or call_analyzed webhooks, or call objects.</li>
           <li><b>Plain transcripts</b>: one turn per line, starting <span className="font-mono">Agent:</span> or <span className="font-mono">Caller:</span>.</li>
           <li><b>Vocto JSON</b> from any other platform, one call per file, a list, or one per line:</li>
         </ul>
-        <pre className="mt-2 text-[13px] font-mono bg-surface-2 border border-line rounded-lg p-3 overflow-x-auto">{EXAMPLE}</pre>
-        <div className="text-muted text-[13px] mt-2">Turn times (start_ms, end_ms) are optional. With them, response time, silences and talk share are measured too.</div>
+        <pre className="mt-2 text-sm font-mono bg-surface-2 border border-line rounded-lg p-3 overflow-x-auto">{EXAMPLE}</pre>
+        <div className="text-muted text-sm mt-2">Turn times (start_ms, end_ms) are optional. With them, response time, silences and talk share are measured too.</div>
       </Card>
     </div>
   );
@@ -405,7 +409,7 @@ function SettingsTab({ page, project, reload }: { page: Page; project: Project; 
             </Notice>
           )}
           {page.intake.error && <Notice tone="bad">{page.intake.error}</Notice>}
-          <div className="text-muted text-[13px] grid gap-1">
+          <div className="text-muted text-sm grid gap-1">
             <div><b className="text-ink-2">Vapi:</b> set the assistant's Server URL to this address and its server secret to the token.</div>
             <div><b className="text-ink-2">Retell:</b> set the webhook URL to this address followed by <span className="font-mono">?token=</span> and the token.</div>
             <div><b className="text-ink-2">Any other platform:</b> POST each call as Vocto JSON with the header <span className="font-mono">Authorization: Bearer</span> and the token.</div>
@@ -422,9 +426,9 @@ function SettingsTab({ page, project, reload }: { page: Page; project: Project; 
               onChange={(on) => set("privacy", { redact: on ? [...privacy.redact, d] : privacy.redact.filter((x) => x !== d) })} />
           ))}
         </div>
-        <div className="text-muted text-[13px] mt-2">Always removed as well: personal values the agent sends to its tools (the tools' personal fields, email, phone, date of birth, names) and this agent's own patterns.</div>
+        <div className="text-muted text-sm mt-2">Always removed as well: personal values the agent sends to its tools (the tools' personal fields, email, phone, date of birth, names) and this agent's own patterns.</div>
         <div className="mt-3 grid gap-2">
-          <div className="font-semibold text-[13px]">Your own patterns</div>
+          <div className="font-semibold text-sm">Your own patterns</div>
           {(privacy.patterns || []).map((p, i) => (
             <div key={i} className="flex gap-1.5 items-center">
               <Text id={`mon-pat-${i}-name`} mono value={p.name} placeholder="member_id" className="w-[34%]"
@@ -472,7 +476,7 @@ function SettingsTab({ page, project, reload }: { page: Page; project: Project; 
       <Card>
         <CardHead level={2} title="Delete real calls" sub="Removes every real call of this agent from this computer. This can't be undone." />
         {confirmAll ? (
-          <div className="flex gap-2 items-center flex-wrap"><span className="text-[13px]">Delete all {plural(page.totals.calls, "real call")}?</span>
+          <div className="flex gap-2 items-center flex-wrap"><span className="text-sm">Delete all {plural(page.totals.calls, "real call")}?</span>
             <Button id="mon-delete-yes" size="sm" variant="danger" icon="x" onClick={deleteAll}>Yes, delete them</Button>
             <Button size="sm" onClick={() => setConfirmAll(false)}>Cancel</Button></div>
         ) : <div><Button id="mon-delete-all" size="sm" icon="x" disabled={!page.totals.calls} onClick={() => setConfirmAll(true)}>Delete all real calls</Button></div>}

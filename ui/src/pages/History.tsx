@@ -17,7 +17,7 @@ import type { BaselinePage, ExitCheckRecord, Project, RunSummary, TestModeId } f
 
 type Filter = "all" | "GO" | "NO_GO" | "NO_GO_INSUFFICIENT_EVIDENCE" | "none" | "text" | "voice" | "health";
 const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "All" }, { value: "GO", label: "Ready" }, { value: "NO_GO", label: "Not ready" },
+  { value: "all", label: "All" }, { value: "GO", label: "Passed or ready" }, { value: "NO_GO", label: "Failed or not ready" },
   { value: "NO_GO_INSUFFICIENT_EVIDENCE", label: "Not enough evidence" }, { value: "none", label: "No result" },
   { value: "text", label: "Text" }, { value: "voice", label: "Voice" }, { value: "health", label: "Health checks" },
 ];
@@ -47,7 +47,7 @@ export function History({ project, mode }: { project: Project; mode?: TestModeId
   const { data, error } = useLoad(() => Promise.all([
     api.get<RunSummary[]>(`/api/runs?project=${encodeURIComponent(project.key)}`),
     api.get<ExitCheckRecord[]>(`/api/exit-checks?project=${encodeURIComponent(project.key)}`),
-  ]), [project.key, live?.id]);
+  ]), [project.key, live?.id], { keep: true });
   const files = project.profiles.map((p) => p.file);
   const { data: bases, reload: reloadBases } = useLoad(() => Promise.all(files.map((f) =>
     api.get<BaselinePage>(`/api/project/${project.key}/baseline?file=${encodeURIComponent(f)}`).catch(() => null))), [project.key, files.join(",")]);
@@ -70,13 +70,13 @@ export function History({ project, mode }: { project: Project; mode?: TestModeId
       {!mode && <PageHead title="Results" sub={<>Every test run of <b className="text-ink">{project.name}</b> and its release readiness, newest first.</>} />}
       {live && !mode && (
         <a href={projectHref(project.key, `/live/${live.id}`)} id="live-card"
-          className="group flex items-center gap-4 mb-5 p-4 rounded-[12px] border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-accent-soft/50 hover:bg-accent-soft hover:no-underline text-ink transition-colors">
-          <span className="size-10 rounded-[12px] grid place-items-center bg-accent text-white flex-none"><Icon name="wave" size={20} /></span>
+          className="group flex items-center gap-4 mb-5 p-4 rounded-xl border border-[color-mix(in_srgb,var(--accent)_35%,var(--line))] bg-accent-soft/50 hover:bg-accent-soft hover:no-underline text-ink transition-colors">
+          <span className="size-10 rounded-xl grid place-items-center bg-accent text-white flex-none"><Icon name="wave" size={20} /></span>
           <span className="flex-1 min-w-0">
-            <span className="flex items-center gap-2"><LiveDot /><b className="text-[14px]">{live.kind === "exit-check" ? "Exit check running" : live.kind === "load" ? "Load test in progress" : "Test run in progress"}</b></span>
-            <span className="block text-[13px] text-ink-2 mt-0.5">Started {ago(live.started_at)} · watch the calls and listen in as they happen</span>
+            <span className="flex items-center gap-2"><LiveDot /><b className="text-base">{live.kind === "exit-check" ? "Exit check running" : live.kind === "load" ? "Load test in progress" : "Test run in progress"}</b></span>
+            <span className="block text-sm text-ink-2 mt-0.5">Started {ago(live.started_at)} · watch the calls and listen in as they happen</span>
           </span>
-          <span className="text-accent-ink font-semibold text-[13px] inline-flex items-center gap-1">Watch live <Icon name="arrow" size={15} className="transition-transform group-hover:translate-x-0.5" /></span>
+          <span className="text-accent-ink font-semibold text-sm inline-flex items-center gap-1">Watch live <Icon name="arrow" size={15} className="transition-transform group-hover:translate-x-0.5" /></span>
         </a>
       )}
       {(!mode || mode === "regression") && <BaselineCard project={project} pages={bases} reload={reloadBases} />}
@@ -88,29 +88,29 @@ export function History({ project, mode }: { project: Project; mode?: TestModeId
           <div className="flex flex-wrap items-center gap-3 mb-3.5">
             <Seg id="filters" value={st.filter} options={FILTERS} onChange={(filter) => setSt({ ...st, filter })} />
             {!mode && (
-              <select id="mode-filter" aria-label="Test mode" className={cx(inputCls, "w-auto min-w-[170px]")} value={st.mode} onChange={(e) => setSt({ ...st, mode: e.target.value })}>
+              <select id="mode-filter" aria-label="Test mode" className={cx(inputCls, "w-auto min-w-42.5")} value={st.mode} onChange={(e) => setSt({ ...st, mode: e.target.value })}>
                 <option value="">All test modes</option>
                 {modesSeen.map((m) => <option key={m} value={m}>{modeTitle(m)}</option>)}
               </select>
             )}
             <span className="flex-1" />
-            <div className="relative w-full sm:w-auto sm:min-w-[260px]">
-              <Icon name="search" className="absolute left-[11px] top-2.5 text-muted pointer-events-none" />
-              <input id="q" className={cx(inputCls, "pl-[34px]")} placeholder="Search runs…" value={st.q}
+            <div className="relative w-full sm:w-auto sm:min-w-65">
+              <Icon name="search" className="absolute left-2.75 top-2.5 text-muted pointer-events-none" />
+              <input id="q" className={cx(inputCls, "pl-8.5")} placeholder="Search runs…" value={st.q}
                 onChange={(e) => setSt({ ...st, q: e.target.value })} />
             </div>
           </div>
           <Card flush>
             {list.length ? (
-              <Table head={["Readiness", "Run", "Settings", "Calls", "Pass / fail", "Response p50", "Cost", "Started"]}>
+              <Table head={["Result", "Run", "Settings", "Calls", "Pass / fail", "Response p50", "Cost", "Started"]}>
                 {list.map((r) => (
                   <tr key={r.run_id} className={rowLink} data-href={runHref(r)} onClick={() => navigate(runHref(r))}>
                     <td><Badge status={r.decision || r.status} label={runLabel(r)} /></td>
                     <td>
-                      <b className="inline-flex items-center gap-1.5"><Icon name={MODE_ICON[r.test_mode || "functional"] || "play"} size={14} className="text-muted" />{modeTitle(r.test_mode)} · {modeLabel(r.mode)}{baselineIds.has(r.run_id) && <span className="inline-flex items-center gap-1 text-accent-ink text-[13px] font-semibold" title="The baseline: every new run is compared with it"><BaselineIcon />baseline</span>}</b>
-                      <div className="text-muted text-[13px] font-mono">{r.run_id}</div>
+                      <b className="inline-flex items-center gap-1.5"><Icon name={MODE_ICON[r.test_mode || "functional"] || "play"} size={14} className="text-muted" />{modeTitle(r.test_mode)} · {modeLabel(r.mode)}{baselineIds.has(r.run_id) && <span className="inline-flex items-center gap-1 text-accent-ink text-sm font-semibold" title="The baseline: every new run is compared with it"><BaselineIcon />baseline</span>}</b>
+                      <div className="text-muted text-sm font-mono">{r.run_id}</div>
                       {r.vs_baseline && (r.vs_baseline.regressions + r.vs_baseline.worse > 0) && (
-                        <div className="text-[13px] text-bad">{r.vs_baseline.regressions ? `${plural(r.vs_baseline.regressions, "new failure")}` : ""}{r.vs_baseline.regressions && r.vs_baseline.worse ? " · " : ""}{r.vs_baseline.worse ? `${r.vs_baseline.worse} worse` : ""} vs baseline</div>
+                        <div className="text-sm text-bad">{r.vs_baseline.regressions ? `${plural(r.vs_baseline.regressions, "new failure")}` : ""}{r.vs_baseline.regressions && r.vs_baseline.worse ? " · " : ""}{r.vs_baseline.worse ? `${r.vs_baseline.worse} worse` : ""} vs baseline</div>
                       )}
                     </td>
                     <td><div className="flex flex-wrap gap-1.5">{r.kind === "load" && <Chip tone="accent" icon="activity">load test{r.load ? ` · ${SHAPE_LABEL[r.load.shape].toLowerCase()} to ${r.load.calls_at_once}` : ""}</Chip>}<OptionChips run={r} /></div></td>
@@ -118,11 +118,11 @@ export function History({ project, mode }: { project: Project; mode?: TestModeId
                     <td className="tabular-nums whitespace-nowrap">
                       <span className="text-good">{r.counts.PASS || 0}</span> / <span className="text-bad">{r.counts.FAIL || 0}</span>
                       {r.counts.ERROR ? <span className="text-muted"> · {r.counts.ERROR} {r.kind === "load" ? "didn't finish" : "err"}</span> : null}
-                      {r.kind === "load" && r.load?.capacity != null && <div className="text-muted text-[13px]">capacity {r.load.capacity} at once</div>}
+                      {r.kind === "load" && r.load?.capacity != null && <div className="text-muted text-sm">capacity {r.load.capacity} at once</div>}
                     </td>
                     <td className="tabular-nums">{r.mode === "voice" ? fmtMs(r.p50_ms) : <span className="text-muted">—</span>}</td>
                     <td className="tabular-nums">{money(r.cost_usd)}</td>
-                    <td className="whitespace-nowrap">{fmtDate(r.started_at)}<div className="text-muted text-[13px]">{ago(r.started_at)}</div></td>
+                    <td className="whitespace-nowrap">{fmtDate(r.started_at)}<div className="text-muted text-sm">{ago(r.started_at)}</div></td>
                   </tr>
                 ))}
               </Table>
@@ -144,8 +144,8 @@ export function History({ project, mode }: { project: Project; mode?: TestModeId
               <Table compact>
                 {c.rows.map((r) => (
                   <tr key={r.run_id + r.label}>
-                    <td className="w-[90px]"><Badge status={r.ok ? "PASS" : "FAIL"} label={r.ok ? "OK" : "MISS"} /></td>
-                    <td><b>{r.label === "clean" ? "Clean agent" : r.label}</b>{r.title && r.label !== "clean" && <div className="text-muted text-[13px]">{r.title}</div>}</td>
+                    <td className="w-22.5"><Badge status={r.ok ? "PASS" : "FAIL"} label={r.ok ? "OK" : "MISS"} /></td>
+                    <td><b>{r.label === "clean" ? "Clean agent" : r.label}</b>{r.title && r.label !== "clean" && <div className="text-muted text-sm">{r.title}</div>}</td>
                     <td className="text-ink-2">{r.detail}</td>
                     <td><a href={runHref({ run_id: r.run_id, project_key: project.key })} className="hover:no-underline"><Badge status={r.decision} /></a></td>
                   </tr>
@@ -181,22 +181,22 @@ function BaselineCard({ project, pages, reload }: { project: Project; pages: (Ba
   return (
     <Card className="mb-5" id="baseline-card">
       <div className="flex items-start gap-3 flex-wrap">
-        <span className="size-9 rounded-[12px] grid place-items-center bg-accent-soft text-accent flex-none"><Icon name="anchor" size={18} /></span>
-        <div className="flex-1 min-w-[240px]">
-          <b className="text-[14px]">Baseline</b>
+        <span className="size-9 rounded-xl grid place-items-center bg-accent-soft text-accent flex-none"><Icon name="anchor" size={18} /></span>
+        <div className="flex-1 min-w-60">
+          <b className="text-base">Baseline</b>
           {set.length ? set.map((p) => (
-            <div key={p.file} className="text-[13px] text-ink-2 mt-0.5 flex flex-wrap items-center gap-x-2">
+            <div key={p.file} className="text-sm text-ink-2 mt-0.5 flex flex-wrap items-center gap-x-2">
               {channel(p.file) && <span className="text-muted">{channel(p.file)}:</span>}
-              <a className="font-mono text-[13px]" href={runHref({ run_id: p.baseline!.run_id, project_key: project.key })}>{p.baseline!.run_id}</a>
+              <a className="font-mono text-sm" href={runHref({ run_id: p.baseline!.run_id, project_key: project.key })}>{p.baseline!.run_id}</a>
               <Badge status={p.baseline!.decision} />
               <span className="text-muted">set {ago(p.baseline!.set_at)}{p.baseline!.note ? ` · ${p.baseline!.note}` : ""}</span>
-              <button type="button" className="text-muted hover:text-bad text-[13px] underline-offset-2 hover:underline cursor-pointer" onClick={() => void clear(p.file)}>Remove</button>
+              <button type="button" className="text-muted hover:text-bad text-sm underline-offset-2 hover:underline cursor-pointer" onClick={() => void clear(p.file)}>Remove</button>
             </div>
           )) : (
-            <div className="text-[13px] text-ink-2 mt-0.5">None yet. Open a good run and click <b>Set as baseline</b>: every new run is then compared with it, and a test that passed there and fails later blocks the release.</div>
+            <div className="text-sm text-ink-2 mt-0.5">None yet. Open a good run and click <b>Set as baseline</b>: every new run is then compared with it, and a test that passed there and fails later blocks the release.</div>
           )}
           {set.length > 0 && !set[0].committed_with_project && (
-            <div className="text-[13px] text-muted mt-1">This agent's files are kept on this computer only, so CI can't see the baseline unless you commit the agent's folder.</div>
+            <div className="text-sm text-muted mt-1">This agent's files are kept on this computer only, so CI can't see the baseline unless you commit the agent's folder.</div>
           )}
         </div>
         {set.length > 0 && <Button size="sm" icon="compare" href={projectHref(project.key, "/compare")}>Compare runs</Button>}

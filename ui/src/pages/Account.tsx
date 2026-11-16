@@ -59,13 +59,13 @@ function Keys({ user }: { user: User }) {
         <Notice tone="good" icon="key" className="mb-3">
           <b>Copy this key now: it is shown only once.</b>
           <div className="flex gap-2 items-center mt-2 flex-wrap">
-            <code className="font-mono text-[12.5px] break-all bg-surface px-2 py-1 rounded-[8px] border border-line flex-1 min-w-0" id="new-key">{made.key}</code>
+            <code className="font-mono text-xs break-all bg-surface px-2 py-1 rounded-lg border border-line flex-1 min-w-0" id="new-key">{made.key}</code>
             <Button size="sm" icon="copy" onClick={() => { void navigator.clipboard?.writeText(made.key || ""); toast("Copied"); }}>Copy</Button>
           </div>
         </Notice>
       )}
       <form className="flex gap-2 flex-wrap items-end mb-3" onSubmit={(e) => { e.preventDefault(); void create(); }}>
-        <Field label="What uses it" className="flex-1 min-w-[180px]"><input id="key-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="GitHub Actions" /></Field>
+        <Field label="What uses it" className="flex-1 min-w-45"><input id="key-name" className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="GitHub Actions" /></Field>
         <Field label="It may"><Select className="w-auto" value={role} onChange={(v) => setRole(v as Role)} options={ROLE_OPTIONS.filter(([r]) => can(user, r))} /></Field>
         <Button type="submit" icon="plus" disabled={!name.trim()}>New key</Button>
       </form>
@@ -74,15 +74,15 @@ function Keys({ user }: { user: User }) {
           {keys.map((k) => (
             <div key={k.id} className="flex items-center gap-2.5 py-2.5 flex-wrap" data-key={k.prefix}>
               <Icon name="key" className="text-muted" />
-              <b className="text-[13.5px]">{k.name}</b>
-              <code className="font-mono text-[12.5px] text-muted">{k.prefix}…</code>
+              <b className="text-sm">{k.name}</b>
+              <code className="font-mono text-xs text-muted">{k.prefix}…</code>
               <Chip>{k.role}</Chip>
-              <span className="text-muted text-[13px] flex-1 min-w-[120px]">last used {when(k.last_used)}</span>
+              <span className="text-muted text-sm flex-1 min-w-30">last used {when(k.last_used)}</span>
               <Button size="sm" variant="danger" onClick={() => void revoke(k)}>Remove</Button>
             </div>
           ))}
         </div>
-      ) : <p className="text-muted text-[13px]">No keys yet.</p>}
+      ) : <p className="text-muted text-sm">No keys yet.</p>}
     </Card>
   );
 }
@@ -119,10 +119,10 @@ function Users({ me }: { me: User }) {
         <div className="divide-y divide-line border-y border-line mb-4">
           {users.map((u) => (
             <div key={u.id} className="flex items-center gap-2.5 py-2.5 flex-wrap" data-user={u.username}>
-              <span className="size-[28px] rounded-full grid place-items-center bg-accent-soft text-accent-ink text-[12px] font-bold flex-none">{(u.name || u.username).slice(0, 2).toUpperCase()}</span>
+              <span className="size-7 rounded-full grid place-items-center bg-accent-soft text-accent-ink text-2xs font-bold flex-none">{(u.name || u.username).slice(0, 2).toUpperCase()}</span>
               <div className="min-w-0 flex-1">
-                <b className="text-[13.5px]">{u.username}</b>{u.name && <span className="text-muted"> · {u.name}</span>}
-                <div className="text-muted text-[12.5px]">last signed in {when(u.last_login)}{u.disabled ? " · switched off" : ""}</div>
+                <b className="text-sm">{u.username}</b>{u.name && <span className="text-muted"> · {u.name}</span>}
+                <div className="text-muted text-xs">last signed in {when(u.last_login)}{u.disabled ? " · switched off" : ""}</div>
               </div>
               <Select className="w-auto" value={u.role} disabled={u.id === me.id} onChange={(v) => void edit(u, { role: v as Role }, `${u.username} is now ${v}`)}
                 options={ROLE_OPTIONS.map(([r]) => [r, r[0].toUpperCase() + r.slice(1)] as [string, string])} />
@@ -165,12 +165,12 @@ function Audit() {
     <Card flush id="audit">
       <div className="px-5 pt-4 pb-2"><CardHead level={2} title="Audit log" sub="sign-ins, user and key changes, secrets and runs; newest first" className="mb-0" /></div>
       {!rows ? <Skeleton height={120} /> : rows.length ? (
-        <div className="divide-y divide-line border-t border-line max-h-[420px] overflow-y-auto scrollbar-thin">
+        <div className="divide-y divide-line border-t border-line max-h-105 overflow-y-auto scrollbar-thin">
           {rows.map((r, i) => {
             const extra = Object.entries(r).filter(([k]) => !["at", "event", "user", "ip"].includes(k)).map(([k, v]) => `${k}: ${String(v)}`).join(" · ");
             return (
-              <div key={i} className="px-5 py-2 text-[13px] flex gap-3 flex-wrap">
-                <span className="text-muted w-[120px] flex-none">{ago(r.at)}</span>
+              <div key={i} className="px-5 py-2 text-sm flex gap-3 flex-wrap">
+                <span className="text-muted w-30 flex-none">{ago(r.at)}</span>
                 <b className={cx(r.event.includes("failed") || r.event.includes("refused") ? "text-bad" : "")}>{r.user || r.username as string || "someone"}</b>
                 <span>{EVENT_WORDS[r.event] || r.event}</span>
                 <span className="text-muted flex-1 min-w-0 truncate">{extra}{r.ip ? ` · from ${r.ip}` : ""}</span>

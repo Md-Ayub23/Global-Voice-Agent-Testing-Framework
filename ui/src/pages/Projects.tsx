@@ -7,6 +7,7 @@ import { Area, Help, Text } from "../components/form";
 import { Icon } from "../components/Icon";
 import { Badge, Button, Card, CardHead, Chip, Choice, EmptyState, Field, Notice, PageHead, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
+import { can, useAuth } from "../lib/auth";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx } from "../lib/format";
 import { domainLabel, modeLabel, projectHref } from "../lib/links";
@@ -23,17 +24,17 @@ function ProjectCard({ p }: { p: Row }) {
       <div className="flex items-start gap-3">
         <ProjectAvatar name={p.name} k={p.key} size={42} />
         <div className="flex-1 min-w-0">
-          <a href={projectHref(p.key)} className="font-semibold text-[15px] text-ink leading-snug block">{p.name}</a>
-          <div className="text-muted text-[13px] mt-0.5">{domainLabel(p.domain)}{p.example ? " · practice agent" : ""}</div>
+          <a href={projectHref(p.key)} className="font-semibold text-md text-ink leading-snug block">{p.name}</a>
+          <div className="text-muted text-sm mt-0.5">{domainLabel(p.domain)}{p.example ? " · practice agent" : ""}</div>
         </div>
         {s.last_decided ? <Badge status={s.last_decided.decision} /> : p.ready ? <Chip tone="good" icon="check">ready</Chip> : <Chip tone="warn" icon="alert">to set up</Chip>}
       </div>
-      {p.description && <p className="text-ink-2 text-[13px] line-clamp-2">{p.description}</p>}
+      {p.description && <p className="text-ink-2 text-sm line-clamp-2">{p.description}</p>}
       <div className="flex flex-wrap gap-1.5">
         {p.channels.map((c) => <Chip key={c} tone={c === "voice" ? "agent" : "caller"} icon={c === "voice" ? "mic" : "text"}>{modeLabel(c)}</Chip>)}
         <Chip icon="target">{s.scenarios} scenario{s.scenarios === 1 ? "" : "s"}</Chip>
       </div>
-      <div className="flex items-center gap-3 pt-3 mt-auto border-t border-line text-[13px]">
+      <div className="flex items-center gap-3 pt-3 mt-auto border-t border-line text-sm">
         <MiniHistory items={s.history.slice(-8)} empty="No runs yet" />
         <span className="flex-1" />
         {s.last_run && <span className="text-muted"><When iso={s.last_run.started_at} /></span>}
@@ -49,7 +50,7 @@ function ProjectCard({ p }: { p: Row }) {
 
 export function Projects() {
   useCrumbs([{ label: "Agents" }]);
-  const { data, error } = useLoad(() => api.get<Dashboard>("/api/dashboard"), []);
+  const { data, error } = useLoad(() => api.get<Dashboard>("/api/dashboard"), [], { keep: true });
   if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
   if (!data) return <Skeleton />;
   const mine = data.projects.filter((p) => !p.example);
@@ -59,15 +60,15 @@ export function Projects() {
       <PageHead title="Agents" sub="Every voice agent you test. Each has its own set up, test cases, runs and results.">
         <Button id="new-project" variant="primary" icon="plus" href="#/projects/new">New agent</Button>
       </PageHead>
-      <h2 className="font-semibold mb-2.5">Your agents</h2>
+      <h2 className="section-title mb-2.5">Your agents</h2>
       {mine.length ? <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 mb-8">{mine.map((p) => <ProjectCard key={p.key} p={p} />)}</div> : (
         <Card className="mb-8"><EmptyState icon="bot" title="No agents yet" text="Add the voice agent you want to test. You'll need its address, and ideally test access to its tools, database and logs."
           action={<Button variant="primary" icon="plus" href="#/projects/new">New agent</Button>} /></Card>
       )}
       {examples.length > 0 && (
         <>
-          <h2 className="font-semibold mb-1">Practice agents</h2>
-          <p className="text-muted text-[13px] mb-2.5">Vocto's own agents, and a real open-source one (Pipecat food ordering), with bugs you can switch on or plant, used to prove that every bug gets caught.</p>
+          <h2 className="section-title mb-1">Practice agents</h2>
+          <p className="text-muted text-sm mb-2.5">Vocto's own agents, and a real open-source one (Pipecat food ordering), with bugs you can switch on or plant, used to prove that every bug gets caught.</p>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{examples.map((p) => <ProjectCard key={p.key} p={p} />)}</div>
         </>
       )}
@@ -79,6 +80,15 @@ const DOMAINS = ["Healthcare", "Banking", "Insurance", "Retail", "Travel", "Tele
 
 export function NewProject() {
   useCrumbs([{ label: "Agents", href: "#/projects" }, { label: "New agent" }]);
+  const { user } = useAuth();
+  if (!can(user, "editor")) {
+    return <EmptyState icon="lock" title="You can view agents, not add them" text="Ask your Vocto admin for editor access to add an agent."
+      action={<a href="#/projects" className="inline-flex items-center gap-1.5"><Icon name="back" size={14} />All agents</a>} />;
+  }
+  return <NewProjectForm />;
+}
+
+function NewProjectForm() {
   const toast = useToast();
   const { reloadProjects } = useApp();
   const [name, setName] = useState("");
@@ -102,7 +112,7 @@ export function NewProject() {
   return (
     <>
       <PageHead title="New agent" sub="Tell Vocto about the agent. Tools, database, logs and test cases come next, step by step." />
-      <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] max-w-[1200px]">
+      <div className="grid gap-4 items-start grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] max-w-300">
         <Card>
           <div className="grid gap-5">
             <div>
@@ -111,14 +121,14 @@ export function NewProject() {
                 <Field label="Name"><Text id="np-name" value={name} onChange={setName} placeholder="Acme Bank card support" /></Field>
                 <Field label="What it does"><Area value={description} onChange={setDescription} rows={2} placeholder="Answers card questions, blocks lost cards and orders replacements." /></Field>
                 <div>
-                  <div className="font-semibold text-[13px] mb-1.5">Industry</div>
+                  <div className="font-semibold text-sm mb-1.5">Industry</div>
                   <div className="flex flex-wrap gap-1.5" id="np-domain">
                     {DOMAINS.map((d) => (
                       <button key={d} type="button" onClick={() => setDomain(domain === d ? "" : d)}
-                        className={cx("px-3 py-1 rounded-full border text-[13px] font-semibold cursor-pointer transition-colors",
+                        className={cx("px-3 py-1 rounded-full border text-sm font-semibold cursor-pointer transition-colors",
                           domain.toLowerCase() === d.toLowerCase() ? "bg-accent-soft text-accent-ink border-transparent" : "bg-surface text-ink-2 border-line hover:border-line-strong")}>{d}</button>
                     ))}
-                    <input className="px-3 py-1 rounded-full border border-line bg-surface text-[13px] w-[140px] outline-none focus:border-accent"
+                    <input className="px-3 py-1 rounded-full border border-line bg-surface text-sm w-35 outline-none focus:border-accent"
                       placeholder="Other…" value={DOMAINS.includes(domain) ? "" : domain} onChange={(e) => setDomain(e.target.value)} aria-label="Other industry" />
                   </div>
                 </div>
@@ -130,26 +140,26 @@ export function NewProject() {
               <div className="grid gap-2 sm:grid-cols-2">
                 <Choice radio on={channel === "voice"} onClick={() => setChannel("voice")} data-channel="voice">
                   <b className="flex items-center gap-2"><Icon name="mic" size={15} />Voice</b>
-                  <div className="text-muted text-[13px] mt-0.5">Real speech both ways, on a phone number or a WebSocket. Response times, interruptions, noisy lines.</div>
+                  <div className="text-muted text-sm mt-0.5">Real speech both ways, on a phone number or a WebSocket. Response times, interruptions, noisy lines.</div>
                 </Choice>
                 <Choice radio on={channel === "text"} onClick={() => setChannel("text")} data-channel="text">
                   <b className="flex items-center gap-2"><Icon name="text" size={15} />Text</b>
-                  <div className="text-muted text-[13px] mt-0.5">Messages over HTTP. Fast and cheap; the same checks without speech. Voice can be added later.</div>
+                  <div className="text-muted text-sm mt-0.5">Messages over HTTP. Fast and cheap; the same checks without speech. Voice can be added later.</div>
                 </Choice>
               </div>
               {channel === "voice" && (
                 <div className="grid gap-2 sm:grid-cols-3 mt-3" id="np-format">
                   <Choice radio on={voiceFormat === "phone"} onClick={() => setVoiceFormat("phone")} data-format="phone">
                     <b>Phone number</b>
-                    <div className="text-muted text-[13px] mt-0.5">The agent answers a real phone number. Vocto rings it through your Twilio or Plivo account, like a real caller.</div>
+                    <div className="text-muted text-sm mt-0.5">The agent answers a real phone number. Vocto rings it through your Twilio or Plivo account, like a real caller.</div>
                   </Choice>
                   <Choice radio on={voiceFormat === "twilio"} onClick={() => setVoiceFormat("twilio")} data-format="twilio">
                     <b>Twilio Media Streams</b>
-                    <div className="text-muted text-[13px] mt-0.5">The agent already takes phone calls from Twilio: Vocto calls the same WebSocket the way Twilio does. Pipecat, LiveKit, Vapi-style servers.</div>
+                    <div className="text-muted text-sm mt-0.5">The agent already takes phone calls from Twilio: Vocto calls the same WebSocket the way Twilio does. Pipecat, LiveKit, Vapi-style servers.</div>
                   </Choice>
                   <Choice radio on={voiceFormat === "vocto"} onClick={() => setVoiceFormat("vocto")} data-format="vocto">
                     <b>Vocto voice protocol</b>
-                    <div className="text-muted text-[13px] mt-0.5">A small WebSocket protocol (PCM16 audio) for agents built to be tested by Vocto.</div>
+                    <div className="text-muted text-sm mt-0.5">A small WebSocket protocol (PCM16 audio) for agents built to be tested by Vocto.</div>
                   </Choice>
                 </div>
               )}
@@ -169,16 +179,14 @@ export function NewProject() {
           <CardHead title="What happens next" />
           <ol className="grid gap-3.5">
             {([
-              ["plug", "Connect the agent", "Its voice or text address, and a quick connection test."],
-              ["tool", "Tools", "The APIs it calls. Vocto watches each call and can break one on purpose."],
-              ["db", "Backend & database", "Read-only access, so Vocto checks what really got saved."],
-              ["logs", "Logs", "Optional: the agent's own log lines, kept with each call."],
-              ["plan", "Test plan", "Scenarios (what callers try) and personas (who calls)."],
-              ["play", "Run tests", "Get a release readiness report with the proof."],
-            ] as const).map(([icon, title, text]) => (
+              ["plug", "Connect", "Its address, a quick connection test, and (optional) its tools, database and logs."],
+              ["plan", "Test cases", "Open a test type, such as Functional, and add test cases or let Claude draft them."],
+              ["play", "Run", "Run one test type, or the Release check that runs them all."],
+              ["layers", "Reports", "Each run's report: what passed, what failed, and the proof from the calls."],
+            ] as const).map(([icon, title, text], i) => (
               <li key={title} className="flex gap-3 items-start">
-                <span className="size-8 rounded-lg grid place-items-center bg-surface text-accent-ink border border-line flex-none"><Icon name={icon} size={15} /></span>
-                <span><b className="text-[13.5px]">{title}</b><span className="block text-[13px] text-ink-2">{text}</span></span>
+                <span className="size-8 rounded-lg grid place-items-center bg-surface text-accent-ink border border-line flex-none relative"><Icon name={icon} size={15} /><span className="sr-only">Step {i + 1}</span></span>
+                <span><b className="text-sm">{title}</b><span className="block text-sm text-ink-2">{text}</span></span>
               </li>
             ))}
           </ol>

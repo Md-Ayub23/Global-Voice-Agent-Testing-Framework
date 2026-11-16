@@ -1,6 +1,6 @@
 // Routes. The workspace pages (home, agents, settings) sit at the top; everything about one
 // agent lives under #/p/<project key>/... The page remounts (and animates in) when the address changes.
-import { Component, useEffect, type ReactNode } from "react";
+import { Component, Suspense, lazy, useEffect, type ReactNode } from "react";
 import { Layout } from "./components/Layout";
 import { Icon } from "./components/Icon";
 import { ToastProvider, TooltipProvider } from "./components/feedback";
@@ -10,31 +10,35 @@ import { AppProvider, useApp } from "./lib/app";
 import { projectByKey } from "./lib/links";
 import { useHashLocation } from "./lib/router";
 import type { Project, RunSummary } from "./lib/types";
-import { CallPage } from "./pages/Call";
-import { ComparePage } from "./pages/Compare";
-import { Dashboard } from "./pages/Dashboard";
-import { Files } from "./pages/Files";
-import { JudgesPageView } from "./pages/Judges";
-import { Labels } from "./pages/Labels";
-import { History } from "./pages/History";
-import { Live } from "./pages/Live";
-import { LoadTestPage } from "./pages/LoadTest";
-import { MonitorPageView, type MonitorTab } from "./pages/Monitor";
-import { MonitorCallPage } from "./pages/MonitorCall";
-import { NewRun } from "./pages/NewRun";
-import { MODE_IDS, ModePage } from "./pages/TestModes";
 import type { TestModeId } from "./lib/types";
-import { PrintReport } from "./pages/PrintReport";
-import { ProjectOverviewPage } from "./pages/ProjectOverview";
-import { ProjectSetup, SETUP_ALIASES, SETUP_TABS, setupSection, type SetupTab } from "./pages/ProjectSetup";
 import { navigate } from "./lib/router";
 import { projectHref } from "./lib/links";
 import { NewProject, Projects } from "./pages/Projects";
-import { RunReport } from "./pages/RunReport";
-import { Settings } from "./pages/Settings";
-import { Account } from "./pages/Account";
 import { SignIn } from "./pages/SignIn";
 import { AuthGate } from "./lib/auth";
+import type { MonitorTab } from "./pages/Monitor";
+import { SETUP_ALIASES, SETUP_TABS, setupSection, type SetupTab } from "./lib/setupnav";
+import { MODE_TITLE } from "./lib/modes";
+
+const MODE_IDS = Object.keys(MODE_TITLE) as TestModeId[];
+// Pages load on first visit (each is its own file in the build), so the first screen arrives sooner.
+const CallPage = lazy(() => import("./pages/Call").then((m) => ({ default: m.CallPage })));
+const ComparePage = lazy(() => import("./pages/Compare").then((m) => ({ default: m.ComparePage })));
+const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })));
+const Files = lazy(() => import("./pages/Files").then((m) => ({ default: m.Files })));
+const JudgesPageView = lazy(() => import("./pages/Judges").then((m) => ({ default: m.JudgesPageView })));
+const Labels = lazy(() => import("./pages/Labels").then((m) => ({ default: m.Labels })));
+const History = lazy(() => import("./pages/History").then((m) => ({ default: m.History })));
+const Live = lazy(() => import("./pages/Live").then((m) => ({ default: m.Live })));
+const MonitorPageView = lazy(() => import("./pages/Monitor").then((m) => ({ default: m.MonitorPageView })));
+const MonitorCallPage = lazy(() => import("./pages/MonitorCall").then((m) => ({ default: m.MonitorCallPage })));
+const ModePage = lazy(() => import("./pages/TestModes").then((m) => ({ default: m.ModePage })));
+const PrintReport = lazy(() => import("./pages/PrintReport").then((m) => ({ default: m.PrintReport })));
+const ProjectOverviewPage = lazy(() => import("./pages/ProjectOverview").then((m) => ({ default: m.ProjectOverviewPage })));
+const ProjectSetup = lazy(() => import("./pages/ProjectSetup").then((m) => ({ default: m.ProjectSetup })));
+const RunReport = lazy(() => import("./pages/RunReport").then((m) => ({ default: m.RunReport })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const Account = lazy(() => import("./pages/Account").then((m) => ({ default: m.Account })));
 
 type Page = (m: RegExpMatchArray, q: URLSearchParams) => ReactNode;
 type ProjectPage = (p: Project, m: RegExpMatchArray, q: URLSearchParams) => ReactNode;
@@ -53,9 +57,11 @@ const PROJECT_ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), Proje
   [new RegExp(`^/p/${K}/test$`), "overview", (p) => <SetupRedirect to={projectHref(p.key)} query={new URLSearchParams()} />],
   [new RegExp(`^/p/${K}/test/(${MODE_IDS.join("|")})(?:/(run|reports))?$`), (m) => `mode:${m[2]}`, (p, m, q) =>
     <ModePage project={p} mode={m[2] as TestModeId} tab={(m[3] as "run" | "reports" | undefined) || null} query={q} />],
-  [new RegExp(`^/p/${K}/new$`), "overview", (p, _m, q) => <NewRun project={p} query={q} />],
   [new RegExp(`^/p/${K}/live(?:/(j-[\\w-]+))?$`), "results", (p, m) => <Live project={p} jobId={m[2] || null} />],
-  [new RegExp(`^/p/${K}/load$`), "mode:load", (p, _m, q) => <LoadTestPage project={p} query={q} />],
+  // The load test lives on its test type's page; the old address goes there.
+  [new RegExp(`^/p/${K}/load$`), "mode:load", (p, _m, q) => <SetupRedirect to={projectHref(p.key, "/test/load")} query={q} />],
+  // "Run tests" is each test type's Run tab now; the old address opens the Release check's.
+  [new RegExp(`^/p/${K}/new$`), "mode:full", (p, _m, q) => <SetupRedirect to={projectHref(p.key, "/test/full/run")} query={q} />],
   [new RegExp(`^/p/${K}/runs$`), "results", (p) => <History project={p} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)$`), "results", (p, m) => <RunReport project={p} runId={m[2]} />],
   [new RegExp(`^/p/${K}/runs/(r-[\\w-]+)/print$`), "results", (p, m) => <PrintReport project={p} runId={m[2]} />],
@@ -152,7 +158,9 @@ function Pages() {
     <Layout section={section} projectKey={projectKey}>
       <div key={loc.hash}>
         <Boundary>
+          <Suspense fallback={<Skeleton />}>
           {page ?? <EmptyState title="Page not found" icon="help" action={<a href="#/"><Icon name="back" size={14} /> Back to the dashboard</a>} />}
+          </Suspense>
         </Boundary>
       </div>
     </Layout>

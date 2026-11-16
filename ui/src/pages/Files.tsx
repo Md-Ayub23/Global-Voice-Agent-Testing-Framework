@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "../components/feedback";
 import { Icon, type IconName } from "../components/Icon";
 import { Button, Card, CardHead, Chip, Divider, EmptyState, Kbd, Notice, PageHead, Skeleton } from "../components/ui";
+import { useCanEdit } from "../lib/auth";
 import { api, qs } from "../lib/api";
 import { useCrumbs } from "../lib/app";
 import { pl, projectHref } from "../lib/links";
@@ -22,14 +23,15 @@ function CheckNotice({ check }: { check: CheckResult | null }) {
   return (
     <Notice tone={check.syntax ? "warn" : "bad"}>
       <b>{check.syntax ? (check.saved ? "Saved, but the project has problems:" : "Problems found:") : "Not saved: the YAML can't be read."}</b>
-      <ul className="mt-1.5 pl-[18px] list-disc">
-        {check.problems.map((p, i) => <li key={i} className="font-mono text-[13px] break-words">{p}</li>)}
+      <ul className="mt-1.5 pl-4.5 list-disc">
+        {check.problems.map((p, i) => <li key={i} className="font-mono text-sm break-words">{p}</li>)}
       </ul>
     </Notice>
   );
 }
 
 function Editor({ project, initialFile }: { project: string; initialFile: string | null }) {
+  const canEdit = useCanEdit();
   const toast = useToast();
   const [proj] = useState(project);
   const [files, setFiles] = useState<ProjectFile[] | null>(null);
@@ -137,7 +139,7 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
   for (const f of files || []) groups.set(f.kind, [...(groups.get(f.kind) || []), f]);
   const fileBtn = (f: ProjectFile, ic: IconName, label: string) => (
     <button key={f.file} type="button" data-file={f.file} title={f.title || ""} onClick={() => void pickFile(f.file)}
-      className={cx("w-full flex items-center gap-2 px-2.5 py-[7px] rounded-lg text-left text-[13px] cursor-pointer transition-colors",
+      className={cx("w-full flex items-center gap-2 px-2.5 py-1.75 rounded-lg text-left text-sm cursor-pointer transition-colors",
         f.file === file ? "bg-accent-soft text-accent-ink font-semibold" : "text-ink-2 hover:bg-surface-2 hover:text-ink")}>
       <Icon name={ic} className="flex-none" /><span className="truncate">{label}</span>
     </button>
@@ -149,29 +151,31 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
         sub={<>For experts: the text behind the setup pages. Every save is checked the same way. <a href={pl("/setup/cases")}>Back to test cases</a></>} />
       {loadError && <Notice tone="bad" className="mb-4">{loadError}</Notice>}
       <div className="grid gap-4 items-start grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <Card className="p-2.5 lg:sticky lg:top-[70px]">
+        <Card className="p-2.5 lg:sticky lg:top-17.5">
           {!files ? <Skeleton height={200} className="mt-0" /> : (
             <div className="flex flex-col gap-0.5">
               {KIND.map(([k, label, ic]) => groups.get(k)?.length ? (
                 <div key={k}>
-                  <div className="text-[13px] font-medium text-muted px-2.5 pt-2.5 pb-1">{label}</div>
+                  <div className="text-sm font-medium text-muted px-2.5 pt-2.5 pb-1">{label}</div>
                   {groups.get(k)!.map((f) => fileBtn(f, ic, f.file.split("/").pop() || f.file))}
                 </div>
               ) : null)}
               {groups.get("unreadable")?.length ? (
                 <div>
-                  <div className="text-[13px] font-medium text-muted px-2.5 pt-2.5 pb-1">Can't read</div>
+                  <div className="text-sm font-medium text-muted px-2.5 pt-2.5 pb-1">Can't read</div>
                   {groups.get("unreadable")!.map((f) => fileBtn(f, "alert", f.file))}
                 </div>
               ) : null}
             </div>
           )}
-          <Divider />
-          <div className="flex flex-col gap-1.5">
-            <Button size="sm" icon="plus" id="new-scenario" onClick={() => void create("scenarios", "scenario")}>New scenario</Button>
-            <Button size="sm" icon="plus" id="new-persona" onClick={() => void create("personas", "persona")}>New persona</Button>
-          </div>
-          <div className="text-muted text-[13px] px-1 pt-2.5 pb-0.5">New items start as a copy of the selected one of that kind.</div>
+          {canEdit && <>
+            <Divider />
+            <div className="flex flex-col gap-1.5">
+              <Button size="sm" icon="plus" id="new-scenario" onClick={() => void create("scenarios", "scenario")}>New scenario</Button>
+              <Button size="sm" icon="plus" id="new-persona" onClick={() => void create("personas", "persona")}>New persona</Button>
+            </div>
+            <div className="text-muted text-sm px-1 pt-2.5 pb-0.5">New items start as a copy of the selected one of that kind.</div>
+          </>}
         </Card>
 
         <div className="flex flex-col gap-4 min-w-0">
@@ -179,26 +183,28 @@ function Editor({ project, initialFile }: { project: string; initialFile: string
             <CardHead title={<span className="font-mono break-all">{file || ""}</span>}>
               <div className="flex items-center gap-2 flex-wrap">
                 {dirty ? <Chip tone="warn">unsaved</Chip> : cur ? <Chip tone="good">saved</Chip> : null}
-                <Button size="sm" id="revert" disabled={!dirty} onClick={() => { setText(saved); setCheck(null); }}>Revert</Button>
-                <Button size="sm" id="check" icon="shield" disabled={!file} onClick={() => void runCheck()}>Check</Button>
-                <Button size="sm" id="save" variant="primary" icon="save" disabled={!dirty} onClick={() => void save()}>Save</Button>
+                {canEdit ? <>
+                  <Button size="sm" id="revert" disabled={!dirty} onClick={() => { setText(saved); setCheck(null); }}>Revert</Button>
+                  <Button size="sm" id="check" icon="shield" disabled={!file} onClick={() => void runCheck()}>Check</Button>
+                  <Button size="sm" id="save" variant="primary" icon="save" disabled={!dirty} onClick={() => void save()}>Save</Button>
+                </> : <Chip icon="lock">read only</Chip>}
               </div>
             </CardHead>
             {files && !files.length ? <EmptyState icon="folder" title="No files in this project" /> : (
-              <div className="flex border border-line rounded-[12px] overflow-hidden bg-surface-2 focus-within:border-accent transition-colors">
+              <div className="flex border border-line rounded-xl overflow-hidden bg-surface-2 focus-within:border-accent transition-colors">
                 <div id="gutter" ref={gutter} aria-hidden="true"
-                  className="flex-none py-3 px-2.5 text-right font-mono text-[13px] leading-5 text-muted select-none whitespace-pre border-r border-line overflow-hidden"
+                  className="flex-none py-3 px-2.5 text-right font-mono text-sm leading-5 text-muted select-none whitespace-pre border-r border-line overflow-hidden"
                   style={{ height }}>
                   {Array.from({ length: lines }, (_, i) => i + 1).join("\n")}
                 </div>
-                <textarea id="text" ref={ta} spellCheck={false} autoComplete="off" autoCapitalize="off" value={text}
+                <textarea id="text" ref={ta} readOnly={!canEdit} spellCheck={false} autoComplete="off" autoCapitalize="off" value={text}
                   onChange={(e) => setText(e.target.value)} onKeyDown={onKeyDown}
                   onScroll={(e) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop; }}
-                  className="flex-1 min-w-0 py-3 px-3 font-mono text-[13px] leading-5 bg-surface text-ink outline-none resize-none whitespace-pre overflow-x-auto"
+                  className="flex-1 min-w-0 py-3 px-3 font-mono text-sm leading-5 bg-surface text-ink outline-none resize-none whitespace-pre overflow-x-auto"
                   style={{ height, tabSize: 2 }} />
               </div>
             )}
-            <div className="text-muted text-[13px] mt-2 flex flex-wrap items-center gap-1">
+            <div className="text-muted text-sm mt-2 flex flex-wrap items-center gap-1">
               <Kbd>Ctrl</Kbd>+<Kbd>S</Kbd> saves · <Kbd>Tab</Kbd> indents two spaces · the whole project is checked against the change
             </div>
           </Card>

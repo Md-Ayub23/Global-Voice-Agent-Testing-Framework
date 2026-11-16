@@ -6,7 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useToast } from "../components/feedback";
 import { Icon } from "../components/Icon";
 import { Timeline, type TimelineHandle } from "../components/Timeline";
-import { Badge, Button, Card, CardHead, Chip, EmptyState, Notice, Skeleton } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, EmptyState, Notice, Skeleton, ReadOnly } from "../components/ui";
+import { useCanEdit } from "../lib/auth";
 import { JudgesHeader } from "./Judges";
 import { api } from "../lib/api";
 import { useCrumbs, useLoad } from "../lib/app";
@@ -48,7 +49,7 @@ export function Labels({ project, runId, testId }: { project: Project; runId?: s
   return (
     <>
       <JudgesHeader project={project} current="review" toLabel={queue.length} />
-      <p className="text-ink-2 text-[13px] -mt-1 mb-4 max-w-[860px]">Say what a careful reviewer would say. Your labels show Vocto which judges to trust: until an item catches the failures you find and passes the calls you pass, its findings are only an opinion.</p>
+      <p className="text-ink-2 text-sm -mt-1 mb-4 max-w-215">Say what a careful reviewer would say. Your labels show Vocto which judges to trust: until an item catches the failures you find and passes the calls you pass, its findings are only an opinion.</p>
       {!queue.length && !current ? (
         <Card><EmptyState icon="check-circle" title="Nothing waiting for a label"
           text="Every judged call has your labels. New runs with the AI judges on bring new calls here."
@@ -68,28 +69,28 @@ export function Labels({ project, runId, testId }: { project: Project; runId?: s
 
 function Queue({ project, queue, current }: { project: Project; queue: QueueItem[]; current?: string }) {
   return (
-    <Card flush className="xl:sticky xl:top-[76px] max-h-[calc(100vh-100px)] flex flex-col">
+    <Card flush className="xl:sticky xl:top-19 max-h-[calc(100vh-100px)] flex flex-col">
       <div className="px-4 pt-3.5 pb-2.5 border-b border-line">
         <div className="font-semibold">Waiting for you</div>
-        <div className="text-muted text-[13px]">{queue.length} call{queue.length === 1 ? "" : "s"} · most useful first</div>
+        <div className="text-muted text-sm">{queue.length} call{queue.length === 1 ? "" : "s"} · most useful first</div>
       </div>
       <div className="overflow-y-auto scrollbar-thin p-1.5 flex xl:flex-col gap-1 max-xl:overflow-x-auto" id="queue">
         {queue.map((q) => (
           <a key={q.test_id} href={projectHref(project.key, `/labels/${q.run_id}/${q.test_id}`)} data-queue={q.test_id}
-            className={cx("block rounded-lg px-2.5 py-2 hover:no-underline text-ink transition-colors max-xl:min-w-[220px]",
+            className={cx("block rounded-lg px-2.5 py-2 hover:no-underline text-ink transition-colors max-xl:min-w-55",
               q.test_id === current ? "bg-accent-soft" : "hover:bg-surface-2")}>
             <div className="flex items-center gap-2">
-              <b className="text-[13px] truncate flex-1">{shortScenario(q.scenario_id)}</b>
-              <span className="text-[13px] text-muted tabular-nums">{q.labelled}/{q.items}</span>
+              <b className="text-sm truncate flex-1">{shortScenario(q.scenario_id)}</b>
+              <span className="text-sm text-muted tabular-nums">{q.labelled}/{q.items}</span>
             </div>
             <div className="flex items-center gap-1.5 mt-1 flex-wrap">
               <Chip tone={REASON_TONE[q.reason] || "default"}>{q.reason}</Chip>
               {q.bugs && <Chip tone="bad" icon="alert">{q.bugs}</Chip>}
             </div>
-            <div className="text-[13px] text-muted mt-1">repeat {q.repeat} · {ago(q.started_at)}</div>
+            <div className="text-sm text-muted mt-1">repeat {q.repeat} · {ago(q.started_at)}</div>
           </a>
         ))}
-        {!queue.length && <div className="text-muted text-[13px] p-2.5">Nothing else waiting.</div>}
+        {!queue.length && <div className="text-muted text-sm p-2.5">Nothing else waiting.</div>}
       </div>
     </Card>
   );
@@ -97,6 +98,7 @@ function Queue({ project, queue, current }: { project: Project; queue: QueueItem
 
 function LabelCall({ project, runId, testId, next, onSaved }: { project: Project; runId: string; testId: string; next: QueueItem | null; onSaved: () => void }) {
   const toast = useToast();
+  const canEdit = useCanEdit();
   const { data, error } = useLoad(
     () => Promise.all([api.get<CallDetail>(`/api/runs/${runId}/calls/${testId}`), judgesApi.callLabels(runId, testId)]),
     [runId, testId],
@@ -153,15 +155,15 @@ function LabelCall({ project, runId, testId, next, onSaved }: { project: Project
     return (
       <div key={c.check_id} data-item={c.check_id} className="py-3 border-b border-line last:border-b-0">
         <div className="flex items-start gap-2 flex-wrap">
-          <div className="flex-1 min-w-[200px]">
-            <b className="text-[13.5px]">{c.judge?.title || c.check_id}</b>
-            <div className="text-[13px] text-ink-2 mt-0.5">{c.judge?.question}</div>
+          <div className="flex-1 min-w-50">
+            <b className="text-sm">{c.judge?.title || c.check_id}</b>
+            <div className="text-sm text-ink-2 mt-0.5">{c.judge?.question}</div>
           </div>
           <div className="flex gap-1" role="radiogroup" aria-label={c.judge?.title || c.check_id}>
             {CHOICES.map((o) => (
               <button key={o.v} type="button" role="radio" aria-checked={mine === o.v} data-choice={o.v} disabled={!!saved}
                 onClick={() => setChoice({ ...choice, [c.check_id]: o.v })}
-                className={cx("inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-[13px] font-semibold transition-colors cursor-pointer disabled:cursor-default",
+                className={cx("inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border text-sm font-semibold transition-colors cursor-pointer disabled:cursor-default",
                   mine === o.v ? o.on : "bg-surface border-line-strong text-ink-2 hover:bg-surface-2 disabled:opacity-60")}>
                 <Icon name={o.icon} size={14} />{VOTE_LABEL[o.v]}
               </button>
@@ -172,12 +174,12 @@ function LabelCall({ project, runId, testId, next, onSaved }: { project: Project
           <input type="text" maxLength={300} value={notes[c.check_id] || ""} placeholder="Why? (optional, helps teach the judges)"
             aria-label={`Why, for ${c.judge?.title || c.check_id}`}
             onChange={(e) => setNotes({ ...notes, [c.check_id]: e.target.value })}
-            className="mt-2 w-full h-8 px-2.5 rounded-lg border border-line-strong bg-surface text-[13px] placeholder:text-muted focus:outline-none focus:border-accent" />
+            className="mt-2 w-full h-8 px-2.5 rounded-lg border border-line-strong bg-surface text-sm placeholder:text-muted focus:outline-none focus:border-accent" />
         )}
         {after?.judge && (
           <div className="mt-2 grid gap-1.5 sm:grid-cols-2 animate-rise">
             {after.judge.votes.map((x) => (
-              <div key={x.judge} className={cx("text-[13px] rounded-lg px-2.5 py-1.5 border",
+              <div key={x.judge} className={cx("text-sm rounded-lg px-2.5 py-1.5 border",
                 x.result === mine ? "border-[color-mix(in_srgb,var(--good)_35%,transparent)] bg-good-soft/50" : "border-[color-mix(in_srgb,var(--warn)_40%,transparent)] bg-warn-soft/50")}>
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <Icon name={x.result === mine ? "check" : "alert"} size={13} className={x.result === mine ? "text-good" : "text-warn"} />
@@ -186,7 +188,7 @@ function LabelCall({ project, runId, testId, next, onSaved }: { project: Project
                 {x.reason && <div className="text-ink-2 mt-0.5">{x.reason}</div>}
               </div>
             ))}
-            <div className="sm:col-span-2 text-[13px] text-muted">{agreeText}</div>
+            <div className="sm:col-span-2 text-sm text-muted">{agreeText}</div>
           </div>
         )}
       </div>
@@ -202,15 +204,16 @@ function LabelCall({ project, runId, testId, next, onSaved }: { project: Project
         </CardHead>
         <Timeline ref={tl} events={call.events} limits={null} />
       </Card>
-      <Card className="2xl:sticky 2xl:top-[76px]">
+      <Card className="2xl:sticky 2xl:top-19">
         <CardHead title="Your labels" sub={saved ? "saved" : `${relevant.length - missing.length} of ${relevant.length} done`} />
         {!saved && (
-          <Notice icon="eye-off" className="mb-1 text-[13px]">The judges' answers are hidden until you save, so they don't sway you. Judge only what the conversation shows.</Notice>
+          <Notice icon="eye-off" className="mb-1 text-sm">The judges' answers are hidden until you save, so they don't sway you. Judge only what the conversation shows.</Notice>
         )}
-        <div id="label-items">{relevant.map(itemCard)}</div>
+        {!canEdit && <Notice tone="warn" icon="lock" className="mb-1 text-sm">Labelling calls changes how the judges are trusted, so it needs editor access.</Notice>}
+        <ReadOnly when={!canEdit}><div id="label-items">{relevant.map(itemCard)}</div></ReadOnly>
         {quiet.length > 0 && (
           <div className="pt-2">
-            <button type="button" className="text-[13px] text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1" onClick={() => setShowQuiet((s) => !s)}>
+            <button type="button" className="text-sm text-muted hover:text-ink cursor-pointer inline-flex items-center gap-1" onClick={() => setShowQuiet((s) => !s)}>
               <Icon name="chevron" size={13} className={cx("transition-transform", showQuiet && "rotate-90")} />
               {plural(quiet.length, "item")} the judges said didn't come up {showQuiet ? "" : "(label them only if they did)"}
             </button>
@@ -220,15 +223,15 @@ function LabelCall({ project, runId, testId, next, onSaved }: { project: Project
         <div className="flex items-center gap-2.5 mt-3 flex-wrap">
           {saved ? (
             <>
-              <span className="flex-1 text-[13px] text-muted">Run decision now: <b className="text-ink">{decisionTitle(saved.decision)}</b></span>
+              <span className="flex-1 text-sm text-muted">Run decision now: <b className="text-ink">{decisionTitle(saved.decision)}</b></span>
               {next ? <Button id="next-call" variant="primary" icon="arrow" href={projectHref(project.key, `/labels/${next.run_id}/${next.test_id}`)}>Next call</Button>
                 : <Button variant="primary" icon="scale" href={projectHref(project.key, "/judges")}>See calibration</Button>}
             </>
           ) : (
             <>
-              <span className="flex-1 text-[13px] text-muted">{missing.length ? `${plural(missing.length, "item")} still to label` : "All labelled"}</span>
+              <span className="flex-1 text-sm text-muted">{missing.length ? `${plural(missing.length, "item")} still to label` : "All labelled"}</span>
               {next && <Button variant="ghost" href={projectHref(project.key, `/labels/${next.run_id}/${next.test_id}`)}>Skip</Button>}
-              <Button id="save-labels" variant="primary" icon="save" busy={busy} disabled={busy || !changed.length} onClick={() => void save()}>Save labels</Button>
+              <Button id="save-labels" variant="primary" icon="save" busy={busy} disabled={busy || !changed.length || !canEdit} onClick={() => void save()}>Save labels</Button>
             </>
           )}
         </div>

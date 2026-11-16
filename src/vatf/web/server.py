@@ -9,6 +9,7 @@ the server answers to. Scripts and CI use an API key (Authorization: Bearer vk_.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import mimetypes
 import os
@@ -75,6 +76,15 @@ OWN_ACCOUNT = re.compile(r"^/api/auth/(me|logout|password|keys(/\d+/delete)?)$")
 PUBLIC_API = {("GET", "/api/auth/status"), ("POST", "/api/auth/login"), ("POST", "/api/auth/setup")}
 
 
+def scrub_paths(message: str, root: Path) -> str:
+    """Error words shown in the browser name files by their place in the project, never by the
+    server's own folders (the project root, the home folder)."""
+    for base, label in ((str(root), "."), (str(Path.home()), "~")):
+        if base and len(base) > 1:
+            message = message.replace(base + os.sep, "" if label == "." else label + os.sep).replace(base, label)
+    return message
+
+
 class Forbidden(Exception):
     """Signed in, but this needs a higher role."""
 
@@ -100,6 +110,7 @@ class App:
         self.api_limit = RateLimiter(_limit("VOCTO_API_PER_MINUTE", 600), burst=_limit("VOCTO_API_BURST", 200))
         self.heavy_limit = RateLimiter(_limit("VOCTO_HEAVY_PER_MINUTE", 20), burst=_limit("VOCTO_HEAVY_BURST", 5))
         self._edit_locks: dict[str, threading.Lock] = {}
+        self.trusted_proxies = trusted_proxies()
 
     def active_runs(self) -> set[str]:
         return self.jobs.run_ids()
@@ -169,6 +180,11 @@ def make_handler(app: App):
         job = app.jobs.active or next(iter(app.jobs.queued()), None)
         info["active_job"] = job.public() if job else None
         info["jobs"] = app.jobs.stats()
+        if app.auth is not None and not at_least((h.user or {}).get("role", ""), "admin"):
+            # The machine's details and the key's last characters are an admin's business.
+            info.pop("python", None)
+            info.pop("platform", None)
+            info["api_key"] = {"set": info["api_key"]["set"], "hint": None, "source": None}
         return info
 
     @route("GET", r"/api/projects")
@@ -688,7 +704,7 @@ def make_handler(app: App):
             self.wfile.write(raw)
 
         def error(self, status: int, message: str) -> None:
-            self.send_json({"error": message}, status)
+            self.send_json({"error": scrub_paths(message, app.root)}, status)
 
         def end_headers(self) -> None:
             for name, value in SECURITY_HEADERS.items():
@@ -714,7 +730,16 @@ def make_handler(app: App):
             return urlparse(origin).netloc.lower() == (self.headers.get("Host") or "").strip().lower()
 
         def client_key(self) -> str:
-            return self.client_address[0] if self.client_address else "?"
+            """The caller's address. Behind a trusted proxy (VOCTO_TRUSTED_PROXIES), the address the proxy
+            saw (X-Forwarded-For), so sign-in limits and the audit log tell users apart."""
+            peer = self.client_address[0] if self.client_address else "?"
+            if not app.trusted_proxies or not _in_nets(peer, app.trusted_proxies):
+                return peer
+            hops = [h.strip() for h in (self.headers.get("X-Forwarded-For") or "").split(",") if h.strip()]
+            for hop in reversed(hops):        # the nearest hop not a proxy of ours; earlier ones are client-made
+                if not _in_nets(hop, app.trusted_proxies):
+                    return hop if _is_ip(hop) else peer
+            return peer
 
         def set_cookie(self, value: str) -> None:
             self._cookies.append(value)
@@ -819,7 +844,9 @@ def make_handler(app: App):
                         except Exception as e:  # noqa: BLE001 - report, keep serving
                             ref = secrets.token_hex(4)
                             print(f"vatf ui: error {ref} on {method} {path}:\n{traceback.format_exc()}", file=sys.stderr)
-                            return self.error(500, f"Something went wrong (ref {ref}): {type(e).__name__}: {e}")
+                            # The details stay in the server's log: they can name files, settings or code.
+                            return self.error(500, f"Something went wrong on the server (ref {ref}). "
+                                                   "Its log has the details.")
                         if result is not None:
                             self.send_json(result)
                         return None
@@ -985,6 +1012,37 @@ def make_handler(app: App):
                 audio.leave(q)
 
     return Handler
+
+
+def trusted_proxies() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
+    """VOCTO_TRUSTED_PROXIES: addresses or networks of the HTTPS proxy in front (comma-separated, e.g.
+    "127.0.0.1,172.16.0.0/12"). Only their X-Forwarded-For is believed; anyone else could fake it."""
+    nets = []
+    for part in (os.environ.get("VOCTO_TRUSTED_PROXIES") or "").split(","):
+        if part.strip():
+            try:
+                nets.append(ipaddress.ip_network(part.strip(), strict=False))
+            except ValueError:
+                print(f"vatf: VOCTO_TRUSTED_PROXIES: {part.strip()!r} is not an address or network; ignored", file=sys.stderr)
+    return nets
+
+
+def _is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+        return True
+    except ValueError:
+        return False
+
+
+def _in_nets(addr: str, nets) -> bool:
+    try:
+        ip = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    if getattr(ip, "ipv4_mapped", None):
+        ip = ip.ipv4_mapped
+    return any(ip.version == n.version and ip in n for n in nets)
 
 
 def server_hosts() -> set[str]:

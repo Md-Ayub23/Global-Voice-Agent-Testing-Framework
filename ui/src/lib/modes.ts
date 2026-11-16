@@ -26,8 +26,10 @@ export const LEVEL: Record<ReadinessLevel, { tone: LevelTone; icon: IconName; sh
 export const FOCUSED: string[] = ["functional", "timing", "speech", "safety", "resilience", "load"];
 export function levelShort(level: ReadinessLevel | null | undefined, mode?: string | null): string {
   const lv = LEVEL[level || "no_result"];
-  if (mode && FOCUSED.includes(mode) && (level === "ready" || level === "ready_with_notes")) {
-    return level === "ready" ? "Passed" : "Passed, with notes";
+  if (mode && FOCUSED.includes(mode)) {
+    if (level === "ready") return "Passed";
+    if (level === "ready_with_notes") return "Passed, with notes";
+    if (level === "not_ready") return "Failed";
   }
   return lv.short;
 }
@@ -37,9 +39,10 @@ export const DECISION_WORDS: Record<Decision, string> = {
   GO: "Ready", NO_GO: "Not ready", NO_GO_INSUFFICIENT_EVIDENCE: "Not enough evidence",
 };
 export const decisionWords = (d: string | null | undefined) => DECISION_WORDS[d as Decision] || "No result";
-// A run's badge label: "Passed" for a clean run of a mode that tests one thing, else the decision in words.
+// A run's badge label. A test type that checks one thing passes or fails ("Passed" / "Failed"); only the
+// Release check and Regression, which run everything, say whether the agent is ready to release.
 export const runLabel = (r: { decision?: string | null; test_mode?: string | null }) =>
-  r.decision === "GO" && FOCUSED.includes(r.test_mode || "") ? "Passed" : undefined;
+  !FOCUSED.includes(r.test_mode || "") ? undefined : r.decision === "GO" ? "Passed" : r.decision === "NO_GO" ? "Failed" : undefined;
 
 export const AREA_STATUS: Record<AreaStatus, { tone: LevelTone; icon: IconName; label: string }> = {
   pass: { tone: "good", icon: "check", label: "Good" },
@@ -66,7 +69,7 @@ export const TONE_BAR: Record<LevelTone, string> = { good: "bg-good", warn: "bg-
 // are not test types of their own: the first combines them, the second lives under Results).
 export const TEST_TYPES: TestModeId[] = ["functional", "timing", "speech", "safety", "resilience", "load", "regression"];
 // Shorter names for tight spots (the Home grid's column heads).
-export const SHORT_TITLE: Partial<Record<TestModeId, string>> = { timing: "Timing", speech: "Speech" };
+export const SHORT_TITLE: Partial<Record<TestModeId, string>> = { timing: "Timing", speech: "Speech", load: "Load" };
 
 // A test type's state (mode_status in src/vatf/web/data.py) in words, with its colour.
 export const TYPE_STATUS: Record<TypeStatus, { label: string; tone: LevelTone }> = {

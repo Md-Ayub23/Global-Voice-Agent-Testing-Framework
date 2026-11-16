@@ -5,6 +5,7 @@ import { Tip, useToast } from "../components/feedback";
 import { Icon } from "../components/Icon";
 import { Button, Card, CardHead, Choice, Chip, Divider, EmptyState, Field, Notice, PageHead, Seg, Skeleton, Switch, inputCls } from "../components/ui";
 import { api } from "../lib/api";
+import { can, useAuth } from "../lib/auth";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx, plural } from "../lib/format";
 import { navigate } from "../lib/router";
@@ -103,6 +104,7 @@ function defaultsOf(p: Profile, offline: boolean): Options {
 
 function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects: Project[]; prefill: RunInfo | null; prefillError: string | null; query: URLSearchParams; mode?: TestModeId }) {
   const { system, activeJob, setActiveJob, projects: allProjects } = useApp();
+  const { user } = useAuth();
   const jobProject = allProjects?.find((p) => p.path === activeJob?.request?.project);
   const activeJobHref = activeJob && jobProject ? projectHref(jobProject.key, `/live/${activeJob.id}`) : "#/";
   const toast = useToast();
@@ -114,6 +116,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
   const voiceOnly = !!mode && VOICE_ONLY.includes(mode);
   const safetyMode = mode === "safety";
   const set = (patch: Partial<Form>) => setF((x) => ({ ...x, ...patch }));
+  const [more, setMore] = useState<boolean | null>(null);
   const project = projects.find((p) => p.path === f.project) || projects[0];
   const profile = project.profiles.find((p) => p.file === f.profile) || project.profiles[0];
   const d = defaultsOf(profile, f.offline);
@@ -227,6 +230,16 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
   const picked = inMode.filter((x) => f.scenarios.has(x.id)).length;
   const nothing = safetyMode ? !safetyOn : (!exit && picked === 0) || (sweeping && f.sweep.length === 0) || (drilling && planned === 0);
   const wrongChannel = voiceOnly && !voice;
+  const viewOnly = !can(user, "editor");
+  // The less common settings sit under "More options", opened by itself when one of them is not the default.
+  const changed = [
+    f.repeats !== "" && "repeats", f.show_pii && "names kept readable", f.agent_version.trim() && `version ${f.agent_version.trim()}`,
+    f.command === "run" && [...f.bugs].sort().join(",") !== [...new Set(splitBugs(d.bugs))].sort().join(",") && "bug switches changed",
+    f.bugs.size > 0 && "bug switches on", f.speech !== "local" && voice && "test tones",
+    f.planted_bug && "planted bug",
+  ].filter(Boolean) as string[];
+  const moreOpen = more ?? (changed.length > 0 || exit);
+  const moreSummary = changed.length ? `Changed: ${changed.join(", ")}` : `Repeats, AI judges, personal data${voice ? ", caller's voice and hearing" : ""}, and the agent's own settings`;
 
   return (
     <>
@@ -238,7 +251,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
       </PageHead>}
       {mode === "full" && (profile.bugs || planted) && (
         <div className="flex flex-wrap items-center gap-3 mb-4">
-          <span className="text-[13px] text-ink-2">Run the tests, or prove Vocto catches known bugs with an exit check:</span>
+          <span className="text-sm text-ink-2">Run the tests, or prove Vocto catches known bugs with an exit check:</span>
           <Seg id="cmd" value={f.command} onChange={(v) => set({ command: v })}
             options={[{ value: "run", label: "Test run", icon: "play" }, { value: "exit-check", label: "Exit check", icon: "shield" }]} />
         </div>
@@ -271,12 +284,12 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
             <CardHead level={2} title="1 · Channel" sub="how Vocto calls the agent" />
             <div className="flex flex-wrap gap-2">
               {project.profiles.map((x) => (
-                <Choice key={x.file} radio on={x.file === profile.file} off={!x.ok || (voiceOnly && x.mode !== "voice")} onClick={() => pickProfile(f.project, x.file)} data-profile={x.file} className="flex-1 min-w-[220px]">
+                <Choice key={x.file} radio on={x.file === profile.file} off={!x.ok || (voiceOnly && x.mode !== "voice")} onClick={() => pickProfile(f.project, x.file)} data-profile={x.file} className="flex-1 min-w-55">
                   <div className="flex items-center gap-2.5 flex-wrap">
                     <Icon name={x.mode === "voice" ? "mic" : "text"} size={15} />
                     <b>{channelLabel(x, project.profiles, project.example)}</b>
                   </div>
-                  <div className="text-ink-2 text-[13px]">
+                  <div className="text-ink-2 text-sm">
                     {voiceOnly && x.mode !== "voice" ? `${MODE_TITLE[mode!]} measures speech, so it needs the voice channel` : x.ok ? (x.connection.type === "phone_call" ? `Rings ${x.connection.target || "the agent's number"} over the real phone network` : x.mode === "voice" ? "Like a phone call: real speech both ways, response times" : "Text messages: fast and cheap, the same checks") : "Not ready: finish its setup first"}
                   </div>
                 </Choice>
@@ -289,7 +302,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
             <Card id="safety-plan">
               <CardHead level={2} title="2 · Attack calls" sub="written for this agent on Set up › Safety tests" />
               {profile.safety?.enabled && profile.safety.attacks ? (
-                <div className="grid gap-2 text-[13px] text-ink-2">
+                <div className="grid gap-2 text-sm text-ink-2">
                   <div><b className="text-ink">{profile.safety.attacks} attacks</b> written for this agent: off-topic questions, pushing for secrets or other people's data, prompt tricks spoken on the call, and any questions of your own.</div>
                   <div>Every call is still checked in full: tools, data saved, what was said, and the AI judges. A leak or an unsafe action blocks the release.</div>
                   <div><a href={projectHref(project.key, "/setup/safety")}>Choose which attacks run</a></div>
@@ -324,7 +337,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                       {!!x.audio?.barge_in && <Chip icon="bolt">barge-in</Chip>}
                       {!x.in_mode && <Chip>{x.modes.join("/")} only</Chip>}
                     </div>
-                    <div className="text-ink-2 font-mono text-[13px] mt-[3px]">
+                    <div className="text-ink-2 font-mono text-sm mt-0.75">
                       {x.id} · {x.repeats}× · {plural(x.checks, "check")}{x.expected ? ` · expects ${x.expected.replace("_", " ")}` : ""}
                     </div>
                   </Choice>
@@ -337,90 +350,16 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
           )}
 
           <Card>
-            <CardHead level={2} title={`${n(3)} · Agent under test`} sub={profile.connection.target.includes("://") ? <span className="font-mono">{profile.connection.target}</span> : "started by Vocto"} />
-            <div className="flex flex-col gap-3">
-              {!exit && profile.agent_process && (
-                <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
-                  <div className="grid gap-1.5 font-semibold text-[13px]">
-                    Start the agent
-                    <Switch id="start-agent" checked={f.start_agent} onChange={(v) => set({ start_agent: v, planted_bug: v ? f.planted_bug : "" })} label="Start the agent for me" />
-                    <span className="font-normal text-[13px] text-muted">
-                      {f.start_agent ? "Vocto starts the agent on this computer before the first call and stops it after the last. Stop it first if it is already running."
-                        : "Off: the agent must already be running at its address."}
-                    </span>
-                  </div>
-                  {planted && (
-                    <Field label="Planted bug" hint={f.start_agent ? "Start the agent with one known bug in its own code or prompts: Vocto should catch it." : "Needs “Start the agent for me”."}>
-                      <select id="planted-bug" className={inputCls} disabled={!f.start_agent} value={f.planted_bug} onChange={(e) => set({ planted_bug: e.target.value })}>
-                        <option value="">None: the agent as released</option>
-                        {profile.planted_bugs!.map((b) => <option key={b.id} value={b.id}>{b.id}: {b.title}</option>)}
-                      </select>
-                    </Field>
-                  )}
-                </div>
-              )}
-              {!exit && profile.bugs && (
-                <div>
-                  <div className="flex flex-wrap items-center gap-2.5 mb-2"><b className="text-[13px]">Bug switches</b><span className="text-muted text-[13px]">{OPTION_HELP.bugs}</span></div>
-                  <div className="flex flex-wrap gap-2" id="bugs">
-                    {profile.bugs.map((b) => {
-                      const voiceOnly = /^voice only/i.test(b.help) && !voice;
-                      const on = f.bugs.has(b.name);
-                      return (
-                        <Tip key={b.name} content={b.help}>
-                          <button type="button" data-bug={b.name} disabled={voiceOnly} onClick={() => set({ bugs: toggle(f.bugs, b.name) })}
-                            className={cx("inline-flex items-center gap-1.5 px-[9px] py-0.5 rounded-full text-[13px] font-semibold border leading-[18px] transition-colors",
-                              voiceOnly ? "opacity-45 cursor-not-allowed bg-surface-2 text-ink-2 border-line"
-                                : on ? "cursor-pointer bg-bad-soft text-bad border-[color-mix(in_srgb,var(--bad)_35%,transparent)]"
-                                  : "cursor-pointer bg-surface-2 text-ink-2 border-line hover:border-line-strong")}>
-                            <Icon name={on ? "alert" : "plus"} size={12} />{b.name}
-                          </button>
-                        </Tip>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-              {!exit && !profile.bugs && "bugs" in (profile.options || {}) && (
-                <Field label="Bug switches" hint={OPTION_HELP.bugs}>
-                  <input className={cx(inputCls, "font-mono text-[13px]")} data-opt="bugs" defaultValue={[...f.bugs].join(",")}
-                    onChange={(e) => set({ bugs: new Set(splitBugs(e.target.value)) })} />
-                </Field>
-              )}
-              <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
-                {optKeys.length ? optKeys.map((k) => {
-                  const locked = f.offline && k in (profile.offline_options || {});
-                  const val = locked ? d[k] : (f.options[k] ?? d[k] ?? "");
-                  const choices = CHOICES[k];
-                  const change = (v: string) => set({ options: { ...f.options, [k]: v } });
-                  return (
-                    <Field key={k} label={optLabel(k)} hint={locked ? "Set by the free dry run." : OPTION_HELP[k] || "An option of this agent."}>
-                      {choices ? (
-                        <select className={inputCls} data-opt={k} disabled={locked} value={String(val)} onChange={(e) => change(e.target.value)}>
-                          {choices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                          {!choices.some(([v]) => v === String(val)) && <option value={String(val)}>{String(val)}</option>}
-                        </select>
-                      ) : (
-                        <input className={cx(inputCls, "font-mono text-[13px]")} data-opt={k} disabled={locked} value={String(val)} onChange={(e) => change(e.target.value)} />
-                      )}
-                    </Field>
-                  );
-                }) : <div className="text-muted text-[13px]">Nothing to choose: Vocto calls the agent at its address.</div>}
-              </div>
-            </div>
-          </Card>
-
-          <Card>
-            <CardHead level={2} title={`${n(4)} · Simulated caller`} />
+            <CardHead level={2} title={`${n(3)} · Simulated caller`} />
             <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="caller">
               <Choice radio on={!f.offline} data-offline="0" onClick={() => set({ offline: false })}>
                 <b className="block font-semibold">Real run</b>
-                <div className="text-ink-2 text-[13px]">Claude plays the caller and checks it stayed on script. Uses your API key.</div>
+                <div className="text-ink-2 text-sm">Claude plays the caller and checks it stayed on script. Uses your API key.</div>
               </Choice>
               <Choice radio on={f.offline} data-offline="1"
                 onClick={() => set({ offline: true, options: Object.fromEntries(Object.entries(f.options).filter(([k]) => !(k in (profile.offline_options || {})))) })}>
                 <b className="block font-semibold">Free dry run</b>
-                <div className="text-ink-2 text-[13px]">
+                <div className="text-ink-2 text-sm">
                   Rule-based caller, no validator, no API calls
                   {Object.keys(profile.offline_options || {}).length > 0 && " (the practice agent answers by rules too)"}. A smoke test.
                   {profile.agent_process && !Object.keys(profile.offline_options || {}).length && " The agent still thinks with its own brain."}
@@ -431,34 +370,91 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
               <Notice tone="warn" icon="key" className="mt-3">No API key is set, so a real run's calls will fail. <a href="#/settings">Add it in Settings</a> or choose the free dry run.</Notice>
             )}
             {!f.offline && (
-              <Field label="Caller and validator model" hint={`Default ${system?.default_model || ""}`} className="mt-3.5 max-w-[340px]">
-                <input id="model" className={cx(inputCls, "font-mono text-[13px]")} value={f.model} onChange={(e) => set({ model: e.target.value.trim() })} />
+              <Field label="Caller and validator model" hint={`Default ${system?.default_model || ""}`} className="mt-3.5 max-w-85">
+                <input id="model" className={cx(inputCls, "font-mono text-sm")} value={f.model} onChange={(e) => set({ model: e.target.value.trim() })} />
               </Field>
             )}
           </Card>
 
+          <div id="more-options" className="rounded-3xl border border-dashed border-line-strong">
+            <button type="button" id="more-toggle" aria-expanded={moreOpen} onClick={() => setMore(!moreOpen)}
+              className="w-full flex items-center gap-3 px-5 py-3.5 text-left cursor-pointer rounded-3xl hover:bg-[var(--glass-strong)] transition-colors">
+              <Icon name="sliders" size={16} className="text-muted" />
+              <span className="flex-1 min-w-0">
+                <b className="card-title block">More options</b>
+                <span className="text-sm text-muted">{moreSummary}</span>
+              </span>
+              <Icon name="chevron" size={16} className={cx("text-muted transition-transform duration-200", moreOpen && "rotate-90")} />
+            </button>
+            {moreOpen && (
+              <div className="flex flex-col gap-4 p-3 pt-0 animate-rise">
+          <Card>
+            <CardHead level={2} title="Run settings" />
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+              <Field label={sweeping ? "Repeats per test and condition" : drilling ? "Repeats per test and failure" : "Repeats per test case"}
+                hint={sweeping ? "1 is usually enough here: every condition is its own call. Raise it to see how steady each condition is."
+                  : drilling ? "1 is usually enough here: every failure is its own call. Raise it to see how steady the agent is."
+                  : "Ready needs every repeat of a critical test case to pass."}>
+                <input id="repeats" className={inputCls} type="number" min={1} max={50} placeholder={`from test settings (${profile.thresholds?.repeats ?? 3})`}
+                  value={f.repeats} onChange={(e) => set({ repeats: e.target.value })} />
+              </Field>
+              {!f.offline && profile.judges !== false && (
+                <div className="grid gap-1.5 font-semibold text-sm">
+                  AI judges
+                  <Switch id="judges" checked={f.judges} onChange={(v) => set({ judges: v })} label="Judge tone, facts and scope" />
+                  <span className="font-normal text-sm text-muted">
+                    {f.judges ? <>Two judges read every call (a little extra cost). They advise until you <a href={projectHref(project.key, "/judges")}>calibrate them</a>.</>
+                      : "Off: only hard checks (tools, database, logs, timing)."}
+                  </span>
+                </div>
+              )}
+              {profile.safety?.enabled && (!mode || mode === "full" || mode === "regression") && (
+                <div className="grid gap-1.5 font-semibold text-sm">
+                  Safety tests
+                  <Switch id="safety" checked={f.safety} onChange={(v) => set({ safety: v })} label="Include safety tests" />
+                  <span className="font-normal text-sm text-muted">
+                    {f.safety ? <>{profile.safety.attacks} attack calls written for this agent: off-topic questions, pushing for secrets, prompt tricks and more. <a href={projectHref(project.key, "/setup/safety")}>Choose them on Safety tests</a>.</>
+                      : "Off: only the test cases above."}
+                  </span>
+                </div>
+              )}
+              {f.command === "run" && (!mode || mode === "full" || mode === "regression") && (
+                <Field label="Agent version (optional)" hint="A label such as v1.4 or “new prompt”. It is saved with the run, shown on the Regression trend, and the comparison says when it changed.">
+                  <input id="agent-version" className={inputCls} value={f.agent_version} maxLength={80} placeholder="e.g. v1.4"
+                    onChange={(e) => set({ agent_version: e.target.value })} />
+                </Field>
+              )}
+              <div className="grid gap-1.5 font-semibold text-sm">
+                Personal data
+                <Switch id="pii" checked={f.show_pii} onChange={(v) => set({ show_pii: v })} label="Keep names and dates readable" />
+                <span className={cx("font-normal text-sm", f.show_pii ? "text-bad" : "text-muted")}>
+                  {f.show_pii ? "This run will NOT be masked. Don't share or commit it." : "Off: names, dates of birth and ids are masked in the saved run."}
+                </span>
+              </div>
+            </div>
+          </Card>
           {voice && (
             <Card>
-              <CardHead level={2} title={`${n(5)} · Caller's voice and ears`} />
-              {languagePick && <div className="mb-4 max-w-[420px]">{languagePick}</div>}
+              <CardHead level={2} title="Caller's voice and ears" />
+              {languagePick && <div className="mb-4 max-w-105">{languagePick}</div>}
               <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="speech">
                 <Choice radio on={f.speech === "local"} data-speech="local" onClick={() => set({ speech: "local" })}>
                   <b className="block font-semibold">Real speech</b>
-                  <div className="text-ink-2 text-[13px]">Piper speaks, Whisper listens, on this computer. Models download once (~750 MB).</div>
+                  <div className="text-ink-2 text-sm">Piper speaks, Whisper listens, on this computer. Models download once (~750 MB).</div>
                 </Choice>
                 <Choice radio on={f.speech === "codec"} data-speech="codec" onClick={() => set({ speech: "codec" })}>
                   <b className="block font-semibold">Test tones</b>
-                  <div className="text-ink-2 text-[13px]">Only for testing Vocto itself: never use it to judge an agent.</div>
+                  <div className="text-ink-2 text-sm">Only for testing Vocto itself: never use it to judge an agent.</div>
                 </Choice>
               </div>
               {sweeping ? <SweepPicker all={system?.sweep_conditions || []} on={f.sweep} set={(sweep) => set({ sweep })} /> : <div className="mt-4">
-                <div className="font-semibold text-[13px] mb-1">Caller conditions</div>
-                <div className="text-muted text-[13px] mb-2">Laid over every test, without editing them. Each call keeps its own caller's voice and behaviour; the report splits results by condition.</div>
+                <div className="font-semibold text-sm mb-1">Caller conditions</div>
+                <div className="text-muted text-sm mb-2">Laid over every test, without editing them. Each call keeps its own caller's voice and behaviour; the report splits results by condition.</div>
                 <div className="grid gap-3 grid-cols-1 md:grid-cols-2" id="conditions">
                   {(system?.conditions || [{ id: "as_written", title: "As written", about: "Each test's own audio." }]).map((c) => (
                     <Choice key={c.id} radio on={f.conditions === c.id} data-conditions={c.id} onClick={() => set({ conditions: c.id })}>
                       <b className="block font-semibold">{c.title}</b>
-                      <div className="text-ink-2 text-[13px]">{c.about}</div>
+                      <div className="text-ink-2 text-sm">{c.about}</div>
                     </Choice>
                   ))}
                 </div>
@@ -477,60 +473,92 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
           )}
 
           <Card>
-            <CardHead level={2} title={`${n(5) + (voice ? 1 : 0)} · Run settings`} />
-            <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
-              <Field label={sweeping ? "Repeats per test and condition" : drilling ? "Repeats per test and failure" : "Repeats per test case"}
-                hint={sweeping ? "1 is usually enough here: every condition is its own call. Raise it to see how steady each condition is."
-                  : drilling ? "1 is usually enough here: every failure is its own call. Raise it to see how steady the agent is."
-                  : "Ready needs every repeat of a critical test case to pass."}>
-                <input id="repeats" className={inputCls} type="number" min={1} max={50} placeholder={`from test settings (${profile.thresholds?.repeats ?? 3})`}
-                  value={f.repeats} onChange={(e) => set({ repeats: e.target.value })} />
-              </Field>
-              {!f.offline && profile.judges !== false && (
-                <div className="grid gap-1.5 font-semibold text-[13px]">
-                  AI judges
-                  <Switch id="judges" checked={f.judges} onChange={(v) => set({ judges: v })} label="Judge tone, facts and scope" />
-                  <span className="font-normal text-[13px] text-muted">
-                    {f.judges ? <>Two judges read every call (a little extra cost). They advise until you <a href={projectHref(project.key, "/judges")}>calibrate them</a>.</>
-                      : "Off: only hard checks (tools, database, logs, timing)."}
-                  </span>
+            <CardHead level={2} title="Agent under test" sub={profile.connection.target.includes("://") ? <span className="font-mono">{profile.connection.target}</span> : "started by Vocto"} />
+            <div className="flex flex-col gap-3">
+              {!exit && profile.agent_process && (
+                <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+                  <div className="grid gap-1.5 font-semibold text-sm">
+                    Start the agent
+                    <Switch id="start-agent" checked={f.start_agent} onChange={(v) => set({ start_agent: v, planted_bug: v ? f.planted_bug : "" })} label="Start the agent for me" />
+                    <span className="font-normal text-sm text-muted">
+                      {f.start_agent ? "Vocto starts the agent on this computer before the first call and stops it after the last. Stop it first if it is already running."
+                        : "Off: the agent must already be running at its address."}
+                    </span>
+                  </div>
+                  {planted && (
+                    <Field label="Planted bug" hint={f.start_agent ? "Start the agent with one known bug in its own code or prompts: Vocto should catch it." : "Needs “Start the agent for me”."}>
+                      <select id="planted-bug" className={inputCls} disabled={!f.start_agent} value={f.planted_bug} onChange={(e) => set({ planted_bug: e.target.value })}>
+                        <option value="">None: the agent as released</option>
+                        {profile.planted_bugs!.map((b) => <option key={b.id} value={b.id}>{b.id}: {b.title}</option>)}
+                      </select>
+                    </Field>
+                  )}
                 </div>
               )}
-              {profile.safety?.enabled && (!mode || mode === "full" || mode === "regression") && (
-                <div className="grid gap-1.5 font-semibold text-[13px]">
-                  Safety tests
-                  <Switch id="safety" checked={f.safety} onChange={(v) => set({ safety: v })} label="Include safety tests" />
-                  <span className="font-normal text-[13px] text-muted">
-                    {f.safety ? <>{profile.safety.attacks} attack calls written for this agent: off-topic questions, pushing for secrets, prompt tricks and more. <a href={projectHref(project.key, "/setup/safety")}>Choose them on Safety tests</a>.</>
-                      : "Off: only the test cases above."}
-                  </span>
+              {!exit && profile.bugs && (
+                <div>
+                  <div className="flex flex-wrap items-center gap-2.5 mb-2"><b className="text-sm">Bug switches</b><span className="text-muted text-sm">{OPTION_HELP.bugs}</span></div>
+                  <div className="flex flex-wrap gap-2" id="bugs">
+                    {profile.bugs.map((b) => {
+                      const voiceOnly = /^voice only/i.test(b.help) && !voice;
+                      const on = f.bugs.has(b.name);
+                      return (
+                        <Tip key={b.name} content={b.help}>
+                          <button type="button" data-bug={b.name} disabled={voiceOnly} onClick={() => set({ bugs: toggle(f.bugs, b.name) })}
+                            className={cx("inline-flex items-center gap-1.5 px-2.25 py-0.5 rounded-full text-sm font-semibold border leading-[18px] transition-colors",
+                              voiceOnly ? "opacity-45 cursor-not-allowed bg-surface-2 text-ink-2 border-line"
+                                : on ? "cursor-pointer bg-bad-soft text-bad border-[color-mix(in_srgb,var(--bad)_35%,transparent)]"
+                                  : "cursor-pointer bg-surface-2 text-ink-2 border-line hover:border-line-strong")}>
+                            <Icon name={on ? "alert" : "plus"} size={12} />{b.name}
+                          </button>
+                        </Tip>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
-              {f.command === "run" && (!mode || mode === "full" || mode === "regression") && (
-                <Field label="Agent version (optional)" hint="A label such as v1.4 or “new prompt”. It is saved with the run, shown on the Regression trend, and the comparison says when it changed.">
-                  <input id="agent-version" className={inputCls} value={f.agent_version} maxLength={80} placeholder="e.g. v1.4"
-                    onChange={(e) => set({ agent_version: e.target.value })} />
+              {!exit && !profile.bugs && "bugs" in (profile.options || {}) && (
+                <Field label="Bug switches" hint={OPTION_HELP.bugs}>
+                  <input className={cx(inputCls, "font-mono text-sm")} data-opt="bugs" defaultValue={[...f.bugs].join(",")}
+                    onChange={(e) => set({ bugs: new Set(splitBugs(e.target.value)) })} />
                 </Field>
               )}
-              <div className="grid gap-1.5 font-semibold text-[13px]">
-                Personal data
-                <Switch id="pii" checked={f.show_pii} onChange={(v) => set({ show_pii: v })} label="Keep names and dates readable" />
-                <span className={cx("font-normal text-[13px]", f.show_pii ? "text-bad" : "text-muted")}>
-                  {f.show_pii ? "This run will NOT be masked. Don't share or commit it." : "Off: names, dates of birth and ids are masked in the saved run."}
-                </span>
+              <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+                {optKeys.length ? optKeys.map((k) => {
+                  const locked = f.offline && k in (profile.offline_options || {});
+                  const val = locked ? d[k] : (f.options[k] ?? d[k] ?? "");
+                  const choices = CHOICES[k];
+                  const change = (v: string) => set({ options: { ...f.options, [k]: v } });
+                  return (
+                    <Field key={k} label={optLabel(k)} hint={locked ? "Set by the free dry run." : OPTION_HELP[k] || "An option of this agent."}>
+                      {choices ? (
+                        <select className={inputCls} data-opt={k} disabled={locked} value={String(val)} onChange={(e) => change(e.target.value)}>
+                          {choices.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                          {!choices.some(([v]) => v === String(val)) && <option value={String(val)}>{String(val)}</option>}
+                        </select>
+                      ) : (
+                        <input className={cx(inputCls, "font-mono text-sm")} data-opt={k} disabled={locked} value={String(val)} onChange={(e) => change(e.target.value)} />
+                      )}
+                    </Field>
+                  );
+                }) : <div className="text-muted text-sm">Nothing to choose: Vocto calls the agent at its address.</div>}
               </div>
             </div>
           </Card>
+
+              </div>
+            )}
+          </div>
         </div>
 
-        <div className="xl:sticky xl:top-[76px] flex flex-col gap-4">
+        <div className="xl:sticky xl:top-19 flex flex-col gap-4">
           <Card>
             <CardHead title="Summary" />
-            <div className="flex flex-col gap-[9px]">
+            <div className="flex flex-col gap-2.25">
               <Row label="Agent"><b className="text-right">{project.name}</b></Row>
               <Row label="Channel"><Chip tone={voice ? "agent" : "caller"} icon={voice ? "mic" : "text"}>{voice ? "Voice" : "Text"}</Chip></Row>
               {!voice && languagePick}
-              {mode && <Row label="Test mode"><b>{MODE_TITLE[mode]}</b></Row>}
+              {mode && <Row label="Test type"><b>{MODE_TITLE[mode]}</b></Row>}
               {!safetyMode && <Row label={exit ? "Runs" : "Test cases"}><b>{exit ? 1 + exitBugs.length : picked}</b></Row>}
               <Row label="Planned calls"><b className="tabular-nums">{planned}</b></Row>
               <Row label="Caller"><b>{f.offline ? "rules (free)" : "Claude"}</b></Row>
@@ -542,22 +570,23 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
               {profile.safety?.enabled && <Row label={safetyMode ? "Attack calls" : "Safety tests"}><b>{safetyOn ? `${safetyCalls} calls` : "off"}</b></Row>}
               {!exit && startAgent && <Row label="Agent"><b>{f.planted_bug ? <Chip tone="bad">{f.planted_bug}</Chip> : "started by Vocto"}</b></Row>}
               {!exit && startAgent && f.planted_bug && (
-                <Notice tone="warn" icon="info" className="text-[13px]">With a planted bug the right answer is <b>Not ready</b> for the test case that should catch it.</Notice>
+                <Notice tone="warn" icon="info" className="text-sm">With a planted bug the right answer is <b>Not ready</b> for the test case that should catch it.</Notice>
               )}
               {!exit && f.bugs.size > 0 && (
                 <>
                   <Row label="Bugs on"><div className="flex flex-wrap justify-end gap-1.5">{[...f.bugs].map((b) => <Chip key={b} tone="bad">{b}</Chip>)}</div></Row>
-                  <Notice tone="warn" icon="info" className="text-[13px]">With bugs switched on, the right answer is <b>Not ready</b>: that means Vocto caught them.</Notice>
+                  <Notice tone="warn" icon="info" className="text-sm">With bugs switched on, the right answer is <b>Not ready</b>: that means Vocto caught them.</Notice>
                 </>
               )}
             </div>
             <Divider />
             <Button id="go" variant="primary" size="lg" className="w-full" busy={starting} icon={starting ? undefined : "play"}
-              disabled={starting || !profile.ok || nothing || wrongChannel} onClick={start}>
+              disabled={starting || !profile.ok || nothing || wrongChannel || viewOnly} onClick={start}>
               {starting ? "Starting…" : exit ? "Start exit check" : "Start run"}
             </Button>
+            {viewOnly && <p className="mt-2 text-sm text-ink-2">You can view this agent but not run its tests. Ask your Vocto admin for editor access.</p>}
             {activeJob && (
-              <Notice tone="warn" className="mt-2.5 text-[13px]">A run is in progress. <a href={activeJobHref}>Watch it</a>; start this one when it's done.</Notice>
+              <Notice tone="warn" className="mt-2.5 text-sm">A run is in progress. <a href={activeJobHref}>Watch it</a>; start this one when it's done.</Notice>
             )}
           </Card>
           {!exit && <PassRules rules={profile.pass_rules?.[mode || "full"]} href={projectHref(project.key, "/setup/rules")} />}
@@ -573,15 +602,15 @@ function PassRules({ rules, href }: { rules?: PassRule[]; href: string }) {
   return (
     <Card id="pass-rules">
       <CardHead title="What passes" sub="from this agent's Pass rules" />
-      <ul className="flex flex-col gap-2 text-[13px]">
+      <ul className="flex flex-col gap-2 text-sm">
         {rules.map((r) => (
           <li key={r.text} className="flex items-start gap-2" data-blocks={r.blocks ? "yes" : "no"}>
-            <Icon name={r.blocks ? "shield" : "info"} size={14} className={cx("mt-[3px] shrink-0", r.blocks ? "text-ink" : "text-muted")} />
+            <Icon name={r.blocks ? "shield" : "info"} size={14} className={cx("mt-0.75 shrink-0", r.blocks ? "text-ink" : "text-muted")} />
             <span className={r.blocks ? "text-ink-2" : "text-muted"}>{r.text}</span>
           </li>
         ))}
       </ul>
-      <div className="text-[13px] mt-3"><a href={href}>Change the rules</a></div>
+      <div className="text-sm mt-3"><a href={href}>Change the rules</a></div>
     </Card>
   );
 }
@@ -673,40 +702,40 @@ function DrillPicker({ all, on, set, target, setTarget, repeat, setRepeat, hasLo
     <div className="mt-4 grid gap-4" id="drills">
       <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
         <div>
-          <div className="font-semibold text-[13px] mb-1.5">What breaks</div>
+          <div className="font-semibold text-sm mb-1.5">What breaks</div>
           <div className="flex flex-wrap gap-2" id="drill-on">
             <Choice on={target.includes("action")} data-drill-on="action" onClick={() => flip(target, "action", setTarget)}>The booking or order tool</Choice>
             <Choice on={target.includes("lookup")} data-drill-on="lookup" onClick={() => hasLookups && flip(target, "lookup", setTarget)}>
               The lookups before it{!hasLookups ? " (this agent has none)" : ""}
             </Choice>
           </div>
-          <div className="text-muted text-[13px] mt-1.5">Lookups are the tools it reads first (free times, the menu, the account). When they fail, nothing may be booked on a guess.</div>
+          <div className="text-muted text-sm mt-1.5">Lookups are the tools it reads first (free times, the menu, the account). When they fail, nothing may be booked on a guess.</div>
         </div>
         <div>
-          <div className="font-semibold text-[13px] mb-1.5">How often</div>
+          <div className="font-semibold text-sm mb-1.5">How often</div>
           <div className="flex flex-wrap gap-2" id="drill-repeat">
             <Choice on={repeat.includes("once")} data-drill-repeat="once" onClick={() => flip(repeat, "once", setRepeat)}>First call only</Choice>
             <Choice on={repeat.includes("every")} data-drill-repeat="every" onClick={() => flip(repeat, "every", setRepeat)}>Every call</Choice>
           </div>
-          <div className="text-muted text-[13px] mt-1.5">Every call is an outage that lasts the whole call: the agent must say so, stop retrying and offer a way forward.</div>
+          <div className="text-muted text-sm mt-1.5">Every call is an outage that lasts the whole call: the agent must say so, stop retrying and offer a way forward.</div>
         </div>
       </div>
       {groups.map(([title, about, items]) => items.length > 0 && (
         <div key={title}>
-          <div className="font-semibold text-[13px] mb-1">{title}</div>
-          <div className="text-muted text-[13px] mb-2">{about}</div>
+          <div className="font-semibold text-sm mb-1">{title}</div>
+          <div className="text-muted text-sm mb-2">{about}</div>
           <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
             {items.map((c) => (
               <Choice key={c.id} on={on.includes(c.id)} data-drill={c.id} onClick={() => toggle(c.id)}>
                 <b className="block font-semibold">{c.title}</b>
-                <div className="text-ink-2 text-[13px]">{c.about}{c.expected === "success" ? " The task must still get done." : ""}
+                <div className="text-ink-2 text-sm">{c.about}{c.expected === "success" ? " The task must still get done." : ""}
                   {c.text_only && voice ? " Runs in text runs only, so it is skipped here." : ""}</div>
               </Choice>
             ))}
           </div>
         </div>
       ))}
-      <p className="text-[13px] text-ink-2" id="drill-count">{count ? `${count} drill${count === 1 ? "" : "s"} per test case.` : "Nothing to drill with these choices."}</p>
+      <p className="text-sm text-ink-2" id="drill-count">{count ? `${count} drill${count === 1 ? "" : "s"} per test case.` : "Nothing to drill with these choices."}</p>
     </div>
   );
 }
@@ -725,17 +754,17 @@ function SweepPicker({ all, on, set }: { all: SweepCondition[]; on: string[]; se
     : on.filter((id) => !ladder.some((c) => c.id === id)));
   return (
     <div className="mt-4" id="sweep">
-      <div className="font-semibold text-[13px] mb-1">Conditions to compare</div>
-      <div className="text-muted text-[13px] mb-2">Every test runs once under each condition you pick. The report shows them side by side, so you see which ones break the agent. Keep “As written” on: it is the clean result the others are compared with.</div>
+      <div className="font-semibold text-sm mb-1">Conditions to compare</div>
+      <div className="text-muted text-sm mb-2">Every test runs once under each condition you pick. The report shows them side by side, so you see which ones break the agent. Keep “As written” on: it is the clean result the others are compared with.</div>
       <div className="grid gap-2 grid-cols-1 md:grid-cols-2">
         {lines.map((c) => (
           <Choice key={c.id} on={on.includes(c.id)} data-sweep={c.id} onClick={() => toggle(c.id)}>
             <b className="block font-semibold">{c.title}</b>
-            <div className="text-ink-2 text-[13px]">{c.about}</div>
+            <div className="text-ink-2 text-sm">{c.about}</div>
           </Choice>
         ))}
       </div>
-      <button type="button" className="mt-3 text-[13px] font-medium text-accent inline-flex items-center gap-1" onClick={() => setShowAccents(!showAccents)} id="sweep-accents">
+      <button type="button" className="mt-3 text-sm font-medium text-accent inline-flex items-center gap-1" onClick={() => setShowAccents(!showAccents)} id="sweep-accents">
         <Icon name="chevron" size={14} className={showAccents ? "rotate-90 transition-transform" : "transition-transform"} />Accents{pickedAccents ? ` (${pickedAccents} picked)` : ""}
       </button>
       {showAccents && (
@@ -743,7 +772,7 @@ function SweepPicker({ all, on, set }: { all: SweepCondition[]; on: string[]; se
           {accents.map((c) => (
             <Choice key={c.id} on={on.includes(c.id)} data-sweep={c.id} onClick={() => toggle(c.id)}>
               <b className="block font-semibold">{c.title}</b>
-              <div className="text-ink-2 text-[13px]">{c.about}</div>
+              <div className="text-ink-2 text-sm">{c.about}</div>
             </Choice>
           ))}
         </div>
@@ -751,7 +780,7 @@ function SweepPicker({ all, on, set }: { all: SweepCondition[]; on: string[]; se
       {ladder.length > 0 && (
         <Choice on={ladderOn} data-sweep="ladder" onClick={() => setLadder(!ladderOn)} className="mt-3">
           <b className="block font-semibold">Find the breaking point</b>
-          <div className="text-ink-2 text-[13px]">Up to 5 test cases (key ones first) run once at each step of cafe noise ({ladder.filter((c) => c.id.startsWith("snr:")).map((c) => c.id.slice(4)).join(", ")} dB) and packet loss ({ladder.filter((c) => c.id.startsWith("loss:")).map((c) => c.id.slice(5)).join(", ")}%). The report says how far it works (“works down to 5 dB”). These calls never decide the release.</div>
+          <div className="text-ink-2 text-sm">Up to 5 test cases (key ones first) run once at each step of cafe noise ({ladder.filter((c) => c.id.startsWith("snr:")).map((c) => c.id.slice(4)).join(", ")} dB) and packet loss ({ladder.filter((c) => c.id.startsWith("loss:")).map((c) => c.id.slice(5)).join(", ")}%). The report says how far it works (“works down to 5 dB”). These calls never decide the release.</div>
         </Choice>
       )}
       {on.length === 0 && <Notice tone="warn" className="mt-3">Pick at least one condition.</Notice>}

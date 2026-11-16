@@ -154,8 +154,24 @@ class file_lock:
             self._tlock.release()
 
 
+def read_text_settled(path: Path, tries: int = 20) -> str:
+    """Reads a text file another process may be replacing (write_text_atomic). On Windows, opening a file
+    in the instant it is being replaced fails with PermissionError ("Access is denied"): wait and retry."""
+    import time
+
+    path = Path(path)
+    for attempt in range(tries):
+        try:
+            return path.read_text(encoding="utf-8")
+        except PermissionError:
+            if attempt == tries - 1 or path.is_dir():
+                raise
+            time.sleep(0.01 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
 def read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(read_text_settled(path))
 
 
 ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")

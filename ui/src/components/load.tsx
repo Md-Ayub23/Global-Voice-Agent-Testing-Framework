@@ -142,11 +142,11 @@ export function StageTable({ rows, voice, callHref }: { rows: LoadStageStats[]; 
     <Table head={["Stage", "At once", "Calls", "Failed", ...(voice ? ["p50", "p95", "p99"] : []), "Tests passed", "Result"]}>
       {rows.map((r) => (
         <tr key={r.index} data-stage={r.index}>
-          <td className="min-w-[180px]">
+          <td className="min-w-45">
             <b>{r.name}</b>
-            <div className="text-muted text-[13px]">{fmtSeconds(r.seconds)}{r.in_flight_max != null ? ` · up to ${r.in_flight_max} in progress` : ""}</div>
-            {r.problems.map((p, i) => <div key={i} className="text-[13px] text-bad mt-0.5">{p.message}</div>)}
-            {!r.trusted && <div className="text-[13px] text-ink-2 mt-0.5">{r.untrusted_why}</div>}
+            <div className="text-muted text-sm">{fmtSeconds(r.seconds)}{r.in_flight_max != null ? ` · up to ${r.in_flight_max} in progress` : ""}</div>
+            {r.problems.map((p, i) => <div key={i} className="text-sm text-bad mt-0.5">{p.message}</div>)}
+            {!r.trusted && <div className="text-sm text-ink-2 mt-0.5">{r.untrusted_why}</div>}
             {Object.keys(r.blockers).length > 0 && (
               <div className="flex flex-wrap gap-1 mt-1">{Object.entries(r.blockers).map(([k, ids]) => (
                 <a key={k} href={callHref(ids[0])} className="hover:no-underline"><Chip tone="bad" icon="alert">{k} · {ids.length}</Chip></a>
@@ -157,12 +157,12 @@ export function StageTable({ rows, voice, callHref }: { rows: LoadStageStats[]; 
           <td className="tabular-nums">{r.finished}</td>
           <td className="tabular-nums whitespace-nowrap">
             {r.failed ? <a href={callHref(r.failed_refs[0])} className={r.problems.some((p) => p.rule === "failed_calls") ? "text-bad font-semibold" : "text-ink"}>{r.failed} ({pctText(r.failed_pct)})</a> : <span className="text-muted">0</span>}
-            {Object.keys(r.failed_why).length > 0 && <div className="text-muted text-[13px]">{Object.entries(r.failed_why).map(([k, n]) => `${n} ${k}`).join(" · ")}</div>}
+            {Object.keys(r.failed_why).length > 0 && <div className="text-muted text-sm">{Object.entries(r.failed_why).map(([k, n]) => `${n} ${k}`).join(" · ")}</div>}
           </td>
           {voice && <td className="tabular-nums whitespace-nowrap">{fmtMs(r.latency.p50_ms)}</td>}
           {voice && <td className={"tabular-nums whitespace-nowrap " + (r.problems.some((p) => p.rule === "latency") ? "text-bad font-semibold" : "")}>{fmtMs(r.latency.p95_ms)}</td>}
           {voice && <td className="tabular-nums whitespace-nowrap">{fmtMs(r.latency.p99_ms)}</td>}
-          <td className="tabular-nums whitespace-nowrap">{r.pass_rate == null ? "—" : `${pctText(r.pass_rate)}`}<div className="text-muted text-[13px]">{r.passed} of {r.passed + r.failed_tests}</div></td>
+          <td className="tabular-nums whitespace-nowrap">{r.pass_rate == null ? "—" : `${pctText(r.pass_rate)}`}<div className="text-muted text-sm">{r.passed} of {r.passed + r.failed_tests}</div></td>
           <td><StageStatus r={r} /></td>
         </tr>
       ))}
@@ -173,9 +173,9 @@ export function StageTable({ rows, voice, callHref }: { rows: LoadStageStats[]; 
 function Kpi({ label, value, foot, tone }: { label: string; value: ReactNode; foot?: ReactNode; tone?: "good" | "bad" | "warn" }) {
   return (
     <Card className="grid gap-1">
-      <div className="text-ink-2 font-semibold text-[13px]">{label}</div>
-      <div className={"text-[26px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15] " + (tone ? `text-${tone}` : "")}>{value}</div>
-      {foot && <div className="text-muted text-[13px]">{foot}</div>}
+      <div className="text-ink-2 font-semibold text-sm">{label}</div>
+      <div className={"text-2xl font-semibold tracking-[-.02em] tabular-nums leading-[1.15] " + (tone ? `text-${tone}` : "")}>{value}</div>
+      {foot && <div className="text-muted text-sm">{foot}</div>}
     </Card>
   );
 }
@@ -289,7 +289,7 @@ export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice
           <CardHead level={2} title="Cross-call leaks" sub="a caller's own details found in another caller's call (target 0) · opens the call at that moment" />
           <div className="grid gap-1.5">
             {leaks.map((l, i) => (
-              <a key={i} href={callHref(l.in_test) + `?at=${l.seq}`} className="flex items-center gap-2.5 text-[13px] rounded-md bg-surface-2 px-2.5 py-1.5 hover:no-underline text-ink">
+              <a key={i} href={callHref(l.in_test) + `?at=${l.seq}`} className="flex items-center gap-2.5 text-sm rounded-md bg-surface-2 px-2.5 py-1.5 hover:no-underline text-ink">
                 <Icon name="alert" size={14} className="text-bad flex-none" />
                 <span className="flex-1 min-w-0">{l.text}</span>
                 <Chip tone="bad">{l.where === "said" ? "said aloud" : "in a tool call"}</Chip>
@@ -323,20 +323,20 @@ export function LoadReport({ load, voice, callHref }: { load: LoadSummary; voice
       )}
 
       <Card flush>
-        <CardHead level={2} title="Stages" sub="every stage runs at or below the target, so every stage must meet the limits" className="px-[18px] pt-4 mb-2" />
+        <CardHead level={2} title="Stages" sub="every stage runs at or below the target, so every stage must meet the limits" className="px-4.5 pt-4 mb-2" />
         <StageTable rows={load.stages} voice={voice} callHref={callHref} />
       </Card>
 
       {(load.notes.length > 0 || load.lag_p95_ms != null) && (
         <Card id="load-notes">
           <CardHead level={3} title="Notes" />
-          <ul className="grid gap-1.5 text-[13px] text-ink-2 list-none">
-            {load.notes.map((n, i) => <li key={i} className="flex gap-2"><Icon name="info" size={14} className="text-muted mt-[3px] flex-none" />{n}</li>)}
+          <ul className="grid gap-1.5 text-sm text-ink-2 list-none">
+            {load.notes.map((n, i) => <li key={i} className="flex gap-2"><Icon name="info" size={14} className="text-muted mt-0.75 flex-none" />{n}</li>)}
             {load.lag_p95_ms != null && (
-              <li className="flex gap-2"><Icon name="activity" size={14} className="text-muted mt-[3px] flex-none" />
+              <li className="flex gap-2"><Icon name="activity" size={14} className="text-muted mt-0.75 flex-none" />
                 Vocto's own computer kept up: event-loop lag p95 {load.lag_p95_ms} ms, worst {load.lag_max_ms} ms (a stage over {load.limits.max_lag_ms} ms is not trusted).</li>
             )}
-            {load.harness_errors > 0 && <li className="flex gap-2"><Icon name="alert" size={14} className="text-warn mt-[3px] flex-none" />{plural(load.harness_errors, "call")} failed because of Vocto itself; they are not counted against the agent.</li>}
+            {load.harness_errors > 0 && <li className="flex gap-2"><Icon name="alert" size={14} className="text-warn mt-0.75 flex-none" />{plural(load.harness_errors, "call")} failed because of Vocto itself; they are not counted against the agent.</li>}
           </ul>
         </Card>
       )}
@@ -351,15 +351,15 @@ export function LoadLiveCard({ stages, live, voice }: { stages: LoadStage[]; liv
   return (
     <Card className="mb-4" id="load-live">
       <CardHead level={2} title="Load" sub={live ? `${live.stage_name} · ${live.level} at once · ${live.in_flight} in progress now` : "Starting the first calls…"} />
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-3 text-[13px]">
-        <div><div className="text-muted text-[13px]">Time</div><b className="tabular-nums">{live ? `${fmtSeconds(Math.min(live.elapsed_s, total))} of ${fmtSeconds(total)}` : `0 of ${fmtSeconds(total)}`}</b></div>
-        <div><div className="text-muted text-[13px]">Calls started</div><b className="tabular-nums" id="load-started">{live?.started ?? 0}</b></div>
-        <div><div className="text-muted text-[13px]">Finished</div><b className="tabular-nums">{live?.finished ?? 0}</b></div>
-        <div><div className="text-muted text-[13px]">Failed</div><b className={"tabular-nums " + (live?.failed ? "text-bad" : "")}>{live?.failed ?? 0}</b>
-          {live && live.harness > 0 && <span className="text-muted text-[13px]"> · {plural(live.harness, "Vocto error")}</span>}</div>
+      <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-3 text-sm">
+        <div><div className="text-muted text-sm">Time</div><b className="tabular-nums">{live ? `${fmtSeconds(Math.min(live.elapsed_s, total))} of ${fmtSeconds(total)}` : `0 of ${fmtSeconds(total)}`}</b></div>
+        <div><div className="text-muted text-sm">Calls started</div><b className="tabular-nums" id="load-started">{live?.started ?? 0}</b></div>
+        <div><div className="text-muted text-sm">Finished</div><b className="tabular-nums">{live?.finished ?? 0}</b></div>
+        <div><div className="text-muted text-sm">Failed</div><b className={"tabular-nums " + (live?.failed ? "text-bad" : "")}>{live?.failed ?? 0}</b>
+          {live && live.harness > 0 && <span className="text-muted text-sm"> · {plural(live.harness, "Vocto error")}</span>}</div>
       </div>
       <div ref={box}><LoadChart stages={stages} timeline={live?.timeline} width={w} now={live?.elapsed_s ?? 0} /></div>
-      <div className="text-muted text-[13px] mt-1.5">
+      <div className="text-muted text-sm mt-1.5">
         {voice ? "Each call is a normal test call: answer times are measured and every check runs. " : "Each call is a normal test call: every check runs. "}
         Vocto's own lag now: {live ? `${Math.round(live.lag_ms)} ms` : "—"}.
       </div>

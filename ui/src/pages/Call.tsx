@@ -3,9 +3,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { LatencyBars, Waveform } from "../components/charts";
 import { Icon } from "../components/Icon";
 import { CallQuality } from "../components/quality";
-import { ChecksList, JudgeList, OutcomeNotice } from "../components/runbits";
+import { ChecksList, JudgeList, OutcomeNotice, outcomeText } from "../components/runbits";
 import { RowsTable, Timeline, type TimelineHandle } from "../components/Timeline";
-import { Badge, Button, Card, CardHead, Chip, Legend, Notice, Seg, Skeleton, Table, Tabs } from "../components/ui";
+import { Badge, Button, Card, CardHead, Chip, Legend, Notice, Seg, Skeleton, Table, Tabs, PageHead } from "../components/ui";
+import { modeHref } from "../components/modecards";
+import { modeTitle } from "../lib/modes";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { projectHref } from "../lib/links";
@@ -15,21 +17,31 @@ import type { CallDetail, Check, Project, RunDetail } from "../lib/types";
 function Kpi({ label, value, foot }: { label: string; value: ReactNode; foot?: ReactNode }) {
   return (
     <Card className="grid gap-1">
-      <div className="text-ink-2 font-semibold text-[13px]">{label}</div>
-      <div className="text-[26px] font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">{value}</div>
-      {foot && <div className="text-muted text-[13px]">{foot}</div>}
+      <div className="text-ink-2 font-semibold text-sm">{label}</div>
+      <div className="text-2xl font-semibold tracking-[-.02em] tabular-nums leading-[1.15]">{value}</div>
+      {foot && <div className="text-muted text-sm">{foot}</div>}
     </Card>
   );
 }
 
 export function CallPage({ project, runId, testId, at }: { project: Project; runId: string; testId: string; at?: number | null }) {
   const runAt = (path = "") => projectHref(project.key, `/runs/${runId}${path}`);
-  useCrumbs([{ label: project.name, href: projectHref(project.key) },
-    { label: "Results", href: projectHref(project.key, "/runs") }, { label: "Run", href: runAt() }, { label: "Call" }]);
   const { data, error } = useLoad(
     () => Promise.all([api.get<CallDetail>(`/api/runs/${runId}/calls/${testId}`), api.get<RunDetail>(`/api/runs/${runId}`)]),
-    [runId, testId],
+    [runId, testId], { keep: true },
   );
+  const { system: sys } = useApp();
+  // A drill call's id is "<test case>.drill.<failure>": its title is the test case's, with the failure it drilled.
+  const caseTitle = (id: string) => {
+    const [base, drill] = id.split(".drill.");
+    const t = project.profiles.flatMap((p) => p.scenarios).find((x) => x.id === base)?.title || shortScenario(base);
+    return drill ? `${t} · ${sys?.drill_failures?.find((f) => f.id === drill)?.title || drill.replace(/_/g, " ")}` : t;
+  };
+  const callMode = data ? data[1].summary.test_mode || (data[1].summary.kind === "load" ? "load" : null) : null;
+  useCrumbs([{ label: project.name, href: projectHref(project.key) },
+    ...(callMode && callMode !== "monitor" ? [{ label: modeTitle(callMode), href: modeHref(project.key, callMode) }] : [{ label: "All runs", href: projectHref(project.key, "/runs") }]),
+    { label: data ? `Run of ${fmtDate(data[1].summary.started_at)}` : "Run", href: runAt() },
+    { label: data ? caseTitle(data[0].record.scenario_id) : "Call" }]);
   const [view, setView] = useState<"chat" | "text">("chat");
   const [side, setSide] = useState("checks");
   const { system } = useApp();
@@ -91,26 +103,24 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
 
   return (
     <>
-      <div className="flex items-end gap-4 mt-2 mb-5 flex-wrap">
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-[24px] font-semibold tracking-[-.025em]">{shortScenario(r.scenario_id)}</h1>
-            {v ? <Badge status={v.status} /> : <Badge status={running ? "running" : "interrupted"} />}
-            {final === false && <Chip tone="warn" icon="refresh">attempt {r.attempt}: Vocto error, rerun · not counted</Chip>}
-          </div>
-          <div className="mt-1 text-ink-2 flex flex-wrap items-center gap-2">
-            <span className="font-mono text-[13px]">{r.scenario_id}</span><span className="text-muted">·</span>repeat {r.repeat}
-            {r.persona_id && <><span className="text-muted">·</span><Chip tone="caller" icon="user">{r.persona_id}</Chip></>}
-            <Chip tone={voice ? "agent" : "caller"} icon={voice ? "mic" : "text"}>{r.mode}</Chip>
-            {c.pii_masked ? <Chip icon="shield">personal data masked</Chip> : <Chip tone="bad" icon="alert">personal data NOT masked</Chip>}
-          </div>
-        </div>
-        <div className="flex gap-2">
-          {prev && <Button size="sm" iconOnly icon="back" href={runAt(`/calls/${prev.test_id}`)} title="Previous call" aria-label="Previous call" />}
-          {next && <Button size="sm" iconOnly icon="arrow" href={runAt(`/calls/${next.test_id}`)} title="Next call" aria-label="Next call" />}
-          <Button size="sm" icon="layers" href={runAt()}>Back to the run</Button>
-        </div>
-      </div>
+      <PageHead
+        back={{ href: runAt(), label: "Back to the run" }}
+        title={<div className="flex flex-wrap items-center gap-2.5">
+          <h1 className="page-title">{caseTitle(r.scenario_id)}</h1>
+          {v ? <Badge status={v.status} /> : <Badge status={running ? "running" : "interrupted"} />}
+          {final === false && <Chip tone="warn" icon="refresh">attempt {r.attempt}: Vocto error, rerun · not counted</Chip>}
+        </div>}
+        meta={<>
+          <span className="font-mono text-2xs">{r.scenario_id}</span><span aria-hidden="true">·</span><span>repeat {r.repeat}</span>
+          {idx >= 0 && <><span aria-hidden="true">·</span><span>call {idx + 1} of {finals.length}</span></>}
+          {r.persona_id && <Chip tone="caller" icon="user">{r.persona_id}</Chip>}
+          <Chip tone={voice ? "agent" : "caller"} icon={voice ? "mic" : "text"}>{voice ? "voice" : "text"}</Chip>
+          {c.pii_masked ? <Chip icon="shield">personal data masked</Chip> : <Chip tone="bad" icon="alert">personal data not masked</Chip>}
+        </>}
+      >
+        <Button iconOnly icon="back" href={prev ? runAt(`/calls/${prev.test_id}`) : undefined} disabled={!prev} title="Previous call" aria-label="Previous call" id="prev-call" />
+        <Button iconOnly icon="arrow" href={next ? runAt(`/calls/${next.test_id}`) : undefined} disabled={!next} title="Next call" aria-label="Next call" id="next-call" />
+      </PageHead>
 
       <OutcomeNotice verdict={v} />
 
@@ -132,7 +142,7 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
               <audio id="audio" ref={setAudio} controls preload="metadata" src={c.recording.url} className="w-full mt-2.5" />
               <div className="mt-2 flex flex-wrap items-center gap-3.5">
                 <Legend items={[["var(--caller)", "Caller"], ["var(--agent)", "Agent"]]} />
-                <span className="text-muted text-[13px]">Click the waveform or a ▶ time to jump there.</span>
+                <span className="text-muted text-sm">Click the waveform or a ▶ time to jump there.</span>
               </div>
               {c.phone && <PhoneLine p={c.phone} />}
             </Card>
@@ -149,13 +159,13 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
                 <Table compact head={["#", "Who", "What happened"]}>
                   {c.story.map((row) => (
                     <tr key={row.seq}>
-                      <td className="font-mono text-[13px] text-muted">#{row.seq}</td>
+                      <td className="font-mono text-sm text-muted">#{row.seq}</td>
                       <td className="whitespace-nowrap"><b>{row.who}</b></td>
                       <td>{row.text}</td>
                     </tr>
                   ))}
                 </Table>
-                <div className="text-muted text-[13px] mt-2">The same lines as story.txt and the terminal output.</div>
+                <div className="text-muted text-sm mt-2">The same lines as story.txt and the terminal output.</div>
               </div>
             )}
           </Card>
@@ -165,11 +175,11 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
           {c.judgement.length > 0 && (
             <Card>
               <CardHead title="Said vs did vs stored" />
-              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-2 text-[13px]">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3.5 gap-y-2 text-sm">
                 {c.judgement.map((j) => (
                   <div key={j.label} className="contents">
                     <dt className="text-muted font-semibold">{j.label}</dt>
-                    <dd className="m-0 min-w-0 break-words">{j.label === "Outcome" ? <b>{j.text}</b> : j.text}</dd>
+                    <dd className="m-0 min-w-0 break-words">{j.label === "Outcome" ? <b>{outcomeText(j.text).replace(/ -> /g, " → ")}</b> : outcomeText(j.text)}</dd>
                   </div>
                 ))}
               </dl>
@@ -180,9 +190,9 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
             <CardHead title="Checks" sub={v ? `${own.filter((x) => x.result === "PASS").length} of ${own.length} passed` : undefined} />
             <div id="checks">
               {v ? <ChecksList verdict={v} onEvidence={onEvidence} />
-                : <div className="text-muted text-[13px]">{running ? "This call has no verdict yet." : "The run was stopped during this call, so it was never judged."}</div>}
+                : <div className="text-muted text-sm">{running ? "This call has no verdict yet." : "The run was stopped during this call, so it was never judged."}</div>}
             </div>
-            <div className="text-muted text-[13px] mt-2">Click an event number to see it in the conversation.</div>
+            <div className="text-muted text-sm mt-2">Click an event number to see it in the conversation.</div>
           </Card>}
           {sideShown === "judges" && v && judged.length > 0 && (
             <Card id="judges" >
@@ -190,7 +200,7 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
                 <Button size="sm" variant="ghost" href={projectHref(project.key, "/judges")}>About</Button>
               </CardHead>
               {v.status === "PASS" && judged.some((x) => ["FAIL", "NEEDS_REVIEW"].includes(x.result) && !x.can_block) && (
-                <Notice className="mb-3 text-[13px]">
+                <Notice className="mb-3 text-sm">
                   <b>Why the call still passed:</b> hard checks decide a call (tools, database, what must and mustn't be said),
                   plus judge items you have learned to trust. The items marked <i>not trusted yet</i> are the judges' opinion:
                   shown, never counted. Label this call to tell them whether they were right; that is how an item earns trust.
@@ -212,8 +222,8 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
               <div className="flex flex-col gap-3">
                 {c.database.map((d) => (
                   <div key={d.probe} className="min-w-0">
-                    <div className="font-mono text-[13px] text-muted mb-1.5 break-all">{d.probe}</div>
-                    {d.rows.length ? <RowsTable rows={d.rows} /> : <div className="text-muted text-[13px]">No rows: nothing was stored by this call.</div>}
+                    <div className="font-mono text-sm text-muted mb-1.5 break-all">{d.probe}</div>
+                    {d.rows.length ? <RowsTable rows={d.rows} /> : <div className="text-muted text-sm">No rows: nothing was stored by this call.</div>}
                   </div>
                 ))}
               </div>
@@ -223,7 +233,7 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
             <CardHead title="Evidence downloads" sub={`${r.locked ? "sealed" : "still open"}${r.events_sha256 ? ` · sha256 ${r.events_sha256.slice(0, 10)}…` : ""}`} />
             <div className="flex flex-col gap-1.5">
               {c.files.map((f) => (
-                <a key={f} className="flex items-center gap-2 text-[13px]" href={`/runs/${runId}/calls/${testId}/${f}`} target="_blank" rel="noreferrer">
+                <a key={f} className="flex items-center gap-2 text-sm" href={`/runs/${runId}/calls/${testId}/${f}`} target="_blank" rel="noreferrer">
                   <Icon name="file" /><span className="font-mono">{f}</span>
                 </a>
               ))}
@@ -246,7 +256,7 @@ function judgeSub(judged: Check[]): string {
 function PhoneLine({ p }: { p: NonNullable<CallDetail["phone"]> }) {
   const cost = p.price != null ? `${p.price.toFixed(4)} ${p.price_unit || ""}`.trim() : "not reported yet";
   return (
-    <div id="phone-call" className="mt-3 text-[13px] text-muted flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2.5">
+    <div id="phone-call" className="mt-3 text-sm text-muted flex flex-wrap gap-x-4 gap-y-1 border-t border-line pt-2.5">
       <span><b className="text-ink font-medium">Real phone call</b> from {p.from} to {p.to}</span>
       <span>{p.duration_s != null ? `${p.duration_s} s on the line` : p.status}</span>
       <span>{p.provider === "twilio" ? "Twilio" : p.provider} cost: {cost}</span>

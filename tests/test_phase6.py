@@ -10,12 +10,12 @@ import json
 import shutil
 import threading
 import xml.etree.ElementTree as ET
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
 import yaml
 
+from vatf.web.httpbase import BoundedHTTPServer
 from vatf import alerts, ciconfig, health
 from vatf.baseline import BaselineError, baseline_path, load_baseline, set_baseline
 from vatf.cireport import junit_xml, markdown
@@ -357,7 +357,7 @@ def web(tmp_path):
     shutil.copytree(ROOT / "examples" / "clinic", root / "examples" / "clinic",
                     ignore=shutil.ignore_patterns("runs", "baselines", "*.db", "__pycache__"))
     app = App(root, Path("runs"))
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    httpd = BoundedHTTPServer(("127.0.0.1", 0), make_handler(app))
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
     yield root, httpd.server_address[1]

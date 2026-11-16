@@ -178,3 +178,12 @@ def test_returning_caller_chain(tmp_path):
     assert _check(result, "not-booked-on-call-2")["result"] == "PASS"
     assert _check(result, "turn3.1")["result"] == "PASS" and _check(result, "call2.turn1.1")["result"] == "PASS"
     assert sum(1 for e in events if e["type"] == "call_ended") == 1      # one test, one chain
+
+
+def test_scripted_voicemail_needs_no_lines(tmp_path):
+    sc = {**BASE, "id": "clinic.vm-scripted", "title": "Reminder voicemail", "style": "scripted",
+          "direction": "outbound", "answered_by": "voicemail", "checks": [{"id": "vm", "type": "voicemail"}]}
+    assert schema_errors("scenario", {**sc, "answered_by": "person"})          # a person call still needs lines
+    events, result = _run(tmp_path, sc)
+    assert [e for e in events if e["type"] == "agent_turn" and e["data"].get("voicemail_message")]
+    assert _check(result, "vm")["result"] == "PASS"

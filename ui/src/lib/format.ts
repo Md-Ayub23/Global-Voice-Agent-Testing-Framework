@@ -45,7 +45,7 @@ export const pct = (v: number | null | undefined) => (v == null ? "—" : `${Mat
 export const money = (v: number | null | undefined) => (v == null ? "—" : !v ? "$0" : `$${Number(v).toFixed(v < 0.1 ? 4 : 2)}`);
 export const shortScenario = (id: string | null | undefined) => String(id || "").replace(/^[^.]+\./, "");
 
-// Joins class names; when two set the same thing (p-[18px] then p-3), the later one wins, so a
+// Joins class names; when two set the same thing (p-4.5 then p-3), the later one wins, so a
 // component's defaults can be overridden with className.
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return twMerge(parts.filter(Boolean).join(" "));

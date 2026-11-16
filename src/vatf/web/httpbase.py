@@ -50,3 +50,14 @@ class BoundedHTTPServer(ThreadingHTTPServer):
             super().process_request_thread(request, client_address)
         finally:
             self._slots.release()
+
+    def handle_error(self, request, client_address):
+        """A client that hangs up mid-request (a closed tab, a test's dropped connection, Windows' "an
+        existing connection was forcibly closed") is normal: say nothing. Anything else: the traceback."""
+        import sys
+        import traceback
+
+        err = sys.exc_info()[1]
+        if isinstance(err, (ConnectionError, TimeoutError, socket.timeout)):
+            return
+        print(f"vatf: error while answering {client_address[0]}:\n{traceback.format_exc()}", file=sys.stderr)

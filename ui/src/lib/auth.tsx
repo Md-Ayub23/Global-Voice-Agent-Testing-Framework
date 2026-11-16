@@ -59,3 +59,9 @@ export function AuthGate({ children, signIn }: { children: ReactNode; signIn: (p
   if (status.enabled && !status.user) return <>{signIn({ setup: status.setup, done: (u) => setStatus({ ...status, user: u, setup: false }) })}</>;
   return <Ctx.Provider value={{ user: status.user, enabled: status.enabled, signOut }}>{children}</Ctx.Provider>;
 }
+
+// May the person signed in change things (run tests, edit set-up)? Viewers read only.
+export function useCanEdit(): boolean {
+  const { user } = useAuth();
+  return can(user, "editor");
+}

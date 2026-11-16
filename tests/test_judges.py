@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from vatf.web.httpbase import BoundedHTTPServer
 from vatf import rubrics
 from vatf.calibration import add_labels, calibration, cohen_kappa, corrected_pass_rate, item_status, load_labels
 from vatf.judges import JudgePanel, answer_schema, combine, judge_prompt, parse_votes, transcript
@@ -529,7 +530,6 @@ def test_soft_bug_switches_change_only_how_the_agent_talks():
 def test_judges_and_labels_api(tmp_path, monkeypatch):
     import http.client
     import threading
-    from http.server import ThreadingHTTPServer
 
     from vatf.web.server import App, make_handler
 
@@ -547,7 +547,7 @@ def test_judges_and_labels_api(tmp_path, monkeypatch):
     decision = asyncio.run(Orchestrator(proj, cfg, llm=llm, log=lambda *_: None).run())
 
     app = App(root, Path("runs"))
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(app))
+    httpd = BoundedHTTPServer(("127.0.0.1", 0), make_handler(app))
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
     port = httpd.server_address[1]
 

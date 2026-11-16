@@ -266,8 +266,11 @@ properties:
 allOf:
   - if: {properties: {style: {const: simulated}}}
     then: {required: [caller], properties: {caller: {required: [persona, goal, facts]}}}
-  - if: {properties: {style: {const: scripted}}}
-    then: {required: [turns]}
+  - if: {properties: {style: {const: scripted}}}       # a voicemail needs no caller lines: it only records
+    then:
+      if: {required: [answered_by], properties: {answered_by: {const: voicemail}}}
+      then: {}
+      else: {required: [turns]}
 
 $defs:
   outcome:

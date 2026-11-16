@@ -1,8 +1,8 @@
 // One agent's set-up pages: Connect (connection, tools, database, logs) and Agent settings (pass rules, callers,
 // AI judges, CI & alerts), plus the test cases and safety tests pages. Every save is checked with the same rules a run uses.
 import type { ReactNode } from "react";
-import type { IconName } from "../components/Icon";
-import { LinkTabs, Notice, PageHead, Seg, Skeleton } from "../components/ui";
+import { LinkTabs, Notice, PageHead, ReadOnly, Seg, Skeleton } from "../components/ui";
+import { useCanEdit } from "../lib/auth";
 import { SafetyCard } from "./setup/SafetyCard";
 import { qs } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
@@ -19,31 +19,12 @@ import { TestSettingsTab } from "./setup/TestSettingsTab";
 import { ToolsTab } from "./setup/ToolsTab";
 import { OpsTab } from "./setup/OpsTab";
 
-export type SetupTab = "connection" | "tools" | "backend" | "logs" | "cases" | "callers" | "safety" | "rules" | "ops" | "judges";
-interface SetupMeta { value: SetupTab; label: string; icon: IconName; sub: string }
-// The set-up pages. Connect holds how Vocto reaches the agent and what else it can check; Agent settings
-// holds the rules and helpers every test type shares. Test cases and safety tests belong to their test type.
-export const SETUP_TABS: SetupMeta[] = [
-  { value: "connection", label: "Connection", icon: "plug", sub: "How callers reach the agent, and the agent brief Vocto writes test cases from." },
-  { value: "tools", label: "Tools", icon: "tool", sub: "The APIs the agent calls. Vocto watches every call and can break one on purpose." },
-  { value: "backend", label: "Database", icon: "db", sub: "Read-only access, so Vocto checks what really got saved, not what the agent said." },
-  { value: "logs", label: "Logs", icon: "logs", sub: "The agent's own log lines, kept next to each call and checked by test cases." },
-  { value: "cases", label: "Test cases", icon: "plan", sub: "The situations the agent must handle." },
-  { value: "safety", label: "Safety tests", icon: "shield", sub: "Attack calls that try to make the agent leak, lie or go off its job." },
-  { value: "rules", label: "Pass rules", icon: "sliders", sub: "What a pass needs for this agent: response times, repeats, coverage, budget, and what may not get worse than the baseline." },
-  { value: "callers", label: "Callers", icon: "user", sub: "The people who call in your tests, from calm to impatient. Every test case picks one." },
-  { value: "judges", label: "AI judges", icon: "sparkles", sub: "What the AI judges score in every conversation, and what the agent may say." },
-  { value: "ops", label: "CI & alerts", icon: "bell", sub: "Run this agent's tests in CI, on a schedule as health checks, and get a message when a release is blocked." },
-];
-const CONNECT_TABS: SetupTab[] = ["connection", "tools", "backend", "logs"];
-const SETTINGS_TABS: SetupTab[] = ["rules", "callers", "judges", "ops"];
-// Old addresses and where they live now.
-export const SETUP_ALIASES: Record<string, SetupTab> = { agent: "connection", plan: "cases", settings: "rules" };
-export const setupSection = (tab: string) => (CONNECT_TABS.includes(tab as SetupTab) ? "connect"
-  : SETTINGS_TABS.includes(tab as SetupTab) ? "agent-settings" : tab === "safety" ? "mode:safety" : "mode:functional");
+import { CONNECT_TABS, SETTINGS_TABS, SETUP_TABS, type SetupTab } from "../lib/setupnav";
+export { SETUP_ALIASES, SETUP_TABS, setupSection, type SetupTab } from "../lib/setupnav";
 
 export function ProjectSetup({ project, tab, query }: { project: Project; tab: SetupTab; query: URLSearchParams }) {
   const { reloadProjects } = useApp();
+  const canEdit = useCanEdit();
   const profiles = project.profiles;
   const wanted = query.get("file");
   const main = mainProfile(project);
@@ -74,7 +55,7 @@ export function ProjectSetup({ project, tab, query }: { project: Project; tab: S
   const shared = ["tools", "backend", "logs", "cases", "callers", "safety", "judges"].includes(tab);   // the same for every connection
   const channelPicker = profiles.length > 1 && !shared && (
     <div className="flex items-center gap-2.5 min-w-0 max-w-full">
-      <span className="text-muted text-[13px] flex-none">{tab === "connection" ? "Connection" : "Settings for"}</span>
+      <span className="text-muted text-sm flex-none">{tab === "connection" ? "Connection" : "Settings for"}</span>
       <Seg id="profile-file" value={file} onChange={(f) => navigate(`${projectHref(project.key, `/setup/${tab}`)}?${qs({ file: f })}`)}
         options={profiles.map((p) => ({ value: p.file, label: <>{channelLabel(p, profiles, project.example)}{p.file === main?.file && profiles.length > 1 ? <span className="text-muted font-normal">main</span> : null}</>, icon: p.mode === "voice" ? "mic" : "text" }))} />
     </div>
@@ -92,14 +73,14 @@ export function ProjectSetup({ project, tab, query }: { project: Project; tab: S
           return { value: t, label: m.label, href: projectHref(project.key, `/setup/${t}`) };
         }), ...(group === "settings" ? [{ value: "files", label: "Files", href: projectHref(project.key, "/files") }] : [])]} />
       )}
-      {group && <p className="text-ink-2 text-[13px] -mt-2 mb-4">{meta.sub}</p>}
+      {group && <p className="text-ink-2 text-sm -mt-2 mb-4">{meta.sub}</p>}
       {detail.problems.length > 0 && (
         <Notice tone="warn" className="mb-4">
           <b>To fix before the first run:</b>
-          <ul className="mt-1 pl-[18px] list-disc">{detail.problems.slice(0, 8).map((p, i) => <li key={i} className="text-[13px] break-words">{p}</li>)}</ul>
+          <ul className="mt-1 pl-4.5 list-disc">{detail.problems.slice(0, 8).map((p, i) => <li key={i} className="text-sm break-words">{p}</li>)}</ul>
         </Notice>
       )}
-      <div key={tab} >{bodies[tab]()}</div>
+      <ReadOnly when={!canEdit}><div key={tab}>{bodies[tab]()}</div></ReadOnly>
     </>
   );
 }
