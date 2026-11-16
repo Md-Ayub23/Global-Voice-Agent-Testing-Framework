@@ -45,7 +45,7 @@ class Job:
     command: str                     # the same thing typed in a terminal
     started_at: str = field(default_factory=utc_now)
     finished_at: str | None = None
-    status: str = "running"          # running | finished | failed | stopped
+    status: str = "running"          # queued | running | finished | failed | stopped
     exit_code: int | None = None
     lines: list[str] = field(default_factory=list)
     run_ids: list[str] = field(default_factory=list)
@@ -53,12 +53,19 @@ class Job:
     summary_path: Path | None = None
     stop_requested: bool = False
     proc: subprocess.Popen | None = None
+    project: str = ""                # the agent's project path: one run per agent at a time
+    user: str | None = None          # who started it (None: the scheduler or the command line)
+    queued_at: str | None = None
+    position: int = 0                # 1 = next to start, while queued
+    seq: int = 0                     # order asked (first come, first served)
+    audio: "LiveAudio | None" = None
 
     def public(self) -> dict[str, Any]:
         out = {"id": self.id, "kind": self.kind, "request": self.request, "command": self.command,
                "started_at": self.started_at, "finished_at": self.finished_at, "status": self.status,
                "exit_code": self.exit_code, "run_ids": list(self.run_ids), "labels": dict(self.labels),
-               "line_count": len(self.lines)}
+               "line_count": len(self.lines), "project": self.project, "user": self.user,
+               "queued_at": self.queued_at, "position": self.position if self.status == "queued" else 0}
         if self.summary_path and self.summary_path.exists():
             try:
                 out["summary"] = read_json(self.summary_path)
@@ -118,24 +125,64 @@ class LiveAudio:
     def listeners(self) -> int:
         return len(self._listeners)
 
+    def close(self) -> None:
+        try:
+            self.sock.close()
+        except (OSError, AttributeError):
+            pass
+
 
 def _arg(value: str) -> str:
     return value if re.fullmatch(r"[A-Za-z0-9_./:=,\-]+", value) else shlex.quote(value)
 
 
-class JobManager:
-    """One run at a time: runs share the agent's test database, so two at once would clash."""
+def _env_int(name: str, default: int, low: int, high: int) -> int:
+    try:
+        return max(low, min(high, int(os.environ.get(name, default))))
+    except ValueError:
+        return default
 
-    def __init__(self, root: Path, runs_dir: Path):
+
+class JobManager:
+    """Runs started from the dashboard, with a waiting line.
+
+    One run per agent at a time (an agent's runs share its test database, so two at once would clash), and
+    at most `max_running` runs at once in all (VOCTO_MAX_RUNS, default 2: each run is a process with its
+    own callers, speech models and AI requests). A run that can't start yet waits in line ("queued") and
+    starts by itself, in the order asked, when a slot frees up. At most `max_queued` wait (VOCTO_MAX_QUEUED)."""
+
+    def __init__(self, root: Path, runs_dir: Path, max_running: int | None = None, max_queued: int | None = None):
         self.root = root
         self.runs_dir = runs_dir
         self.jobs: dict[str, Job] = {}
-        self._lock = threading.Lock()
-        self.audio = LiveAudio()
+        self._lock = threading.RLock()
+        self.max_running = max_running or _env_int("VOCTO_MAX_RUNS", 2, 1, 64)
+        self.max_queued = max_queued if max_queued is not None else _env_int("VOCTO_MAX_QUEUED", 20, 0, 1000)
+        self.audio = LiveAudio()     # kept for older callers; each voice run gets its own (job.audio)
+        self._seq = 0
 
     @property
     def active(self) -> Job | None:
-        return next((j for j in self.jobs.values() if j.status == "running"), None)
+        """The newest run going now (the dashboard's "a run is going" banner)."""
+        running = self.running()
+        return running[-1] if running else None
+
+    def running(self) -> list[Job]:
+        return [j for j in list(self.jobs.values()) if j.status == "running"]
+
+    def queued(self) -> list[Job]:
+        return sorted((j for j in list(self.jobs.values()) if j.status == "queued"), key=lambda j: j.seq)
+
+    def busy(self, project_path: str) -> bool:
+        """True while this agent has a run going or waiting."""
+        return any(j.project == project_path and j.status in ("running", "queued") for j in list(self.jobs.values()))
+
+    def run_ids(self) -> set[str]:
+        return {r for j in self.running() for r in j.run_ids}
+
+    def stats(self) -> dict[str, Any]:
+        return {"running": len(self.running()), "queued": len(self.queued()),
+                "max_running": self.max_running, "max_queued": self.max_queued}
 
     def build(self, req: dict[str, Any], project: dict[str, Any]) -> tuple[list[str], str]:
         """The vatf command line for a request from the New run page. `project` is the
@@ -341,32 +388,68 @@ class JobManager:
             command += f" --runs-dir {_arg(self.runs_dir.as_posix())}"
         return args, command
 
-    def start(self, req: dict[str, Any], project: dict[str, Any]) -> Job:
+    def start(self, req: dict[str, Any], project: dict[str, Any], user: str | None = None,
+              exclusive: bool = False) -> Job:
+        """Starts the run now, or puts it in line when its agent is busy or every slot is taken.
+        exclusive=True refuses instead of waiting when its agent already has a run going or waiting
+        (the health scheduler uses it, so checks never pile up)."""
+        args, command = self.build(req, project)
         with self._lock:
-            if self.active:
-                raise JobError("a run is already in progress; wait for it or stop it first")
-            args, command = self.build(req, project)
-            job_id = f"j-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
-            job = Job(job_id, args[0], dict(req), args, command)
+            path = project.get("path", "")
+            if exclusive and self.busy(path):
+                raise JobError("this agent already has a run going; the health check waits for the next minute")
+            can_start = not self.busy(path) and len(self.running()) < self.max_running and not self.queued()
+            if not can_start and len(self.queued()) >= self.max_queued:
+                raise JobError(f"{len(self.queued())} runs are already waiting to start; try again when some have finished")
+            job_id = f"j-{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
+            job = Job(job_id, args[0], dict(req), args, command, status="queued", project=path, user=user,
+                      queued_at=utc_now())
+            self._seq += 1
+            job.seq = self._seq
             if job.kind == "exit-check":
                 job.summary_path = self.root / self.runs_dir / ".ui" / "exit-checks" / f"{job_id}.json"
                 job.summary_path.parent.mkdir(parents=True, exist_ok=True)
                 job.argv = [*args, "--summary", str(job.summary_path)]
-            env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "VATF_UI_CHILD": "1"}
-            if self.audio.port:
-                env[PORT_ENV] = str(self.audio.port)
-            flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+            self.jobs[job_id] = job
+            done = [k for k in sorted(self.jobs) if self.jobs[k].status not in ("running", "queued")]
+            for old in done[:-30]:  # keep the last 30 finished in memory; runs stay on disk
+                del self.jobs[old]
+            self._dispatch()
+            return job
+
+    def _dispatch(self) -> None:
+        """Starts waiting runs, oldest first, while there are free slots and their agent is free."""
+        with self._lock:
+            waiting = self.queued()
+            for job in waiting:
+                if len(self.running()) >= self.max_running:
+                    break
+                if any(j.project == job.project for j in self.running()):
+                    continue
+                self._launch(job)
+            for n, job in enumerate(self.queued(), 1):
+                job.position = n
+
+    def _launch(self, job: Job) -> None:
+        env = {**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8", "VATF_UI_CHILD": "1"}
+        job.audio = LiveAudio()
+        if job.audio.port:
+            env[PORT_ENV] = str(job.audio.port)
+        flags = subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+        job.started_at = utc_now()
+        job.status = "running"
+        try:
             job.proc = subprocess.Popen(
                 [sys.executable, "-m", "vatf.cli", *job.argv, "--root", str(self.root)],
                 cwd=self.root, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL, text=True, encoding="utf-8", errors="replace",
                 creationflags=flags, start_new_session=sys.platform != "win32")
-            self.jobs[job_id] = job
-            for old in sorted(self.jobs)[:-30]:  # keep the last 30 in memory; runs stay on disk
-                if self.jobs[old].status != "running":
-                    del self.jobs[old]
-            threading.Thread(target=self._read, args=(job,), daemon=True).start()
-            return job
+        except OSError as e:
+            job.status, job.finished_at = "failed", utc_now()
+            job.lines.append(f"vatf ui: couldn't start the run: {e}")
+            job.audio.close()
+            return
+        threading.Thread(target=self._read, args=(job,), daemon=True).start()
 
     def _read(self, job: Job) -> None:
         label = None
@@ -394,6 +477,9 @@ class JobManager:
         else:
             job.status = "failed"
         self._seal_runs(job)
+        if job.audio:
+            job.audio.close()
+        self._dispatch()     # the next run in line may start now
 
     def _seal_runs(self, job: Job) -> None:
         """A run that was stopped (or crashed) still says "running" in its run.json; say what happened."""
@@ -411,6 +497,12 @@ class JobManager:
         job = self.jobs.get(job_id)
         if job is None:
             raise JobError("no such run")
+        with self._lock:
+            if job.status == "queued":       # never started: just take it out of the line
+                job.status, job.stop_requested, job.finished_at = "stopped", True, utc_now()
+                job.lines.append("vatf ui: taken out of the waiting line before it started.")
+                self._dispatch()
+                return job
         if job.status != "running" or job.proc is None:
             return job
         job.stop_requested = True
@@ -431,6 +523,10 @@ class JobManager:
         return job
 
     def stop_all(self) -> None:
+        with self._lock:
+            for job in list(self.jobs.values()):
+                if job.status == "queued":
+                    job.status, job.stop_requested = "stopped", True
         for job in list(self.jobs.values()):
             if job.status == "running" and job.proc:
                 job.stop_requested = True

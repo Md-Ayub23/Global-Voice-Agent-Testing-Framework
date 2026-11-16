@@ -35,8 +35,9 @@ import numpy as np
 from ..audio.pcm import from_pcm16, to_pcm16
 from ..audio.recorder import Recorder
 from ..contracts.models import CallContext
+from .. import netguard
 from ..util import expand_env
-from . import ConnectError
+from . import ConnectError, call_metadata
 
 CONNECT_TIMEOUT_S = 15
 
@@ -150,12 +151,13 @@ class WebSocketAudioConnector:
             url = conn.get("target", "")
             if not url.startswith(("ws://", "wss://")):
                 raise ConnectError(f"connection.target must be a ws:// or wss:// URL, got {url!r}")
-        meta: dict[str, Any] = {"now": ctx.scenario.get("setup", {}).get("now")}
+        meta: dict[str, Any] = {"now": ctx.scenario.get("setup", {}).get("now"), **call_metadata(ctx)}
         if "session_metadata" in self._profile.get("test_id", {}).get("propagation", []):
             meta["test_id"] = ctx.test_id
         try:
             headers = {str(k): str(v) for k, v in expand_env(conn.get("options", {}).get("headers") or {}).items()}
-            ws = await asyncio.wait_for(websockets.connect(url, max_size=None, ping_interval=None,
+            await asyncio.to_thread(netguard.check_url, url, netguard.WS_SCHEMES)
+            ws = await asyncio.wait_for(websockets.connect(url, max_size=netguard.MAX_RESPONSE, ping_interval=None,
                                                            additional_headers=headers or None),
                                         CONNECT_TIMEOUT_S)
             await ws.send(json.dumps({"type": "start", "sample_rate": self.sample_rate, "encoding": "pcm16",

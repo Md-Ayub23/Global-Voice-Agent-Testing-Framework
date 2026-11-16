@@ -76,7 +76,7 @@ export function Dashboard() {
           <a href={jobProject ? projectHref(jobProject.key, `/live/${activeJob.id}`) : "#/"} id="live-banner"
             className="flex items-center gap-3 px-4 py-3 rounded-[12px] border border-line bg-surface text-ink hover:no-underline hover:bg-surface-2 animate-rise">
             <LiveDot />
-            <span className="flex-1 min-w-0"><b className="font-medium">{activeJob.kind === "exit-check" ? "Exit check running" : "Test run in progress"}</b>
+            <span className="flex-1 min-w-0"><b className="font-medium">{activeJob.status === "queued" ? "Test run waiting to start" : activeJob.kind === "exit-check" ? "Exit check running" : "Test run in progress"}</b>
               <span className="text-ink-2"> · {jobProject?.name || "An agent"}</span></span>
             <span className="text-accent-ink font-medium text-[13px] flex items-center gap-1">Watch live <Icon name="arrow" size={14} /></span>
           </a>

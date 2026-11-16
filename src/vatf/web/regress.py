@@ -11,6 +11,7 @@ from ..baseline import BaselineError, clear_baseline, load_baseline, run_snapsho
 from ..compare import DEFAULTS as GATE_DEFAULTS, as_ab, compare, rules as gate_rules
 from ..conditions import PRESETS
 from ..loader import ProjectError, load_project
+from ..util import write_text_atomic
 from . import data
 
 
@@ -128,7 +129,7 @@ def keep_as_test(root: Path, runs: Path, run_id: str, scenario_id: str) -> dict[
         doc["tags"].append("regression")
     else:
         doc["tags"] = ["regression"]
-    path.write_text(_dump_rt(doc), encoding="utf-8", newline="\n")
+    write_text_atomic(path, _dump_rt(doc), newline="\n")
     return {"kept": True, "file": f"scenarios/{path.name}", "already": False}
 
 

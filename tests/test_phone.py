@@ -13,6 +13,7 @@ import json
 import re
 import threading
 import time
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -63,6 +64,10 @@ class FakeTwilio:
         self.answer = answer            # answer | busy | no-answer
         self.account_type = "Full"
         self.calls: dict[str, dict] = {}
+        self.number = {"sid": "PN" + "7" * 32, "phone_number": OURS, "voice_url": "https://example.com/ivr",
+                       "voice_method": "POST"}
+        self.voice_urls: list[tuple[str, str]] = []
+        self.triggers: list[dict] = []
         self.agent_heard: list[str] = []
         self.loop = asyncio.new_event_loop()
         threading.Thread(target=self.loop.run_forever, daemon=True).start()
@@ -96,15 +101,32 @@ class FakeTwilio:
                 if self.path.endswith(f"/Accounts/{SID}.json"):
                     return self._send(200, {"sid": SID, "type": fake.account_type, "status": "active", "friendly_name": "Acme QA"})
                 if "/IncomingPhoneNumbers.json" in self.path:
-                    return self._send(200, {"incoming_phone_numbers": [{"phone_number": OURS}] if "14155550199" in self.path else []})
+                    return self._send(200, {"incoming_phone_numbers": [dict(fake.number)] if "14155550199" in self.path else []})
                 if "/OutgoingCallerIds.json" in self.path:
                     return self._send(200, {"outgoing_caller_ids": []})
                 self._send(404, {"code": 20404, "message": "not found"})
 
             def do_POST(self):
+                if self.path == "/trigger":      # the agent's own "make a call" API: it rings our number
+                    body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                    fake.triggers.append(body)
+                    sid = "CA" + str(len(fake.calls) + 1).rjust(32, "0")
+                    fake.calls[sid] = {"sid": sid, "to": body["to"], "from": AGENT, "status": "ringing"}
+                    url = fake.number["voice_url"] + f"?CallSid={sid}&From=%2B14155550100&To=%2B14155550199"
+                    assert fake.number["voice_method"] == "GET"
+                    with urllib.request.urlopen(url, timeout=5) as r:
+                        twiml = r.read().decode()
+                    fake.calls[sid]["twiml"] = twiml
+                    stream = re.search(r'<Stream url="([^"]+)"', twiml).group(1)
+                    fake.calls[sid]["_task"] = asyncio.run_coroutine_threadsafe(fake._agent(sid, stream), fake.loop)
+                    return self._send(200, {"ok": True})
                 if not self._authorised():
                     return
                 form = {k: v[0] for k, v in parse_qs(self.rfile.read(int(self.headers["Content-Length"])).decode()).items()}
+                if "/IncomingPhoneNumbers/" in self.path:
+                    fake.number.update(voice_url=form["VoiceUrl"], voice_method=form["VoiceMethod"])
+                    fake.voice_urls.append((form["VoiceUrl"], form["VoiceMethod"]))
+                    return self._send(200, dict(fake.number))
                 m = re.search(r"/Calls/(CA\w+)\.json$", self.path)
                 if m:     # hang up
                     call = fake.calls[m.group(1)]
@@ -182,14 +204,15 @@ def profile(api: str, **options):
         "public_url": "local", "api_base": api, "ring_timeout_s": 5, **options}}}
 
 
-def ctx():
-    return CallContext(test_id="t-20261105-0001-abcd", run_id="r-1", profile={}, scenario={}, repeat=1, attempt=1, mode="voice")
+def ctx(scenario=None):
+    return CallContext(test_id="t-20261105-0001-abcd", run_id="r-1", profile={}, scenario=scenario or {}, repeat=1,
+                       attempt=1, mode="voice")
 
 
-async def _call(p, caller_says: str):
+async def _call(p, caller_says: str, scenario=None):
     start = time.monotonic()
     rec = Recorder(8000, lambda: time.monotonic() - start)
-    session = await build_connector(p, ROOT, None).open(ctx(), rec)
+    session = await build_connector(p, ROOT, None).open(ctx(scenario), rec)
     # The greeting comes down the phone line: wait until it has been spoken and half a second of quiet follows
     # (how long the call takes to connect differs from computer to computer).
     deadline = time.monotonic() + 8
@@ -530,3 +553,31 @@ def test_plivo_credentials_and_the_account_check():
             asyncio.run(_call(p, "hello"))
     finally:
         fake.close()
+
+
+def test_an_outbound_agent_calls_vocto_on_its_own_number(twilio):
+    """Outbound: Vocto points its Twilio number at the call's stream, starts the agent's call through the
+    agent's trigger API, answers, talks, and puts the number back as it was."""
+    p = profile(twilio.api, outbound={"trigger_url": twilio.api.split("/2010")[0] + "/trigger", "wait_s": 10})
+    sc = {"direction": "outbound", "outbound": {"reason": "reminder", "patient": "$full_name"},
+          "caller": {"facts": {"full_name": "Maria Lopez"}}}
+    session, greeting, reply = asyncio.run(_call(p, "I need a check-up", sc))
+    assert greeting.startswith("Riverside clinic") and "Booked. Goodbye." in reply
+    assert twilio.triggers == [{"to": OURS, "test_id": "t-20261105-0001-abcd", "reason": "reminder", "patient": "Maria Lopez"}]
+    (call,) = twilio.calls.values()
+    assert session.call_meta["direction"] == "outbound" and session.call_meta["call_sid"] == call["sid"]
+    assert session.call_meta["from"] == AGENT and "/stream/" in call["twiml"]
+    # Pointed at this call's answer address for the call, then put back.
+    assert [m for _, m in twilio.voice_urls] == ["GET", "POST"] and "/answer/" in twilio.voice_urls[0][0]
+    assert twilio.number["voice_url"] == "https://example.com/ivr"
+
+
+def test_an_outbound_test_says_why_it_cannot_answer(twilio):
+    sc = {"direction": "outbound"}
+    with pytest.raises(ConnectError, match="did not call"):
+        asyncio.run(_call(profile(twilio.api, outbound={"wait_s": 1}), "hi", sc))
+    assert twilio.number["voice_url"] == "https://example.com/ivr"           # put back after a failure too
+    with pytest.raises(ConnectError, match="not a phone number in this Twilio account"):
+        asyncio.run(_call(profile(twilio.api, outbound={"answer_number": "+14155550123", "wait_s": 1}), "hi", sc))
+    with pytest.raises(ConnectError, match="could not be started"):
+        asyncio.run(_call(profile(twilio.api, outbound={"trigger_url": "http://169.254.169.254/x", "wait_s": 1}), "hi", sc))

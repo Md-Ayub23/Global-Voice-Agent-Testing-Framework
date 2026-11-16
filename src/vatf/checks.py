@@ -248,7 +248,57 @@ def evaluate_check(check: Mapping[str, Any], check_id: str, events: Events, all_
                        f"The call lasted {secs:.0f} s" + (" and the agent ended it." if by == "agent" else f" (limit {limit} s)."),
                        _refs(ended), EvidenceLevel.PLATFORM)
 
+    if kind == "voicemail":
+        return _voicemail(check, check_id, events, mode)
+
     return _result(check, check_id, Result.NOT_VERIFIED, f"Unknown check type {kind!r}.", (), EvidenceLevel.NONE)
+
+
+def _voicemail(check, check_id, events, mode) -> CheckResult:
+    """An outbound call that reached a voicemail: did the agent leave a message (or not, when it shouldn't),
+    after the beep, short, with what it must say and nothing private."""
+    vm = [e for e in events if e.type == "caller_turn" and e.data.get("voicemail")]
+    if not vm:
+        return _result(check, check_id, Result.NOT_APPLICABLE, "No voicemail answered this call.", (), EvidenceLevel.NONE)
+    greeting = vm[0]
+    said = [e for e in events if e.type == "agent_turn" and e.turn == greeting.turn and e.seq > greeting.seq
+            and (e.data.get("heard_text") or "").strip()]
+    text = " ".join(e.data["heard_text"].strip() for e in said)
+    want_message = check.get("message", True)
+    if not want_message:
+        if said:
+            return _result(check, check_id, Result.FAIL, f'The agent left a message it should not have: "{_short(text)}".',
+                           _refs(said), EvidenceLevel.SPEECH)
+        return _result(check, check_id, Result.PASS, "The agent hung up without leaving a message, as it should.",
+                       _refs([greeting]), EvidenceLevel.SPEECH)
+    if not said:
+        return _result(check, check_id, Result.FAIL, "The agent reached the voicemail but left no message.",
+                       _refs([greeting]), EvidenceLevel.SPEECH)
+    problems: list[str] = []
+    beep_end = greeting.data.get("beep_end_ms")
+    first = said[0].data.get("audio") or {}
+    if mode == "voice" and check.get("after_beep", True) and beep_end is not None and first.get("start_ms") is not None:
+        if first["start_ms"] < beep_end - 150:      # a little slack for where the beep's fade ends
+            problems.append(f"it started talking {(beep_end - first['start_ms']) / 1000:.1f} s before the beep, "
+                            "so the start of the message is lost")
+    if check.get("max_seconds") and mode == "voice":
+        last = said[-1].data.get("audio") or {}
+        if first.get("start_ms") is not None and last.get("end_ms") is not None:
+            secs = (last["end_ms"] - first["start_ms"]) / 1000
+            if secs > float(check["max_seconds"]):
+                problems.append(f"the message ran {secs:.0f} s (limit {check['max_seconds']} s)")
+    for pattern in check.get("must_say") or []:
+        if not re.search(pattern, text, re.IGNORECASE):
+            problems.append(f"it never said anything matching {pattern}")
+    for pattern in check.get("never_say") or []:
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            problems.append(f'it said "{m.group(0)}", which a voicemail must not hear')
+    if problems:
+        return _result(check, check_id, Result.FAIL, "The voicemail message falls short: " + "; ".join(problems) + ".",
+                       _refs(said), EvidenceLevel.SPEECH)
+    return _result(check, check_id, Result.PASS, f'The agent left a good voicemail message: "{_short(text)}".',
+                   _refs(said), EvidenceLevel.SPEECH)
 
 
 def _identity_first(check, check_id, all_events) -> CheckResult:
@@ -602,15 +652,27 @@ def scenario_checks(scenario: Mapping[str, Any], events: Events, facts: Mapping[
                     salt: str, mode: str) -> list[CheckResult]:
     """All hard checks of a scenario: call-level checks, then scripted turn checks (turn<n>.<i>)."""
     # Judge items are scored by the AI judges (judges.py), not here.
-    results = [evaluate_check(c, c["id"], events, events, facts, salt, mode) for c in scenario.get("checks", [])
+    from .calls import call_scope, first_turns
+
+    def scope_of(check):   # a returning caller's chain: `call: n` looks at that call only
+        return call_scope(events, int(check["call"])) if check.get("call") else events
+
+    results = [evaluate_check(c, c["id"], scope_of(c), events, facts, salt, mode) for c in scenario.get("checks", [])
                if c["type"] != "judge"]
-    for n, turn in enumerate(scenario.get("turns", []), start=1):
-        # Scripted turn n is conversation turn n + 1 (turn 1 is the agent's greeting).
-        scope = [e for e in events if e.turn == n + 1]
-        for i, check in enumerate(turn.get("expect", []), start=1):
-            if check["type"] == "judge":
-                continue
-            results.append(evaluate_check(check, check.get("id", f"turn{n}.{i}"), scope, events, facts, salt, mode))
+    # Scripted turn n is conversation turn n + 1 (turn 1 is the agent's greeting); on a returning call
+    # it is n turns after that call's greeting.
+    starts = first_turns(events)
+    scripts = [(1, "", scenario.get("turns", []))] + [
+        (k, f"call{k}.", part.get("turns") or []) for k, part in enumerate(scenario.get("returning") or [], 2)]
+    for k, prefix, turns in scripts:
+        for n, turn in enumerate(turns, start=1):
+            first = starts.get(k)
+            scope = [e for e in events if first is not None and e.turn == first + n]
+            for i, check in enumerate(turn.get("expect", []), start=1):
+                if check["type"] == "judge":
+                    continue
+                results.append(evaluate_check(check, check.get("id", f"{prefix}turn{n}.{i}"), scope, events, facts,
+                                              salt, mode))
     if mode == "voice":
         results += barge_in_checks(scenario, events)
     crashes = [e for e in events if e.type == "harness_event" and e.data.get("code") == "agent_exception"]

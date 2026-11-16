@@ -32,6 +32,9 @@ import { projectHref } from "./lib/links";
 import { NewProject, Projects } from "./pages/Projects";
 import { RunReport } from "./pages/RunReport";
 import { Settings } from "./pages/Settings";
+import { Account } from "./pages/Account";
+import { SignIn } from "./pages/SignIn";
+import { AuthGate } from "./lib/auth";
 
 type Page = (m: RegExpMatchArray, q: URLSearchParams) => ReactNode;
 type ProjectPage = (p: Project, m: RegExpMatchArray, q: URLSearchParams) => ReactNode;
@@ -42,6 +45,7 @@ const ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), Page][] = [
   [/^\/projects$/, "projects", () => <Projects />],
   [/^\/projects\/new$/, "projects", () => <NewProject />],
   [/^\/settings$/, "settings", () => <Settings />],
+  [/^\/account$/, "account", () => <Account />],
   [/^\/runs\/(r-[\w-]+)(\/calls\/t-[\w-]+)?$/, "", (m) => <RunRedirect runId={m[1]} rest={m[2] || ""} />],
 ];
 const PROJECT_ROUTES: [RegExp, string | ((m: RegExpMatchArray) => string), ProjectPage][] = [
@@ -157,12 +161,14 @@ function Pages() {
 
 export function App() {
   return (
-    <AppProvider>
-      <ToastProvider>
-        <TooltipProvider>
-          <Pages />
-        </TooltipProvider>
-      </ToastProvider>
-    </AppProvider>
+    <AuthGate signIn={(p) => <SignIn {...p} />}>
+      <AppProvider>
+        <ToastProvider>
+          <TooltipProvider>
+            <Pages />
+          </TooltipProvider>
+        </ToastProvider>
+      </AppProvider>
+    </AuthGate>
   );
 }

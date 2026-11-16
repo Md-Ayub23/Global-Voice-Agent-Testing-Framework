@@ -29,3 +29,10 @@ limits:
   max_call_seconds: 300
   end_of_turn_ms: 1000                    # caller takes 1 s of silence as "the agent has finished"
   no_reply_ms: 15000                      # then waits up to 15 s for an answer before reacting
+load:
+  peak_calls_per_hour: 3
+  start_at: 2
+  calls_at_once: 5
+  call_minutes: 1
+  scenarios:
+    - clinic.confirm-before-booking

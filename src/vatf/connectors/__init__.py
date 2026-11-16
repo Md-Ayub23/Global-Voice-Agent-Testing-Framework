@@ -10,6 +10,34 @@ from typing import Any, Mapping
 VOICE_TYPES = ("websocket_audio", "twilio_media_stream", "phone_call")
 
 
+def call_metadata(ctx: Any) -> dict[str, Any]:
+    """What a call tells the agent about itself, beyond the time and test id: its direction and, for an
+    outbound call, what the agent's dialler would be told (scenario `outbound`, with $facts filled in);
+    the caller's number when the test gives one (`caller_id`, so an agent can recognise a returning
+    caller). Empty for an ordinary inbound call, so agents that know nothing of it see no change."""
+    if ctx is None:
+        return {}
+    sc = getattr(ctx, "scenario", None) or {}
+    facts = (sc.get("caller") or {}).get("facts") or {}
+
+    def fill(v: Any) -> Any:
+        if isinstance(v, str) and v.startswith("$") and v[1:] in facts:
+            return facts[v[1:]]
+        if isinstance(v, dict):
+            return {k: fill(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [fill(x) for x in v]
+        return v
+
+    out: dict[str, Any] = {}
+    if sc.get("direction") == "outbound":
+        out["direction"] = "outbound"
+        out["outbound"] = fill(dict(sc.get("outbound") or {}))
+    if sc.get("caller_id"):
+        out["from"] = str(fill(sc["caller_id"]))
+    return out
+
+
 class ConnectError(Exception):
     """Could not reach or start the agent. A harness error, never blamed on the agent."""
 

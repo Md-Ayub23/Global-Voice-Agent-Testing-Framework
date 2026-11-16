@@ -55,7 +55,7 @@ def _badge(status: str) -> str:
 
 
 WHO_CLASS = {"AGENT": "agent", "second listen": "sys", "CALLER": "caller", "vatf breaks tool": "fault", "vatf error": "fault",
-             "database check": "db"}
+             "database check": "db", "VOICEMAIL": "caller", "AGENT error": "fault", "NEW CALL": "sys", "vatf": "sys"}
 
 
 def _story_table(events: Sequence[Mapping[str, Any]]) -> str:

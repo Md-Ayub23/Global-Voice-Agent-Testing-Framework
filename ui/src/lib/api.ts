@@ -27,6 +27,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   } catch {
     data = { error: text };
   }
+  if (res.status === 401 && url !== "/api/auth/login") window.dispatchEvent(new Event("vocto:signed-out"));
   if (!res.ok) throw new Error((data as { error?: string } | null)?.error || `${res.status} ${res.statusText}`);
   return data as T;
 }

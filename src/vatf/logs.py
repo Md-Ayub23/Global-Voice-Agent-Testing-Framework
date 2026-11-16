@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from . import netguard
 from .util import MissingSecret, expand_env
 
 DEFAULT_MAX_LINES = 300
@@ -121,8 +122,8 @@ class LogCollector:
         if not url.startswith(("http://", "https://")):
             raise LogSetupError(f"logs.url must be an http(s) URL, got {template!r}")
         try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=20) as resp:
-                raw = resp.read().decode("utf-8", errors="replace")
+            with netguard.urlopen(urllib.request.Request(url, headers=headers), timeout=20) as resp:
+                raw = netguard.read_limited(resp).decode("utf-8", errors="replace")
                 ctype = resp.headers.get("Content-Type", "")
         except urllib.error.HTTPError as e:
             raise LogSetupError(f"the log URL answered HTTP {e.code}") from e

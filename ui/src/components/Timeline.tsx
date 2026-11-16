@@ -105,8 +105,15 @@ function build(events: TraceEvent[]): { items: Item[]; owner: Map<number, number
           : { kind: "sys", seq: e.seq, tone: "bad", icon: "alert", text: `Validator: the simulated caller went off script: ${(d.problems || []).join("; ")}` });
         break;
       case "harness_event":
-        add({ kind: "sys", seq: e.seq, tone: d.level === "warning" ? "" : "bad", icon: "alert",
-          text: `Vocto ${d.level || "error"}: ${d.code}: ${d.message} (not blamed on the agent)` });
+        if (d.code === "next_call")
+          add({ kind: "sys", seq: e.seq, tone: "", icon: "phone", text: <><b>Call {d.call}</b>: {d.message}{(d.remembered || []).length ? ` Carried over: ${d.remembered.join(", ")}.` : ""}</> });
+        else if (d.code === "agent_exception")
+          add({ kind: "sys", seq: e.seq, tone: "bad", icon: "alert", text: <><b>The agent raised an error</b>: {d.message}</> });
+        else if (d.level === "info")
+          add({ kind: "sys", seq: e.seq, tone: "", icon: d.code === "call_part_ended" ? "hang" : "phone", text: d.message || d.code });
+        else
+          add({ kind: "sys", seq: e.seq, tone: d.level === "warning" ? "" : "bad", icon: "alert",
+            text: `Vocto ${d.level || "error"}: ${d.code}: ${d.message} (not blamed on the agent)` });
         break;
       case "call_ended":
         add({ kind: "sys", seq: e.seq, tone: "", icon: "hang",
@@ -183,8 +190,11 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                     Agent <span className="text-muted font-medium inline-flex gap-1">turn {it.e.turn ?? ""} · {d.audio ? play(d.audio.start_ms) : fmtSecs(it.e.t_ms)}</span>
                   </div>
                   <div className="whitespace-pre-wrap break-words">{d.silent ? <span className="text-muted">(said nothing)</span> : d.heard_text || ""}</div>
-                  {(d.latency_ms != null || d.interrupted || d.went_on) && (
+                  {(d.latency_ms != null || d.interrupted || d.went_on || d.before_pickup || d.voicemail_message || d.rang_back) && (
                     <div className="flex gap-1.5 flex-wrap mt-[7px]">
+                      {d.before_pickup && <Chip tone="warn" icon="phone" title="An outbound agent should wait until someone answers">said before anyone picked up</Chip>}
+                      {d.voicemail_message && <Chip icon="mic">left on the voicemail</Chip>}
+                      {d.rang_back && <Chip icon="phone">after the caller rang back</Chip>}
                       {d.went_on && <Chip icon="clock" title="The agent spoke again before the caller answered, so the caller listened to this too">went on talking</Chip>}
                       {d.latency_ms != null && (
                         <Chip tone={d.latency_ms < 0 ? "warn" : slow ? "bad" : "default"} icon="clock">
@@ -211,12 +221,13 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                 <div className="size-[30px] rounded-[12px] grid place-items-center text-white flex-none bg-caller"><Icon name="user" /></div>
                 <div className="rounded-2xl rounded-br-[5px] px-3.5 py-2.5 bg-caller-soft min-w-0">
                   <div className="text-[13px] font-bold flex gap-2 items-center mb-0.5 flex-wrap text-caller">
-                    Caller <span className="text-muted font-medium inline-flex gap-1">turn {it.e.turn ?? ""} · {d.audio ? play(d.audio.start_ms) : fmtSecs(it.e.t_ms)}</span>
+                    {d.voicemail ? "Voicemail" : "Caller"} <span className="text-muted font-medium inline-flex gap-1">turn {it.e.turn ?? ""} · {d.audio ? play(d.audio.start_ms) : fmtSecs(it.e.t_ms)}</span>
                   </div>
                   <div className="whitespace-pre-wrap break-words">{d.text || ""}</div>
                   {d.background && <div className="text-[13px] text-ink-2 mt-1.5 italic">A voice behind the caller: "{d.background}"</div>}
-                  {(d.barge_in || d.recording) && (
+                  {(d.barge_in || d.recording || (d.pickup && !d.voicemail)) && (
                     <div className="flex gap-1.5 flex-wrap mt-[7px]">
+                      {d.pickup && !d.voicemail && <Chip icon="phone">picks up the agent's call</Chip>}
                       {d.barge_in && <Chip tone="warn" icon="bolt">cut in while the agent was talking</Chip>}
                       {d.recording && <Chip icon="mic" title={`Played from ${d.recording}, a recording of a real caller; the words above are what is said in it`}>real caller recording</Chip>}
                     </div>

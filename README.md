@@ -53,6 +53,9 @@ fill in its address, tools, backend and logs access, test plan and test settings
 
 - [docs/onboarding-guide.md](docs/onboarding-guide.md): testing a new agent: what to ask its team, and the set-up screens
 - [docs/ui-guide.md](docs/ui-guide.md): the dashboard (`uv run vatf ui`): start runs, watch them live, read the reports
+- [docs/outbound-and-returning.md](docs/outbound-and-returning.md): agents that make calls, voicemail, callers who ring back
+- [docs/server.md](docs/server.md): Vocto for a team: `vatf serve`, Docker, users and roles, API keys, HTTPS
+- [docs/security.md](docs/security.md): threats and defences (sign-in, SSRF, prompt injection, rate limits)
 - [docs/phase3-guide.md](docs/phase3-guide.md): AI judges, labelling calls and calibration
 - [docs/test-plan-guide.md](docs/test-plan-guide.md): writing tests automatically from the agent's instructions, the persona library
 - [docs/safety-guide.md](docs/safety-guide.md): safety tests: the attacks, planted secrets, how they affect the decision
@@ -95,8 +98,11 @@ The easy way is the dashboard. It opens in your browser, and everything below ca
 
 ```powershell
 uv sync                          # install (once)
-uv run vatf ui                   # the dashboard: http://127.0.0.1:8765
+uv run python -m vatf ui         # the dashboard: http://127.0.0.1:8765 (first visit: create your admin account)
 ```
+
+For a team, run it as a server with sign-in, roles and API keys (`vatf serve`, or Docker:
+`docker compose up -d`): see [docs/server.md](docs/server.md).
 
 The same things from the terminal:
 

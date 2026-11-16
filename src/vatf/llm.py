@@ -10,6 +10,7 @@ from typing import Callable, Sequence
 
 from .contracts.llm import BudgetExceeded
 from .contracts.models import LLMRequest, LLMResponse
+from .ratelimit import llm_gate
 from .util import write_json
 
 # US dollars per million tokens (input, output). Unknown models are logged at cost 0.
@@ -71,7 +72,9 @@ class ClaudeClient:
     def __init__(self, budget: Budget, cache_dir: Path | None = None, effort: str = "low", api_key: str | None = None):
         import anthropic
 
-        self._client = anthropic.AsyncAnthropic(**({"api_key": api_key} if api_key else {}))
+        # Retries are done by Vocto's AI queue (ratelimit.py), which every request in this process shares,
+        # so the SDK's own retries are off (they would retry outside the queue and its limits).
+        self._client = anthropic.AsyncAnthropic(max_retries=0, timeout=600.0, **({"api_key": api_key} if api_key else {}))
         self._budget = budget
         self._cache_dir = cache_dir
         self._effort = effort
@@ -110,14 +113,17 @@ class ClaudeClient:
                 return hit
 
         self._budget.check()
-        try:
+
+        async def send():
             if request.max_tokens > STREAM_ABOVE_TOKENS:
                 # Long answers (the test plan writer) must be streamed: the SDK refuses a plain request
                 # that could take more than ten minutes.
                 async with self._client.messages.stream(**kwargs) as stream:
-                    msg = await stream.get_final_message()
-            else:
-                msg = await self._client.messages.create(**kwargs)
+                    return await stream.get_final_message()
+            return await self._client.messages.create(**kwargs)
+
+        try:
+            msg = await llm_gate().call(send)
         except anthropic.APIError as e:
             raise LLMError(f"Claude API error: {e}") from e
         if msg.stop_reason == "refusal":

@@ -6,6 +6,7 @@ import { Icon } from "../components/Icon";
 import { Badge, Button, Card, CardHead, Chip, EmptyState, Field, Notice, PageHead, Skeleton, inputCls } from "../components/ui";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
+import { useAuth } from "../lib/auth";
 import { cx } from "../lib/format";
 import { projectHref } from "../lib/links";
 import type { Secret, System } from "../lib/types";
@@ -98,6 +99,8 @@ function Row({ label, children, top }: { label: string; children: ReactNode; top
 export function Settings() {
   useCrumbs([{ label: "Settings" }]);
   const { poll } = useApp();
+  const { user } = useAuth();
+  const admin = !user || user.role === "admin";
   const { data: sys, error, reload } = useLoad(() => api.get<System>("/api/system"), []);
   const [key, setKey] = useState("");
   const [busy, setBusy] = useState(false);
@@ -126,10 +129,10 @@ export function Settings() {
 
   return (
     <>
-      <PageHead title="Settings" sub="What Vocto needs on this computer: your API key, speech models and secrets." />
+      <PageHead title="Settings" sub="What Vocto needs: the API key, speech models, secrets, and who may use it." />
       <div className="grid gap-4">
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 items-start">
-          <Card>
+          {admin ? <Card>
             <CardHead level={2} title="Anthropic API key">{k.set ? <Badge status="PASS" label="set" /> : <Badge status="NOT_VERIFIED" label="not set" />}</CardHead>
             <p className="text-ink-2 mb-3">Real runs use Claude to play the caller and to check it stayed on script. Free dry runs need no key.</p>
             {k.set && (
@@ -146,7 +149,12 @@ export function Settings() {
                 <Button id="save-key" type="submit" variant="primary" icon="save" busy={busy} disabled={busy}>Save key</Button>
               </div>
             </form>
-          </Card>
+          </Card> : (
+            <Card>
+              <CardHead level={2} title="Anthropic API key">{k.set ? <Badge status="PASS" label="set" /> : <Badge status="NOT_VERIFIED" label="not set" />}</CardHead>
+              <p className="text-ink-2">The API key and the secrets agents use are kept by your Vocto admin.</p>
+            </Card>
+          )}
           <Card>
             <CardHead level={2} title="Speech models">{speechReady ? <Badge status="PASS" label="ready" /> : <Badge status="NOT_APPLICABLE" label="not downloaded yet" />}</CardHead>
             <p className="text-ink-2 mb-3">Voice runs speak with Piper and listen with Whisper, on this computer. They download once on the first voice run (about 750 MB).</p>
@@ -172,8 +180,15 @@ export function Settings() {
               <Row label="System">Python {sys.python} · {sys.platform}</Row>
             </div>
           </Card>
-          <Secrets />
+          {admin && <Secrets />}
           <AgentSettings />
+          {user && (
+            <Card>
+              <CardHead level={2} title="Team and access" />
+              <p className="text-ink-2 mb-3">{user.role === "admin" ? "Add users, set what each one may do, and read the audit log." : "Change your password and make API keys for scripts and CI."}</p>
+              <Button href="#/account" icon="user">{user.role === "admin" ? "Users, keys and audit log" : "Your account"}</Button>
+            </Card>
+          )}
         </div>
       </div>
     </>

@@ -510,11 +510,15 @@ export interface Job {
   command: string;
   started_at: string;
   finished_at: string | null;
-  status: "running" | "finished" | "failed" | "stopped";
+  status: "queued" | "running" | "finished" | "failed" | "stopped";
   exit_code: number | null;
   run_ids: string[];
   labels: Record<string, string>;
   line_count: number;
+  project?: string;
+  user?: string | null;
+  queued_at?: string | null;
+  position?: number;
   summary?: ExitSummary | null;
 }
 

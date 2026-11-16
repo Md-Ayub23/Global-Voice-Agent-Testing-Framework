@@ -321,8 +321,13 @@ def test_scheduler_starts_one_due_check_and_waits(tmp_path, monkeypatch):
     class FakeJobs:
         active = None
         started = []
+        running: set = set()
 
-        def start(self, req, project):
+        def busy(self, path):
+            return path in self.running
+
+        def start(self, req, project, exclusive=False):
+            assert exclusive                       # a health check never queues behind another run
             self.started.append((req, project["path"]))
 
             class J:
@@ -336,6 +341,9 @@ def test_scheduler_starts_one_due_check_and_waits(tmp_path, monkeypatch):
     s = schedule.HealthScheduler(tmp_path, tmp_path / "runs", FakeJobs())
     assert s.tick(now=1000.0) == {"id": "j-1"}
     assert s.tick(now=1060.0) is None                   # failed to write a run? not retried within the hour
+    FakeJobs.running.add("examples/clinic")
+    assert s.tick(now=1000.0 + 3600) is None            # its agent has a run going: tried again next minute
+    FakeJobs.running.clear()
     assert s.tick(now=1000.0 + 3600) == {"id": "j-1"}
     assert FakeJobs.started[0] == ({"command": "health", "profile": "profile.yaml", "start_agent": False}, "examples/clinic")
 

@@ -1,0 +1,23 @@
+# Vocto as a team server: `docker compose up -d`, then open http://<this server>:8765.
+# Put an HTTPS proxy in front (Caddy, nginx, a cloud load balancer) and set VOCTO_SECURE_COOKIES=1.
+services:
+  vocto:
+    build: .
+    image: vocto:latest
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    volumes:
+      - vocto-data:/data            # projects, runs, users, secrets (.env), speech models
+    environment:
+      # The host names people type to reach Vocto (comma-separated). Required: the server refuses others.
+      VOCTO_ALLOWED_HOSTS: "${VOCTO_ALLOWED_HOSTS:-localhost}"
+      VOCTO_SECURE_COOKIES: "${VOCTO_SECURE_COOKIES:-0}"
+      # Optional: the Claude key for live runs (or set it in Settings, as an admin).
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      VOCTO_MAX_RUNS: "${VOCTO_MAX_RUNS:-2}"
+    # Real-call webhooks (Quality > Real calls) listen on their own port when switched on:
+    # add "8791:8791" above and set the listener's host to 0.0.0.0 in that agent's settings.
+
+volumes:
+  vocto-data:

@@ -27,7 +27,7 @@ export function Live({ project, jobId }: { project: Project; jobId: string | nul
     if (error) return <Notice tone="bad" className="mt-5">{error.message}</Notice>;
     if (!data) return <Skeleton />;
     const jobs = (data as Job[]).filter((j) => j.request?.project === project.path);
-    const pick = jobs.find((j) => j.status === "running") || jobs[0];
+    const pick = jobs.find((j) => j.status === "running" || j.status === "queued") || jobs[0];
     if (pick) { location.replace(projectHref(project.key, `/live/${pick.id}`)); return null; }
     const other = projectOfJob(activeJob, projects);
     return (
@@ -79,7 +79,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
     es.addEventListener("job", (e) => {
       const j = JSON.parse((e as MessageEvent).data) as Job;
       setJob(j);
-      setActiveJob(j.status === "running" ? j : null);
+      setActiveJob(j.status === "running" || j.status === "queued" ? j : null);
     });
     es.addEventListener("run", (e) => {
       const d = JSON.parse((e as MessageEvent).data, reviver) as RunDetail;
@@ -107,7 +107,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
   }, [initial.id, setActiveJob, poll]);
 
   useEffect(() => {
-    if (job.status !== "running") return;
+    if (job.status !== "running" && job.status !== "queued") return;
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [job.status]);
@@ -129,7 +129,8 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
   }, [follow, calls, lastRun]);
 
   const runMode = [...runs.values()].find((r) => r.info)?.info?.mode || null;
-  const finished = job.status !== "running";
+  const waiting = job.status === "queued";
+  const finished = job.status !== "running" && !waiting;
   const sameCall = (c: CallDetail, p: { scenario_id: string; repeat: number }) => c.record.scenario_id === p.scenario_id && c.record.repeat === p.repeat;
   const planDone = (runId: string): [number, number] => {
     const run = runs.get(runId);
@@ -158,14 +159,15 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
   const phase = !finished && !active && lastVatfLine ? lastVatfLine.replace(/^vatf:\s*/, "") : "";
   const progressText = finished
     ? ({ finished: "Finished", stopped: "Stopped", failed: "Vocto stopped with an error" } as Record<string, string>)[job.status] || job.status
+    : waiting ? `Waiting to start${job.position && job.position > 1 ? `: ${job.position - 1} ${job.position - 1 === 1 ? "run" : "runs"} ahead` : ": next in line"}`
     : active ? `Calling: ${shortScenario(active.record.scenario_id)} · repeat ${active.record.repeat}${active.record.attempt > 1 ? ` · retry ${active.record.attempt - 1}` : ""}`
       : run ? (list.length && list.length >= plan.length ? "Deciding…" : "Getting ready…") : "Starting…";
 
   const sel = selected ? calls.get(selected) : undefined;
-  const elapsed = (job.finished_at ? new Date(job.finished_at).getTime() : now) - new Date(job.started_at).getTime();
+  const elapsed = waiting ? 0 : (job.finished_at ? new Date(job.finished_at).getTime() : now) - new Date(job.started_at).getTime();
 
   const stop = async () => {
-    if (!confirm("Stop this run? Calls already finished stay saved; there will be no decision.")) return;
+    if (!confirm(waiting ? "Take this run out of the waiting line?" : "Stop this run? Calls already finished stay saved; there will be no decision.")) return;
     setStopping(true);
     try { await api.post(`/api/jobs/${job.id}/stop`); toast("Stopping…"); }
     catch (e) { toast((e as Error).message, "bad"); setStopping(false); }
@@ -188,7 +190,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
           </div>
           <div className="flex items-center gap-2.5">
             <span className="text-muted tabular-nums" id="elapsed">{fmtDuration(elapsed)}</span>
-            {job.status === "running" && <Button id="stop" variant="danger" icon="stop" disabled={stopping} onClick={stop}>Stop</Button>}
+            {(job.status === "running" || waiting) && <Button id="stop" variant="danger" icon="stop" disabled={stopping} onClick={stop}>{waiting ? "Cancel" : "Stop"}</Button>}
           </div>
         </div>
         <div id="result"><Result job={job} ended={ended} exit={false} /></div>
@@ -222,7 +224,7 @@ function LiveJob({ initial, project }: { initial: Job; project: Project }) {
         <div className="flex items-center gap-2.5">
           <span className="text-muted tabular-nums" id="elapsed">{fmtDuration(elapsed)}</span>
           {job.status === "running" && runMode === "voice" && <ListenLive jobId={job.id} />}
-          {job.status === "running" && <Button id="stop" variant="danger" icon="stop" disabled={stopping} onClick={stop}>Stop</Button>}
+          {(job.status === "running" || waiting) && <Button id="stop" variant="danger" icon="stop" disabled={stopping} onClick={stop}>{waiting ? "Cancel" : "Stop"}</Button>}
         </div>
       </div>
 
@@ -434,7 +436,7 @@ function ExitSteps({ job, runMode, onPick }: { job: Job; runMode: string | null;
 
 function Result({ job, ended, exit }: { job: Job; ended: boolean; exit: boolean }) {
   const runId = job.run_ids[0];
-  const done = job.status !== "running";
+  const done = job.status !== "running" && job.status !== "queued";
   const { data: detail } = useLoad(() => (done && !exit && runId ? api.get<RunDetail>(`/api/runs/${runId}`) : Promise.resolve(null)), [done, exit, runId, ended]);
   if (!done) return null;
   if (exit) {

@@ -83,10 +83,14 @@ def test_a_run_can_set_the_callers_language(jobs, clinic):
     assert "--language" not in args
 
 
-def test_only_one_run_at_a_time(jobs, clinic):
-    jobs.jobs["j-busy"] = Job("j-busy", "run", {}, [], "")
-    with pytest.raises(JobError, match="already"):
-        jobs.start({"command": "run", "profile": "profile.yaml"}, clinic)
+def test_one_run_per_agent_at_a_time_the_next_waits_in_line(jobs, clinic):
+    jobs.jobs["j-busy"] = Job("j-busy", "run", {}, [], "", project=clinic["path"])
+    job = jobs.start({"command": "run", "profile": "profile.yaml"}, clinic)
+    assert job.status == "queued" and job.position == 1 and job.proc is None
+    with pytest.raises(JobError, match="already has a run"):
+        jobs.start({"command": "health", "profile": "profile.yaml"}, clinic, exclusive=True)
+    jobs.stop(job.id)
+    assert job.status == "stopped"
 
 
 def test_project_lists_profiles_scenarios_and_bug_switches(clinic):

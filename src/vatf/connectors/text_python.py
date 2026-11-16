@@ -25,7 +25,7 @@ from typing import Any, AsyncIterator, Callable, Mapping
 
 from ..contracts.connector import AgentOutput
 from ..contracts.models import AudioClip, CallContext
-from . import ConnectError
+from . import ConnectError, call_metadata
 
 
 class TextPythonSession:
@@ -81,7 +81,7 @@ class TextPythonConnector:
             raise ConnectError(f"connection.target must look like module:function, got {target!r}")
         if str(self._root) not in sys.path:
             sys.path.insert(0, str(self._root))
-        session_meta = {"now": ctx.scenario.get("setup", {}).get("now")}
+        session_meta = {"now": ctx.scenario.get("setup", {}).get("now"), **call_metadata(ctx)}
         if "session_metadata" in self._profile.get("test_id", {}).get("propagation", []):
             session_meta["test_id"] = ctx.test_id
         try:

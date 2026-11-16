@@ -18,16 +18,13 @@ import hashlib
 import json
 import re
 import shutil
-import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ..evidence import utc_now
-from ..util import read_json, sha256_file, write_json
+from ..util import file_lock, read_json, sha256_file, write_json, write_text_atomic
 
-_LOCKS: dict[str, threading.Lock] = {}
-_LOCKS_GUARD = threading.Lock()
 CALL_ID = re.compile(r"^c-\d{8}-\d{6}-[0-9a-f]{6}$")
 
 
@@ -37,11 +34,6 @@ def agent_slug(root: Path, folder: Path) -> str:
     except ValueError:
         rel = Path(folder).resolve().name
     return re.sub(r"[^A-Za-z0-9._-]+", "-", rel).strip("-") or "agent"
-
-
-def _lock(path: Path) -> threading.Lock:
-    with _LOCKS_GUARD:
-        return _LOCKS.setdefault(str(path), threading.Lock())
 
 
 def parse_time(ts: str | None) -> datetime | None:
@@ -153,16 +145,15 @@ class MonitorStore:
                       reverse=True)
 
     def update_rows(self, rows: Iterable[Mapping[str, Any]] = (), remove: Iterable[str] = ()) -> None:
-        with _lock(self.index_file):
+        self.dir.mkdir(parents=True, exist_ok=True)
+        # The dashboard and `vatf monitor listen` may both write this agent's index: lock across processes.
+        with file_lock(self.index_file):
             idx = self.index()
             for r in rows:
                 idx[r["call_id"]] = {**idx.get(r["call_id"], {}), **dict(r)}
             for cid in remove:
                 idx.pop(cid, None)
-            self.dir.mkdir(parents=True, exist_ok=True)
-            tmp = self.index_file.with_suffix(".tmp")
-            tmp.write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
-            tmp.replace(self.index_file)
+            write_text_atomic(self.index_file, json.dumps(idx, ensure_ascii=False, indent=1))
 
     # ---- calls ----
     def new_id(self, started_at: str | None, key: str) -> str:

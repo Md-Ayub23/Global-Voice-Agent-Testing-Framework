@@ -16,6 +16,7 @@ from typing import Any, Mapping, Sequence
 
 from .contracts.caller import CallerAction, ValidatorResult
 from .contracts.models import CallTrace, LLMMessage, LLMRequest
+from .untrusted import CALLER_RULE
 
 HANG_UP = "[HANG UP]"
 
@@ -55,7 +56,9 @@ End the call when: {c.get('end_when', 'your goal is reached or clearly cannot be
 To end the call, say a short goodbye and then write {HANG_UP} at the very end.
 
 Reply with only the words you say out loud: one or two short spoken sentences, no stage
-directions, no quotation marks, no descriptions of tone.""" + (VOICE_NOTE if voice else "") + note
+directions, no quotation marks, no descriptions of tone.
+
+""" + CALLER_RULE + (VOICE_NOTE if voice else "") + note
 
 
 RANG_BACK = ("(The line went dead just after you agreed, before you heard the agent's answer. You have rung "

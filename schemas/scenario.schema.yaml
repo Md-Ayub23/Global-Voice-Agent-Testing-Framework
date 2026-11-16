@@ -36,6 +36,75 @@ properties:
     minItems: 1
     items: {enum: [text, voice]}
 
+  direction:
+    description: >
+      inbound (default): the caller rings the agent. outbound: the agent calls the customer (a reminder, a
+      follow-up, a sales call). Vocto plays whoever picks up, a person or a voicemail (answered_by), and tells
+      the agent it is an outbound call (call metadata "direction" and "outbound").
+    enum: [inbound, outbound]
+  outbound:
+    description: >
+      Outbound calls: what the agent's dialler is told about this call, sent to the agent as the call's
+      "outbound" metadata, e.g. {reason: appointment reminder, customer: {name: $patient_name}}. Values that
+      start with $ are caller facts.
+    type: object
+  answered_by:
+    description: "Outbound calls: who picks up. person (default) says hello; voicemail plays a greeting and a beep, then records."
+    enum: [person, voicemail]
+  pickup:
+    description: "Outbound calls answered by a person: the first words when they pick up (default \"Hello?\")."
+    type: string
+  voicemail:
+    description: Outbound calls answered by voicemail.
+    type: object
+    additionalProperties: false
+    properties:
+      greeting: {description: "What the voicemail says before the beep.", type: string}
+      beep: {description: "A beep after the greeting (default true).", type: boolean}
+      max_message_s: {description: "The voicemail stops recording after this many seconds (default 60).", type: integer, minimum: 5, maximum: 600}
+  caller_id:
+    description: >
+      The caller's phone number, sent to the agent as the call's "from" (text and websocket connections) so it
+      can recognise a returning caller. $fact allowed. A phone_call connection uses its own from_number.
+    type: string
+  returning:
+    description: >
+      A returning caller: after this call, the same caller rings the agent again, once per entry, with the
+      same persona and facts, and the agent's systems as the earlier calls left them (nothing is reset). Each
+      entry is either a goal (an AI caller) or scripted lines. Checks with `call: 2` look at that call only;
+      the outcome and checks without `call` look at all of them.
+    type: array
+    minItems: 1
+    maxItems: 5
+    items:
+      type: object
+      additionalProperties: false
+      properties:
+        title: {type: string}
+        gap_s: {description: "Seconds between the calls (default 2). Short: the backend only sees the order of calls.", type: number, minimum: 0, maximum: 600}
+        goal: {description: "What the caller wants on this call, in plain words.", type: string}
+        rules: {type: array, items: {type: string}}
+        end_when: {type: string}
+        max_turns: {type: integer, minimum: 1}
+        turns:
+          description: Scripted lines for this call ({name} is replaced by a remembered detail or a caller fact).
+          type: array
+          minItems: 1
+          items:
+            type: object
+            additionalProperties: false
+            required: [caller]
+            properties:
+              caller: {type: string}
+              expect: {type: array, items: {$ref: "#/$defs/check"}}
+  remember:
+    description: >
+      Returning callers: details to carry into the next calls, found in what the agent said or its tools
+      answered on the earlier calls, e.g. {booking_ref: "RC-\d{4}"}. A pattern with a group keeps the group.
+      Later calls use them as caller facts ($booking_ref in goals and facts, {booking_ref} in scripted lines).
+    type: object
+    additionalProperties: {type: string}
+
   setup:
     type: object
     additionalProperties: false
@@ -312,7 +381,16 @@ $defs:
           - retry_limit       # tools, max_retries: after a tool failed, at most this many tries more (Resilience drills)
           - acts_on_real_data # tools (lookups), writes: no write before some lookup really answered (Resilience drills)
           - way_forward       # tools (transfer or callback), pattern: after a failure the agent hands over or offers it
+          - voicemail         # outbound calls answered by voicemail: message (left or not), after the beep, max_seconds, must_say, never_say
           - judge             # rubric (an item id from the library or judges.custom) or intent (a one-off question)
+      call:
+        description: "Returning callers: look at this call only (1 = the first call, 2 = the first return call)."
+        type: integer
+        minimum: 1
+      message: {description: "voicemail: true (default) the agent should leave a message; false it should hang up without one.", type: boolean}
+      after_beep: {description: "voicemail: the message must start after the beep (default true; voice runs).", type: boolean}
+      must_say: {description: "voicemail: patterns the message must contain (e.g. a callback number).", type: array, items: {type: string}}
+      never_say: {description: "voicemail: patterns the message must not contain (private details).", type: array, items: {type: string}}
       severity:
         description: blocker failures stop the release on their own.
         enum: [blocker, major, minor]

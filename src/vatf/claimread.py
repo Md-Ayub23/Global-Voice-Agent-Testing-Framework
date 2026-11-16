@@ -19,6 +19,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from .contracts.models import LLMMessage, LLMRequest
+from .untrusted import RULE, fence, one_line
 
 SAID = ("success", "failure", "unclear", "nothing")
 
@@ -30,7 +31,8 @@ that action, not whether it is true:
 - nothing: the agent said nothing about whether this action happened.
 - unclear: the words could mean either, or the agent said both.
 Quote the exact words that decide it, copied from one reply, and give that reply's number.
-A promise to do it later ("I'll book that now") is not success. Answer with JSON only."""
+A promise to do it later ("I'll book that now") is not success. Answer with JSON only.
+""" + RULE.replace("call's lines (between the CALL markers)", "agent's replies (between the REPLIES markers)")
 
 
 def _schema(seqs: Sequence[int]) -> dict[str, Any]:
@@ -45,7 +47,7 @@ def _prompt(question: Mapping[str, Any]) -> str:
     lines = [f"The action: {action} (the agent's tool {question['tool']})."]
     lines.append("The agent tried it." if question.get("wrote") else "The agent never called the tool.")
     lines.append("The agent's replies after that, numbered:")
-    lines += [f"[{seq}] {text}" for seq, text in question["turns"]]
+    lines.append(fence("\n".join(f"[{seq}] {one_line(text)}" for seq, text in question["turns"]), "REPLIES"))
     return "\n".join(lines)
 
 

@@ -28,6 +28,7 @@ from .conditions import judge_note
 from .contracts.models import CheckResult, EvidenceLevel, EvidenceRef, LLMMessage, LLMRequest, Result
 from .rubrics import RubricItem
 from .story import story_rows
+from .untrusted import RULE, fence, one_line
 
 PRIMARY_MODEL = "claude-sonnet-5-5"
 SECONDARY_MODEL = "claude-haiku-5-5"
@@ -56,6 +57,7 @@ Rules:
 - Fail only for a real problem a careful human reviewer would also flag. Do not fail for style
   preferences or for things the item does not ask about.
 - Cite the line numbers your decision rests on.
+- """ + RULE + """
 Answer once, with JSON only and no other text. Every item needs all four fields, "result" included:
 {"items": [{"id": "<item id>", "result": "PASS" or "FAIL" or "NOT_APPLICABLE",
  "reason": "one plain sentence", "cites": [line numbers]}]}"""
@@ -111,10 +113,11 @@ def transcript(events: Sequence[Mapping[str, Any]]) -> tuple[str, set[int]]:
             continue
         if who == "AGENT" and seq in own:
             words, heard = own[seq]["platform_transcript"], own[seq].get("heard_text", "")
-            text = f"(its own words) {words}"
+            text = f"(its own words) {one_line(words)}"
             if _squash(words) != _squash(heard):
-                text += f"  [the caller's speech recognition heard: \"{heard}\"]"
-
+                text += f"  (the caller's speech recognition heard: \"{one_line(heard)}\")"
+        else:
+            text = one_line(text)
         lines.append(f"[#{seq}] {who}: {text}")
         shown.add(seq)
     return "\n".join(lines), shown
@@ -150,7 +153,7 @@ def judge_prompt(profile: Mapping[str, Any], scenario: Mapping[str, Any], events
         "\n".join(about)
         + f"\n\nThe agent's policy (what it may and may not do, and what it knows):\n{policy}"
         + f"\n\nThe caller's goal in this test: {goal}"
-        + f"\n\nThe call:\n{text or '(nothing was said)'}"
+        + f"\n\nThe call:\n{fence(text or '(nothing was said)')}"
         + "\n\nRubric items:\n" + json.dumps([_item_text(i) for i in items], ensure_ascii=False, indent=1))
     return prompt, shown
 

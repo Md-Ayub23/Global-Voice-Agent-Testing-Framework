@@ -22,6 +22,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Mapping
 
+from . import netguard
 from .contracts.models import CallContext
 from .contracts.observers import ProbeResult
 from .util import MissingSecret, expand_env
@@ -179,8 +180,8 @@ class BackendProbe:
             raise ProbeSetupError(str(e)) from e
         req = urllib.request.Request(url, headers={"Accept": "application/json", **headers})
         try:
-            with urllib.request.urlopen(req, timeout=20) as resp:
-                raw = resp.read().decode("utf-8")
+            with netguard.urlopen(req, timeout=20) as resp:
+                raw = netguard.read_limited(resp).decode("utf-8")
         except urllib.error.HTTPError as e:
             if e.code == 404 and spec.get("empty_on_404"):
                 return []
@@ -247,7 +248,7 @@ def check_backend(profile: Mapping[str, Any], root: Path) -> str:
     except MissingSecret as e:
         raise ProbeSetupError(str(e)) from e
     try:
-        with urllib.request.urlopen(urllib.request.Request(base, headers=headers), timeout=10) as resp:
+        with netguard.urlopen(urllib.request.Request(base, headers=headers), timeout=10) as resp:
             return f"{base} answered HTTP {resp.status}."
     except urllib.error.HTTPError as e:
         return f"{base} answered HTTP {e.code} (the server is up; probes call their own paths)."

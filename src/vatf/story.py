@@ -62,6 +62,12 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
             if d.get("silent"):
                 text = "(said nothing)"
             notes = []
+            if d.get("before_pickup"):
+                notes.append("said before anyone picked up")
+            if d.get("voicemail_message"):
+                notes.append("left on the voicemail")
+            if d.get("rang_back"):
+                notes.append("the caller rang back")
             if d.get("went_on"):
                 notes.append("went on talking before the caller answered")
             if "latency_ms" in d:
@@ -83,7 +89,10 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
             if "audio" in d:
                 cut = ("cut in on its own, " if d.get("barge_in_auto") else "cut in, ") if d.get("barge_in") else ""
                 notes.append(f"{cut}spoke {_secs(d['audio']['start_ms'])}-{_secs(d['audio']['end_ms'])}")
-            rows.append((n, "CALLER", text + (f"  [{'; '.join(notes)}]" if notes else "")))
+            who = "VOICEMAIL" if d.get("voicemail") else "CALLER"
+            if d.get("pickup") and not d.get("voicemail"):
+                notes.insert(0, "picks up the agent's call")
+            rows.append((n, who, text + (f"  [{'; '.join(notes)}]" if notes else "")))
         elif t == "agent_heard":
             rows.append((n, "AGENT HEARD", f"\"{d.get('text', '')}\"" + ("  [from its logs]" if d.get("source") == "log" else "")))
         elif t == "caller_sound" and d.get("kind") == "backchannel":
@@ -149,6 +158,12 @@ def story_rows(events: Sequence[Mapping[str, Any]]) -> list[tuple[int, str, str]
             text = (f"{d.get('lines', 0)} line(s) from {d.get('from', '')}" if d.get("ok")
                     else f"could not read {d.get('from', '')}: {d.get('error', '')}")
             rows.append((n, "logs", text + (" (only the last ones kept)" if d.get("truncated") else "")))
+        elif t == "harness_event" and d.get("code") == "next_call":
+            rows.append((n, "NEW CALL", d.get("message") or f"call {d.get('call')}"))
+        elif t == "harness_event" and d.get("code") == "agent_exception":
+            rows.append((n, "AGENT error", f"{d.get('message')}"))
+        elif t == "harness_event" and d.get("level") in ("info", "warning"):
+            rows.append((n, "vatf", f"{d.get('message') or d.get('code')}"))
         elif t == "harness_event":
             rows.append((n, "vatf error", f"{d.get('code')}: {d.get('message')} (not blamed on the agent)"))
     return rows

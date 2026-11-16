@@ -100,3 +100,21 @@ With Plivo, only these change:
     auth_token: ${PLIVO_AUTH_TOKEN}
     from_number: "+14155550199"         # your Plivo number
 ```
+
+## Agents that make calls (outbound tests, Twilio)
+
+For a test case with `direction: outbound` (docs/outbound-and-returning.md) the agent calls Vocto
+instead. Add:
+
+```yaml
+    outbound:
+      answer_number: "+14155550199"     # a number in your Twilio account (default: from_number)
+      trigger_url: https://agent.example.com/calls   # optional: the agent's own "make a call" API
+      trigger_headers: {Authorization: "Bearer ${AGENT_API_TOKEN}"}
+      wait_s: 90                        # how long to wait for the agent's call
+```
+
+For each test, Vocto points `answer_number` at that test (its Voice URL, in Twilio), POSTs
+`{to, test_id, ...the test's outbound details}` to `trigger_url`, answers when the agent rings, and
+puts the number's Voice URL back as it was, even when the test fails. Without `trigger_url`, start
+the agent's call yourself within `wait_s`. Tests on the same number run one at a time.

@@ -73,7 +73,7 @@ def load_dotenv(path: Path) -> list[str]:
             continue
         key, _, value = line.removeprefix("export ").partition("=")
         key, value = key.strip(), value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
+        if key and not os.environ.get(key):          # an empty variable (e.g. from docker compose) counts as unset
             os.environ[key] = value
             loaded.append(key)
     return loaded
@@ -817,6 +817,49 @@ def cmd_ui(args) -> int:
     return serve(Path(args.root).resolve(), Path(args.runs_dir), port=args.port, open_browser=not args.no_browser)
 
 
+def cmd_serve(args) -> int:
+    from .web.server import serve
+
+    return serve(Path(args.root).resolve(), Path(args.runs_dir), port=args.port, open_browser=False,
+                 host=args.host, team=True)
+
+
+def cmd_users(args) -> int:
+    """Users from the terminal: list them, add one, or reset a password (e.g. a locked-out admin)."""
+    import getpass
+
+    from .web.auth import Auth, AuthError
+
+    auth = Auth(Path(args.root).resolve() / args.runs_dir / ".vocto")
+    try:
+        if args.action == "list":
+            for u in auth.users():
+                print(f"{u['username']:<24} {u['role']:<7} {'(switched off)' if u['disabled'] else ''}")
+            if not auth.users():
+                print("No users yet: the first visit to the dashboard creates the admin.")
+            return 0
+        if not args.username:
+            print("error: give a user name", file=sys.stderr)
+            return 2
+        password = os.environ.get("VOCTO_NEW_PASSWORD") or getpass.getpass(f"New password for {args.username}: ")
+        if args.action == "add":
+            u = auth.create_user(args.username, password, args.role)
+            auth.audit("user_created", None, "terminal", target=u["username"], role=u["role"])
+            print(f"Added {u['username']} ({u['role']}).")
+        else:
+            match = [u for u in auth.users() if u["username"].lower() == args.username.lower()]
+            if not match:
+                print(f"error: no user called {args.username}", file=sys.stderr)
+                return 3
+            auth.update_user(match[0]["id"], password=password, disabled=False)
+            auth.audit("user_changed", None, "terminal", target=match[0]["username"], password_reset=True)
+            print(f"New password set for {match[0]['username']}; they are signed out everywhere.")
+        return 0
+    except AuthError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 3
+
+
 def main(argv: list[str] | None = None) -> int:
     if os.environ.pop("VATF_UI_CHILD", None):
         # Started by `vatf ui`: its Stop button sends Ctrl+C (Ctrl+Break on Windows). Make sure both
@@ -1000,6 +1043,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--runs-dir", default="runs", help="where runs are written (default: runs)")
     p.add_argument("--no-browser", action="store_true", help="don't open a browser window")
     p.set_defaults(func=cmd_ui)
+
+    p = sub.add_parser("serve", help="run Vocto as an always-on server for a team (sign-in required; see docs/server.md)")
+    p.add_argument("--host", default=os.environ.get("VOCTO_HOST", "0.0.0.0"), help="address to listen on (default 0.0.0.0)")
+    p.add_argument("--port", type=int, default=int(os.environ.get("VOCTO_PORT", "8765")), help="port (default 8765)")
+    p.add_argument("--root", default=".", help="project root (default: here)")
+    p.add_argument("--runs-dir", default="runs", help="where runs are written (default: runs)")
+    p.set_defaults(func=cmd_serve)
+
+    p = sub.add_parser("users", help="dashboard users: list, add, or reset a password")
+    p.add_argument("action", choices=["list", "add", "reset-password"])
+    p.add_argument("username", nargs="?")
+    p.add_argument("--role", choices=["viewer", "editor", "admin"], default="viewer", help="add: the new user's role")
+    p.add_argument("--root", default=".", help="project root (default: here)")
+    p.add_argument("--runs-dir", default="runs", help="where runs are written (default: runs)")
+    p.set_defaults(func=cmd_users)
 
     args = parser.parse_args(argv)
     load_dotenv(Path(getattr(args, "root", ".")) / ".env")

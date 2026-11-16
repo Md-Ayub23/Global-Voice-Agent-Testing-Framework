@@ -78,7 +78,10 @@ properties:
           phone_call: provider (twilio or plivo), account_sid (Plivo: the Auth ID) and auth_token (as ${NAME}),
           from_number (the team's Twilio or Plivo number), ring_timeout_s (default 30), public_url (the team's own
           https address for Vocto's phone line, forwarding to line_port, default 8766; without it Vocto opens
-          a Cloudflare quick tunnel), jitter_buffer_ms.
+          a Cloudflare quick tunnel), jitter_buffer_ms, outbound (tests where the agent makes the call, Twilio only:
+          answer_number, a number in the account that Vocto answers, default from_number; trigger_url, the agent's
+          own "make a call" API, POSTed {to, test_id, ...the test's outbound details}; trigger_headers; wait_s,
+          default 90).
         type: object
       offline_options:
         description: Merged into options for --offline runs (agents in this repo only), so nothing calls an API.

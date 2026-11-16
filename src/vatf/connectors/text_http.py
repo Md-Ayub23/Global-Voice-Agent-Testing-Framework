@@ -28,8 +28,9 @@ from typing import Any, AsyncIterator, Callable, Mapping
 
 from ..contracts.connector import AgentOutput
 from ..contracts.models import AudioClip, CallContext
+from .. import netguard
 from ..util import MissingSecret, expand_env
-from . import ConnectError
+from . import ConnectError, call_metadata
 
 
 def _pick(doc: Any, path: str) -> Any:
@@ -45,8 +46,8 @@ def post_json(url: str, body: Mapping[str, Any], headers: Mapping[str, str], tim
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
                                  headers={"Content-Type": "application/json", **headers})
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            raw = resp.read().decode("utf-8")
+        with netguard.urlopen(req, timeout=timeout_s) as resp:
+            raw = netguard.read_limited(resp).decode("utf-8")
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", errors="replace")[:200]
         raise ConnectError(f"{url} answered HTTP {e.code}: {detail}") from e
@@ -135,7 +136,7 @@ class TextHttpConnector:
 
     async def open(self, ctx: CallContext, clock: Callable[[], int] = lambda: 0) -> TextHttpSession:
         url, opts, headers = self._setup()
-        meta: dict[str, Any] = {"now": ctx.scenario.get("setup", {}).get("now")}
+        meta: dict[str, Any] = {"now": ctx.scenario.get("setup", {}).get("now"), **call_metadata(ctx)}
         if "session_metadata" in self._profile.get("test_id", {}).get("propagation", []):
             meta["test_id"] = ctx.test_id
         session = TextHttpSession(url, opts, headers, f"s-{secrets.token_hex(6)}", clock)

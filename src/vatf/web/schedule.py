@@ -1,9 +1,10 @@
 """Health checks on a schedule while the dashboard is open (Phase 6, health.py).
 
 Once a minute: every profile with health_checks.enabled whose last health check is older than
-every_minutes gets one, as an ordinary dashboard run (`python -m vatf health ...`). Only when no other
-run is going (runs share the agent's test database); a check that can't start waits for the next
-minute. A check that fails before it writes a run is not retried until every_minutes has passed.
+every_minutes gets one, as an ordinary dashboard run (`python -m vatf health ...`). Only when its agent
+has no other run going or waiting (an agent's runs share its test database); a check that can't start
+waits for the next minute. Other agents' runs don't hold it back (the runs queue in jobs.py). A check
+that fails before it writes a run is not retried until every_minutes has passed.
 """
 
 from __future__ import annotations
@@ -43,18 +44,18 @@ class HealthScheduler:
     def tick(self, now: float | None = None) -> dict[str, Any] | None:
         """Starts at most one due health check; returns the job started (public form) or None."""
         now = time.time() if now is None else now
-        if self.jobs.active:
-            return None
         for row in regress.health_status(self.root, self.runs, now):
             key = (row["project"]["path"], row["file"])
             tried = self.attempts.get(key)
+            if self.jobs.busy(row["project"]["path"]):
+                continue                     # its agent has a run going or waiting: try next minute
             if not row["due"] or (tried is not None and now - tried < row["every_minutes"] * 60):
                 continue
             self.attempts[key] = now
             req = {"command": "health", "profile": row["file"],
                    "start_agent": row["start_agent"]}
             try:
-                return self.jobs.start(req, row["project"]).public()
+                return self.jobs.start(req, row["project"], exclusive=True).public()
             except JobError as e:
                 self.last_error = str(e)
                 return None

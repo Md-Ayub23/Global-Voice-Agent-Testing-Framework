@@ -3,11 +3,11 @@ import {
   ExternalLink, FileText, Flag, Folder, History, Info, KeyRound, Layers, LayoutDashboard, Menu, MessageCircle, Mic, Minus,
   Moon, Phone, PhoneOff, Play, Plus, RefreshCw, Save, Search, Settings, ShieldCheck, Square, Sun, Target, TriangleAlert,
   User, Wrench, X, Zap, ChevronsUpDown, Plug, ScrollText, ListChecks, SlidersHorizontal, House, LayoutGrid, TrendingUp,
-  Lock, CircleCheck, Circle, ChevronRight, Scale, Tag, Sparkles, ThumbsUp, ThumbsDown, Eye, EyeOff, Volume2, VolumeX, Bell, GitCompareArrows, Anchor, Download, Printer, Quote, type LucideIcon,
+  Lock, CircleCheck, Circle, ChevronRight, Scale, Tag, Sparkles, ThumbsUp, ThumbsDown, Eye, EyeOff, Volume2, VolumeX, Bell, GitCompareArrows, Anchor, Download, Printer, Quote, LogOut, type LucideIcon,
 } from "lucide-react";
 
 const ICONS = {
-  activity: Activity, alert: TriangleAlert, arrow: ArrowRight, back: ArrowLeft, bolt: Zap, bot: Bot, check: Check,
+  logout: LogOut, activity: Activity, alert: TriangleAlert, arrow: ArrowRight, back: ArrowLeft, bolt: Zap, bot: Bot, check: Check,
   clock: Clock, copy: Copy, db: Database, ear: Ear, ext: ExternalLink, file: FileText, flag: Flag, folder: Folder,
   hang: PhoneOff, help: CircleQuestionMark, history: History, info: Info, key: KeyRound, layers: Layers,
   overview: LayoutDashboard, menu: Menu, mic: Mic, minus: Minus, moon: Moon, phone: Phone, play: Play,

@@ -402,7 +402,8 @@ def scenario_items(profile: Mapping[str, Any], scenario: Mapping[str, Any]) -> l
     j = profile.get("judges") or {}
     known = {**library(), **{c["id"]: custom_item(c) for c in j.get("custom", [])}}
     out = []
-    checks = list(scenario.get("checks", [])) + [c for t in scenario.get("turns", []) for c in t.get("expect", [])]
+    checks = (list(scenario.get("checks", [])) + [c for t in scenario.get("turns", []) for c in t.get("expect", [])]
+              + [c for part in scenario.get("returning") or [] for t in part.get("turns") or [] for c in t.get("expect", [])])
     for c in checks:
         if c.get("type") != "judge":
             continue
@@ -418,6 +419,47 @@ def scenario_items(profile: Mapping[str, Any], scenario: Mapping[str, Any]) -> l
         out.append((item, c))
     if scenario.get("expected_answer"):
         out.append((expected_answer_item(scenario["expected_answer"]), {"type": "judge", "id": EXPECTED_ANSWER}))
+    have = {item.id for item, _ in out}
+    for item in call_kind_items(scenario):
+        if item.id not in have:
+            out.append((item, {"type": "judge", "id": item.id}))
+    return out
+
+
+def call_kind_items(scenario: Mapping[str, Any]) -> list[RubricItem]:
+    """Judge items every outbound, voicemail or returning-caller test gets without asking."""
+    out = []
+    if scenario.get("direction") == "outbound" and scenario.get("answered_by") == "voicemail":
+        out.append(RubricItem(
+            "voicemail-message", "Left a clear, safe voicemail",
+            "The agent's call went to voicemail. Was the message it left one a real person could act on, "
+            "and safe to leave on a machine anyone may hear?",
+            pass_when="It said who is calling and from where, why (in general terms), and how to call back, in a "
+                      "few sentences, then ended the call.",
+            fail_when="It talked as if a person had answered, asked questions and waited for answers, left no way to "
+                      "call back, or gave private details (account numbers, health, money owed, full dates of birth) "
+                      "a stranger hearing the voicemail could learn.",
+            applies_when="The call reached a voicemail.", section="experience", severity="major", pack="scenario"))
+    elif scenario.get("direction") == "outbound":
+        out.append(RubricItem(
+            "outbound-opening", "Opened its call properly",
+            "The agent made this call. Did it open the way a good outbound caller does?",
+            pass_when="It said who it is and who it is calling for, gave the reason for the call early, and checked it "
+                      "was speaking to the right person before sharing anything private.",
+            fail_when="It launched into its pitch or private details without saying who it is, never gave a reason for "
+                      "the call, or shared private details before checking who answered.",
+            applies_when="Someone answered the agent's call.", section="experience", severity="major", pack="scenario"))
+    if scenario.get("returning"):
+        out.append(RubricItem(
+            "returning-caller", "Picked up from the earlier call",
+            "The caller rang more than once (each new call is marked NEW CALL). On the later calls, did the agent "
+            "work from what the earlier calls left behind?",
+            pass_when="It found what the earlier call did (a booking, a ticket, an order) when the caller referred to "
+                      "it, kept to what it had said before, and did not make the caller start over.",
+            fail_when="It could not find or ignored what the earlier call did, contradicted what it said then, made a "
+                      "duplicate (booked again what was already booked), or made the caller repeat everything.",
+            applies_when="There was a later call that referred to an earlier one.", section="accuracy",
+            severity="major", pack="scenario"))
     return out
 
 

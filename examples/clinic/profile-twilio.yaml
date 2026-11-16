@@ -26,3 +26,10 @@ limits:
   max_call_seconds: 300
   end_of_turn_ms: 1000
   no_reply_ms: 15000
+load:
+  peak_calls_per_hour: 3
+  start_at: 1
+  call_minutes: 6
+  calls_at_once: 5
+  scenarios:
+    - clinic.confirm-before-booking

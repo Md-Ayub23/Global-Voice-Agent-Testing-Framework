@@ -26,10 +26,11 @@ export const CHECKS: Record<string, { label: string; help: string; fields: strin
   latency: { label: "Answer time", help: "This call's slow answers (p95) stay under a limit. Voice only.", fields: ["p95_ms", "min_answers"] },
   max_turns: { label: "Conversation length", help: "The caller needs at most this many turns.", fields: ["n"] },
   handoff: { label: "Handed over", help: "Multi-agent platforms: the call was handed to this sub-agent.", fields: ["to"] },
+  voicemail: { label: "Voicemail message", help: "Outbound calls answered by voicemail: the agent leaves a message (or not), after the beep, short, with what it must say and nothing private.", fields: ["message", "after_beep", "max_seconds", "must_say", "never_say"] },
   judge: { label: "AI judge question", help: "A yes/no question the AI judges answer from the conversation. It is only an opinion until your labels show the judges get it right; then it can block.", fields: ["intent", "pass_when", "fail_when", "applies_when", "rubric"] },
 };
 
-interface Ctx { tools: string[]; writeTools: string[]; probes: string[]; facts: string[] }
+interface Ctx { tools: string[]; writeTools: string[]; probes: string[]; facts: string[]; calls: number }
 
 function CheckFields({ check, set, ctx }: { check: Obj; set: (k: string, v: Json | undefined) => void; ctx: Ctx }) {
   const spec = CHECKS[str(check.type)];
@@ -55,6 +56,17 @@ function CheckFields({ check, set, ctx }: { check: Obj; set: (k: string, v: Json
       case "pass_when": case "fail_when": case "applies_when":
         return <Field key={f} label={{ pass_when: "Passes when", fail_when: "Fails when", applies_when: "Only applies when" }[f]}
           hint={f === "applies_when" ? "Empty: always." : undefined}><Text value={str(check[f])} onChange={(v) => set(f, v || undefined)} /></Field>;
+      case "message":
+        return <Field key={f} label="The agent should"><Seg value={check.message === false ? "no" : "yes"} onChange={(v) => set("message", v === "no" ? false : undefined)}
+          options={[{ value: "yes", label: "Leave a message" }, { value: "no", label: "Hang up without one" }]} /></Field>;
+      case "after_beep":
+        return <Field key={f} label="Timing (voice runs)"><Check checked={check.after_beep !== false} onChange={(on) => set("after_beep", on ? undefined : false)} label="The message must start after the beep" /></Field>;
+      case "max_seconds":
+        return <Field key={f} label="Longest message (seconds)" hint="Empty: no limit."><Num value={check.max_seconds as number} min={1} onChange={(v) => set("max_seconds", v)} /></Field>;
+      case "must_say": case "never_say":
+        return <Field key={f} label={f === "must_say" ? "Must say (patterns)" : "Must never say (patterns)"} className="sm:col-span-2"
+          hint={f === "must_say" ? "e.g. the callback number: 555[ -]?0100" : "Private details a stranger could hear, e.g. \\b\\d{6}\\b for an account number."}>
+          <StrList mono value={asList<string>(check[f])} onChange={(v) => set(f, v.length ? v : undefined)} placeholder={f === "must_say" ? "(?i)call us back" : "\\b\\d{6}\\b"} /></Field>;
       case "rubric":
         return <Field key={f} label="Or reuse a judge item" hint="Instead of a question: a built-in or custom item id from the AI judges setup, e.g. grounded-facts.">
           <Text mono value={str(check[f])} onChange={(v) => set(f, v || undefined)} placeholder="grounded-facts" /></Field>;
@@ -62,7 +74,16 @@ function CheckFields({ check, set, ctx }: { check: Obj; set: (k: string, v: Json
         return <Field key={f} label={f}><Text mono value={str(check[f])} onChange={(v) => set(f, v)} /></Field>;
     }
   };
-  return <Grid>{spec.fields.map(field)}</Grid>;
+  return <Grid>
+    {spec.fields.map(field)}
+    {ctx.calls > 1 && check.type !== "judge" && (
+      <Field label="Look at" hint="A returning caller rings more than once.">
+        <Select value={check.call ? String(check.call) : ""} placeholder="All the calls"
+          options={Array.from({ length: ctx.calls }, (_, i) => [String(i + 1), i === 0 ? "The first call only" : `Call ${i + 1} only`] as [string, string])}
+          onChange={(v) => set("call", v ? Number(v) : undefined)} />
+      </Field>
+    )}
+  </Grid>;
 }
 
 function CheckList({ checks, onChange, ctx, needId, prefix }: { checks: Obj[]; onChange: (c: Obj[]) => void; ctx: Ctx; needId: boolean; prefix: string }) {
@@ -132,6 +153,7 @@ export function ScenarioForm({ detail, file, initial, onDone, testType }: { deta
     writeTools: tools.filter((t) => t.effect === "write").map((t) => str(t.name)),
     probes: asList<Obj>(asObj(detail.merged.backend).probes).map((p) => str(p.id)),
     facts: Object.keys(asObj(at("caller", "facts"))),
+    calls: 1 + asList<Obj>(doc.returning).length,
   };
   const scripted = doc.style === "scripted";
   const outcome = asObj(doc.outcome);
@@ -333,6 +355,8 @@ export function ScenarioForm({ detail, file, initial, onDone, testType }: { deta
           </>
         ) : <Help>No business action: only the checks below are used.</Help>}
       </Block>
+      <CallKind doc={doc} put={put} />
+      <Returning doc={doc} put={put} ctx={ctx} />
 
       <Block title="The right answer (optional)" sub="For a question with one right answer: opening hours, a price, a policy. The AI judges check the agent's reply agrees with it, in any words.">
         <Area id="scenario-expected-answer" rows={2} value={str(doc.expected_answer)} onChange={(v) => put(["expected_answer"], v.trim() ? v : undefined)}
@@ -436,5 +460,129 @@ function Recording({ project, path, line, onChange }: { project: string; path: s
         </div>
       )}
     </Field>
+  );
+}
+
+
+// Who rings whom: an ordinary inbound call, or the agent calling out (answered by a person or a voicemail).
+function CallKind({ doc, put }: { doc: Obj; put: (path: (string | number)[], v: Json | undefined) => void }) {
+  const outbound = doc.direction === "outbound";
+  const voicemail = outbound && doc.answered_by === "voicemail";
+  const vm = asObj(doc.voicemail);
+  return (
+    <Block title="Who makes the call" sub="Most agents answer calls. Sales, reminder and follow-up agents make them: Vocto then plays whoever picks up.">
+      <div className="flex flex-wrap gap-x-6 gap-y-3 items-end">
+        <Field label="Direction">
+          <Seg id="scenario-direction" value={outbound ? "outbound" : "inbound"} onChange={(v) => {
+            if (v === "outbound") put(["direction"], "outbound");
+            else { put(["direction"], undefined); put(["answered_by"], undefined); put(["voicemail"], undefined); put(["outbound"], undefined); put(["pickup"], undefined); }
+          }} options={[{ value: "inbound", label: "The caller rings the agent" }, { value: "outbound", label: "The agent rings the customer" }]} />
+        </Field>
+        {outbound && (
+          <Field label="Who picks up">
+            <Seg id="scenario-answered-by" value={voicemail ? "voicemail" : "person"} onChange={(v) => put(["answered_by"], v === "voicemail" ? "voicemail" : undefined)}
+              options={[{ value: "person", label: "A person" }, { value: "voicemail", label: "Voicemail" }]} />
+          </Field>
+        )}
+        <Field label="Caller's number (optional)" hint="Sent to the agent as the call's 'from', so it can recognise the caller. $fact allowed.">
+          <Text mono value={str(doc.caller_id)} onChange={(v) => put(["caller_id"], v || undefined)} placeholder="+14155550123 or $phone" />
+        </Field>
+      </div>
+      {outbound && (
+        <>
+          <Field label="What the agent's dialler is told" hint="Sent to the agent with the call: who it is calling and why. A value starting with $ is a caller fact.">
+            <KeyValue value={asObj(doc.outbound)} onChange={(v) => put(["outbound"], Object.keys(v).length ? v : undefined)} keyPh="reason" valPh="appointment reminder" />
+          </Field>
+          {!voicemail && (
+            <Field label="What the person says on picking up" hint='Empty: "Hello?"'>
+              <Text value={str(doc.pickup)} onChange={(v) => put(["pickup"], v || undefined)} placeholder="Hello?" />
+            </Field>
+          )}
+          {voicemail && (
+            <Grid>
+              <Field label="Voicemail greeting" className="sm:col-span-2" hint="Empty: a standard greeting.">
+                <Area rows={2} value={str(vm.greeting)} onChange={(v) => put(["voicemail", "greeting"], v.trim() ? v : undefined)}
+                  placeholder="Hi, you've reached Maria. Leave a message after the tone." />
+              </Field>
+              <Field label="Beep"><Check checked={vm.beep !== false} onChange={(on) => put(["voicemail", "beep"], on ? undefined : false)} label="Play a beep after the greeting" /></Field>
+              <Field label="Stops recording after (seconds)" hint="Default 60."><Num value={vm.max_message_s as number} min={5} max={600} onChange={(v) => put(["voicemail", "max_message_s"], v)} /></Field>
+            </Grid>
+          )}
+          {voicemail && <Help>Add a "Voicemail message" check below to say what a good message has (a callback number) and must not have (private details). The AI judges also check the message is clear and safe.</Help>}
+        </>
+      )}
+    </Block>
+  );
+}
+
+function without(o: Obj, key: string): Obj {
+  const { [key]: _drop, ...rest } = o;
+  return rest;
+}
+
+// A returning caller: after this call the same caller rings again (the agent's systems as the call left them).
+function Returning({ doc, put, ctx }: { doc: Obj; put: (path: (string | number)[], v: Json | undefined) => void; ctx: Ctx }) {
+  const parts = asList<Obj>(doc.returning);
+  const setPart = (i: number, p: Obj | null) => {
+    const next = p ? parts.map((x, j) => (j === i ? p : x)) : parts.filter((_, j) => j !== i);
+    put(["returning"], next.length ? next : undefined);
+    if (!next.length) put(["remember"], undefined);
+  };
+  return (
+    <Block title="Calls back later (optional)" sub="The same caller rings the agent again after this call, with nothing reset: tests that the agent finds what the first call did (a booking, a ticket) and doesn't start over.">
+      <div className="grid gap-3">
+        {parts.map((p, i) => {
+          const lines = asList<Obj>(p.turns);
+          const isScripted = lines.length > 0;
+          return (
+            <div key={i} className="grid gap-2.5 p-3 border border-line rounded-[12px]" data-call={i + 2}>
+              <div className="flex items-center gap-2">
+                <Chip tone="caller">Call {i + 2}</Chip>
+                <span className="flex-1" />
+                <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove call" onClick={() => setPart(i, null)} />
+              </div>
+              <div className="flex flex-wrap gap-x-6 gap-y-3 items-end">
+                <Field label="The caller">
+                  <Seg value={isScripted ? "scripted" : "simulated"} onChange={(v) => setPart(i, v === "scripted"
+                    ? { ...without(p, "goal"), turns: [{ caller: "" }] } : without(p, "turns"))}
+                    options={[{ value: "simulated", label: "AI caller with a goal" }, { value: "scripted", label: "Scripted lines" }]} />
+                </Field>
+                <Field label="Seconds after the last call" hint="Default 2."><Num value={p.gap_s as number} min={0} max={600} onChange={(v) => setPart(i, { ...p, gap_s: v } as Obj)} /></Field>
+              </div>
+              {!isScripted && (
+                <Field label="Goal on this call" hint="$name uses a remembered detail or a caller fact.">
+                  <Area rows={2} value={str(p.goal)} onChange={(v) => setPart(i, { ...p, goal: v } as Obj)} placeholder="Move your appointment ($booking_ref) to Thursday." />
+                </Field>
+              )}
+              {isScripted && lines.map((t, n) => (
+                <div key={n} className="grid gap-2 pl-3 border-l-2 border-line">
+                  <div className="flex items-center gap-2">
+                    <Field label={`Line ${n + 1}: caller says`} className="flex-1" hint={n === 0 ? "{name} uses a remembered detail or a caller fact." : undefined}>
+                      <Text value={str(t.caller)} onChange={(v) => setPart(i, { ...p, turns: lines.map((x, j) => (j === n ? { ...x, caller: v } : x)) } as Obj)}
+                        placeholder="Hi, I'm calling about booking {booking_ref}." />
+                    </Field>
+                    <Button size="sm" variant="ghost" iconOnly icon="x" aria-label="Remove line" onClick={() => {
+                      const rest = lines.filter((_, j) => j !== n);
+                      setPart(i, rest.length ? { ...p, turns: rest } : without(p, "turns"));
+                    }} />
+                  </div>
+                  <Field label="Then check the agent's reply">
+                    <CheckList checks={asList<Obj>(t.expect)} ctx={{ ...ctx, calls: 1 }} needId={false} prefix={`call${i + 2}.turn${n + 1}.`}
+                      onChange={(c) => setPart(i, { ...p, turns: lines.map((x, j) => (j === n ? { ...x, expect: c.length ? c : undefined } as Obj : x)) } as Obj)} />
+                  </Field>
+                </div>
+              ))}
+              {isScripted && <div><Button size="sm" icon="plus" onClick={() => setPart(i, { ...p, turns: [...lines, { caller: "" }] } as Obj)}>Add line</Button></div>}
+            </div>
+          );
+        })}
+        <div><Button size="sm" icon="plus" data-add-call onClick={() => put(["returning"], [...parts, { goal: "" }])} disabled={parts.length >= 5}>Add a call back</Button></div>
+        {parts.length > 0 && (
+          <Field label="Details to carry into the next calls" hint="Found in what the agent said or its tools answered on the earlier calls. A pattern with ( ) keeps only that part. Use them as $name in goals and {name} in lines.">
+            <KeyValue value={asObj(doc.remember)} onChange={(v) => put(["remember"], Object.keys(v).length ? v : undefined)} keyPh="booking_ref" valPh="reference is (\\d{6})" />
+          </Field>
+        )}
+      </div>
+    </Block>
   );
 }

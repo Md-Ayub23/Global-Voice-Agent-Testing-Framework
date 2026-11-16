@@ -1228,10 +1228,27 @@ def _regression(decision: Mapping[str, Any]) -> dict[str, Any] | None:
     return out
 
 
+class _SafeCSV:
+    """CSV cells a spreadsheet would run as a formula (=, +, -, @, tab, CR at the start) get a leading
+    apostrophe: text from a call (what an agent or caller said) must never become a formula in Excel."""
+
+    def __init__(self, writer: Any):
+        self._w = writer
+
+    @staticmethod
+    def cell(v: Any) -> Any:
+        if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r") and not re.fullmatch(r"[-+]?\d+(\.\d+)?%?", v):
+            return "'" + v
+        return v
+
+    def writerow(self, row: Sequence[Any]) -> None:
+        self._w.writerow([self.cell(v) for v in row])
+
+
 def to_csv(report: Mapping[str, Any]) -> str:
     """The findings, scorecard and numbers as one CSV (opens in Excel / Google Sheets)."""
     buf = io.StringIO()
-    w = csv.writer(buf)
+    w = _SafeCSV(csv.writer(buf))
     w.writerow(["section", "id", "title", "area", "status", "severity", "blocks release", "how often", "who to look at",
                 "what happened", "expected", "where to look", "test cases", "calls"])
     v = report["verdict"]

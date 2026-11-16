@@ -52,8 +52,106 @@ def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def write_text_atomic(path: Path, text: str, newline: str | None = None) -> None:
+    """Writes the whole file or nothing: a reader (the dashboard polling a run, another process) never sees
+    half a file. The text goes to a unique temporary file next to it, then replaces it in one step."""
+    import os
+    import tempfile
+    import time
+
+    path = Path(path)
+    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline=newline) as f:
+            f.write(text)
+        for attempt in range(20):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError:
+                # Windows: the target is open in another process (a reader) for a moment; try again.
+                if attempt == 19:
+                    raise
+                time.sleep(0.02 * (attempt + 1))
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 def write_json(path: Path, data: Any) -> None:
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    write_text_atomic(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+class file_lock:
+    """A lock shared by every process on this computer (a lock file next to `path`), for read-modify-write
+    of a shared file such as an index or the .env file. Also a lock between threads of one process."""
+
+    _thread_locks: dict[str, Any] = {}
+
+    def __init__(self, path: Path, timeout: float = 30.0):
+        import os
+        import threading
+
+        self.lock_path = Path(str(path) + ".lock")
+        self.timeout = timeout
+        key = os.path.normcase(os.path.abspath(self.lock_path))
+        self._tlock = file_lock._thread_locks.setdefault(key, threading.RLock())
+        self._fh = None
+
+    def __enter__(self) -> "file_lock":
+        import os
+        import time
+
+        if not self._tlock.acquire(timeout=self.timeout):
+            raise TimeoutError(f"{self.lock_path.name} is busy")
+        try:
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+            self._fh = open(self.lock_path, "a+b")
+            deadline = time.monotonic() + self.timeout
+            while True:
+                try:
+                    if os.name == "nt":
+                        import msvcrt
+
+                        self._fh.seek(0)
+                        msvcrt.locking(self._fh.fileno(), msvcrt.LK_NBLCK, 1)
+                    else:
+                        import fcntl
+
+                        fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    return self
+                except OSError:
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"{self.lock_path.name} is held by another process") from None
+                    time.sleep(0.02)
+        except BaseException:
+            if self._fh:
+                self._fh.close()
+                self._fh = None
+            self._tlock.release()
+            raise
+
+    def __exit__(self, *exc: Any) -> None:
+        import os
+
+        try:
+            if self._fh:
+                if os.name == "nt":
+                    import msvcrt
+
+                    self._fh.seek(0)
+                    try:
+                        msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
+                else:
+                    import fcntl
+
+                    fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+                self._fh.close()
+                self._fh = None
+        finally:
+            self._tlock.release()
 
 
 def read_json(path: Path) -> Any:

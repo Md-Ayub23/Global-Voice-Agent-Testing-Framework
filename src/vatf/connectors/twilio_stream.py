@@ -42,8 +42,9 @@ from ..audio.g711 import pcm16_to_ulaw, ulaw_to_pcm16
 from ..audio.pcm import from_pcm16, to_pcm16
 from ..audio.recorder import Recorder
 from ..contracts.models import CallContext
+from .. import netguard
 from ..util import expand_env
-from . import ConnectError
+from . import ConnectError, call_metadata
 
 CONNECT_TIMEOUT_S = 15
 SAMPLE_RATE = 8000          # Twilio Media Streams are always 8 kHz mu-law, mono
@@ -65,6 +66,12 @@ def start_messages(ctx: CallContext | None, profile: Mapping[str, Any], *, strea
             params.setdefault("now", str(now))
         if "session_metadata" in profile.get("test_id", {}).get("propagation", []):
             params["test_id"] = ctx.test_id
+        extra = call_metadata(ctx)      # Twilio's customParameters are flat strings
+        if extra.get("direction"):
+            params["direction"] = extra["direction"]
+            params["outbound"] = json.dumps(extra["outbound"], ensure_ascii=False)
+        if extra.get("from"):
+            params.setdefault("From", extra["from"])
     return [
         {"event": "connected", "protocol": "Call", "version": "1.0.0"},
         {"event": "start", "sequenceNumber": "1", "streamSid": stream_sid,
@@ -249,7 +256,8 @@ class TwilioStreamConnector:
             headers = {str(k): str(v) for k, v in expand_env(options.get("headers") or {}).items()}
             first = start_messages(ctx, self._profile, stream_sid=stream_sid, call_sid=call_sid,
                                    account_sid=account_sid)
-            ws = await asyncio.wait_for(websockets.connect(url, max_size=None, ping_interval=None,
+            await asyncio.to_thread(netguard.check_url, url, netguard.WS_SCHEMES)
+            ws = await asyncio.wait_for(websockets.connect(url, max_size=netguard.MAX_RESPONSE, ping_interval=None,
                                                            additional_headers=headers or None),
                                         CONNECT_TIMEOUT_S)
             for msg in first:

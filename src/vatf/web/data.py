@@ -14,6 +14,7 @@ import re
 import shutil
 import sys
 import tempfile
+import threading
 import wave
 from pathlib import Path
 from typing import Any, Mapping
@@ -33,7 +34,7 @@ from ..llm import DEFAULT_MODEL
 from ..loader import ProjectError, load_project, read_yaml
 from ..metrics import metric_list
 from ..story import database_rows, judgement, story_rows
-from ..util import read_json
+from ..util import file_lock, read_json, write_text_atomic
 
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "runs", ".models", "__pycache__", ".pytest_cache", "src"}
 RUN_ID = re.compile(r"^r-\d{8}-\d{6}-[0-9a-f]{4}$")
@@ -82,7 +83,8 @@ _bug_cache: dict[str, Any] = {}
 
 def bug_switches(root: Path, connection: Mapping[str, Any]) -> list[dict[str, str]] | None:
     """The agent's bug switches, when its module lists them (BUG_HELP, or BUGS): zoo agents do."""
-    target = connection.get("launch") or connection.get("target") or ""
+    # Only a module the profile already runs (launch, a text_python agent) is imported to read its switches.
+    target = connection.get("launch") or (connection.get("target") if connection.get("type") == "text_python" else "") or ""
     module = target.partition(":")[0]
     if not module or "://" in target:
         return None
@@ -301,7 +303,7 @@ def write_project_file(root: Path, path: str, rel: str, text: str, create: bool 
     if not result["syntax"]:
         return {**result, "saved": False}
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8", newline="\n")
+    write_text_atomic(target, text, newline="\n")
     return {**result, "saved": True}
 
 
@@ -332,7 +334,40 @@ def _started_from_id(run_id: str) -> str:
     return f"{d[:4]}-{d[4:6]}-{d[6:]}T{t[:2]}:{t[2:4]}:{t[4:]}Z"
 
 
+_SUMMARIES: dict[str, tuple[tuple, dict[str, Any]]] = {}
+_SUMMARIES_LOCK = threading.Lock()
+
+
+def _mtime(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
 def run_summary(runs: Path, run_id: str, active_runs: set[str] = frozenset()) -> dict[str, Any]:
+    """One run's row for the lists. A finished run's files no longer change, so its row is kept in memory
+    (keyed by the files' times) and the dashboard doesn't re-read every call of every run on each visit."""
+    folder = runs / run_id
+    if run_id in active_runs:
+        return _run_summary(runs, run_id, active_runs)
+    sig = (str(runs), _mtime(folder / "run.json"), _mtime(folder / "decision.json"), _mtime(folder / "calls"),
+           _mtime(folder / "report.html"))
+    key = f"{runs}|{run_id}"
+    with _SUMMARIES_LOCK:
+        hit = _SUMMARIES.get(key)
+    if hit and hit[0] == sig:
+        out = dict(hit[1])
+    else:
+        out = _run_summary(runs, run_id, active_runs)
+        with _SUMMARIES_LOCK:
+            if len(_SUMMARIES) > 20000:
+                _SUMMARIES.clear()
+            _SUMMARIES[key] = (sig, dict(out))
+    return out
+
+
+def _run_summary(runs: Path, run_id: str, active_runs: set[str] = frozenset()) -> dict[str, Any]:
     folder = runs / run_id
     info = _safe_json(folder / "run.json") or {}
     decision = _safe_json(folder / "decision.json")
@@ -935,20 +970,31 @@ def secrets(root: Path) -> list[dict[str, Any]]:
     return out
 
 
+def _private(path: Path) -> None:
+    """Only this user may read the .env file (on Windows the user's folder already keeps it private)."""
+    if os.name != "nt":
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+
+
 def _save_env(root: Path, name: str, value: str) -> None:
     path = root / ".env"
-    lines = path.read_text(encoding="utf-8-sig").splitlines() if path.is_file() else []
-    out, done = [], False
-    for line in lines:
-        if line.strip().removeprefix("export ").partition("=")[0].strip() == name:
-            if not done:
-                out.append(f"{name}={value}")
-                done = True
-            continue
-        out.append(line)
-    if not done:
-        out.append(f"{name}={value}")
-    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+    with file_lock(path):     # the dashboard's threads and other vatf processes may save secrets at once
+        lines = path.read_text(encoding="utf-8-sig").splitlines() if path.is_file() else []
+        out, done = [], False
+        for line in lines:
+            if line.strip().removeprefix("export ").partition("=")[0].strip() == name:
+                if not done:
+                    out.append(f"{name}={value}")
+                    done = True
+                continue
+            out.append(line)
+        if not done:
+            out.append(f"{name}={value}")
+        write_text_atomic(path, "\n".join(out) + "\n")
+        _private(path)
     os.environ[name] = value   # runs and connection tests started from now on use it
 
 

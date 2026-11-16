@@ -27,7 +27,8 @@ from ..loader import ProjectError, load_profile, load_project, schema_errors
 from ..logs import sample_logs
 from .. import recordings
 from ..probe import BackendProbe, ProbeSetupError, check_backend
-from ..util import MissingSecret, expand_env
+from .. import netguard
+from ..util import MissingSecret, expand_env, write_text_atomic
 from . import data
 
 PROJECTS_DIR = "projects"
@@ -261,7 +262,7 @@ def save_profile(root: Path, project: str, file: str, sections: Mapping[str, Any
                     errors.append(str(e))
     if errors:
         return {"saved": False, "problems": errors}
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_text_atomic(path, text, newline="\n")
     detail = profile_detail(root, project, file)
     return {"saved": True, "problems": detail["problems"], "detail": detail}
 
@@ -309,7 +310,7 @@ def save_doc(root: Path, project: str, file: str, doc: Mapping[str, Any], create
     if problems:
         return {"saved": False, "problems": problems}
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8", newline="\n")
+    write_text_atomic(path, text, newline="\n")
     return {"saved": True, "file": file, "problems": others}
 
 
@@ -381,7 +382,8 @@ async def _test_websocket(profile: Mapping[str, Any]) -> dict[str, Any]:
     except MissingSecret as e:
         return {"ok": False, "message": str(e)}
     try:
-        ws = await asyncio.wait_for(websockets.connect(url, max_size=None, ping_interval=None,
+        await asyncio.to_thread(netguard.check_url, url, netguard.WS_SCHEMES)
+        ws = await asyncio.wait_for(websockets.connect(url, max_size=netguard.MAX_RESPONSE, ping_interval=None,
                                                        additional_headers=headers or None), 10)
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "message": f"could not connect to {url}: {type(e).__name__}: {e}"}

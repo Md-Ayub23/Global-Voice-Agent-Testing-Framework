@@ -21,6 +21,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from . import netguard
 from .evidence import utc_now
 from .util import MissingSecret, expand_env, read_json, write_json
 
@@ -96,7 +97,7 @@ def payload(kind: str, text: str, decision: Mapping[str, Any], info: Mapping[str
 def _post(url: str, body: Mapping[str, Any], timeout: float = 10) -> int:
     req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"), method="POST",
                                  headers={"Content-Type": "application/json", "User-Agent": "vocto-alerts"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (the owner's own URL)
+    with netguard.urlopen(req, timeout=timeout) as resp:
         return resp.status
 
 

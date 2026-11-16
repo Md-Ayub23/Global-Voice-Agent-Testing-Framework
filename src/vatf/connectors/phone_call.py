@@ -132,6 +132,18 @@ class TwilioClient:
     def account(self) -> dict[str, Any]:
         return self._request("GET", ".json")
 
+    def own_number(self, number: str) -> dict[str, Any]:
+        """The account's own phone number record (sid, voice_url, voice_method), or ConnectError."""
+        q = urllib.parse.urlencode({"PhoneNumber": number})
+        found = self._request("GET", f"/IncomingPhoneNumbers.json?{q}").get("incoming_phone_numbers") or []
+        if not found or not found[0].get("sid"):
+            raise ConnectError(f"{number} is not a phone number in this Twilio account: an outbound test needs a "
+                               "number Vocto can answer (buy one in Twilio console › Phone Numbers)")
+        return found[0]
+
+    def set_voice_url(self, number_sid: str, url: str, method: str) -> dict[str, Any]:
+        return self._request("POST", f"/IncomingPhoneNumbers/{number_sid}.json", {"VoiceUrl": url, "VoiceMethod": method})
+
     def number_kind(self, number: str) -> str | None:
         """"owned" (a number bought in this account), "verified" (a verified caller id) or None."""
         q = urllib.parse.urlencode({"PhoneNumber": number})
@@ -574,6 +586,7 @@ class PhoneCallConnector:
     sample_rate = SAMPLE_RATE
     _last_dial = 0.0
     _dial_lock: asyncio.Lock | None = None
+    _answer_locks: dict[tuple[int, str], asyncio.Lock] = {}
 
     def __init__(self, profile: Mapping[str, Any], root: Path | None = None, tools: Any = None):
         self._profile = profile
@@ -618,6 +631,8 @@ class PhoneCallConnector:
     async def open(self, ctx: CallContext | None, recorder: Recorder) -> PhoneCallSession:
         if recorder.sr != SAMPLE_RATE:
             raise ConnectError(f"phone calls are 8 kHz; the recorder runs at {recorder.sr} Hz")
+        if ctx is not None and (getattr(ctx, "scenario", None) or {}).get("direction") == "outbound":
+            return await self._answer(ctx, recorder)
         conn, o = self._profile["connection"], self._options()
         to = check_number(conn.get("target", ""), "The agent's phone number")
         client = self.client()
@@ -668,3 +683,68 @@ class PhoneCallConnector:
         line.forget(token)
         return PhoneCallSession(ws, start, done, recorder, client, meta,
                                 jitter_ms=int(o.get("jitter_buffer_ms", JITTER_MS)), ref=ref)
+
+    async def _answer(self, ctx: CallContext, recorder: Recorder) -> PhoneCallSession:
+        """An outbound test: the agent calls Vocto. Vocto's own Twilio number (options.outbound.answer_number,
+        default from_number) is pointed at this call's stream for as long as it takes the agent to ring,
+        then put back as it was. Vocto starts the agent's call through options.outbound.trigger_url (the
+        agent's own "make a call" API), or waits for someone to start it."""
+        from . import call_metadata
+        from .. import netguard
+
+        o = self._options()
+        if self._provider() != "twilio":
+            raise ConnectError("outbound tests over a real phone line work with Twilio for now "
+                               "(use a websocket or Twilio-stream connection to test outbound calls on Plivo)")
+        out = dict(o.get("outbound") or {})
+        client = self.client()
+        ours = check_number(out.get("answer_number") or o.get("from_number", ""), "The number the agent calls")
+        wait_s = int(out.get("wait_s") or 90)
+        public = str(o.get("public_url") or "").strip()
+        port = int(o.get("line_port") or (LINE_PORT if public and public != "local" else 0))
+        line = await PhoneLine.get(self._root, public, port)
+        lock = type(self)._answer_locks.setdefault((id(asyncio.get_running_loop()), ours), asyncio.Lock())
+        async with lock:                 # one outbound test per answering number at a time
+            try:
+                record = await asyncio.to_thread(client.own_number, ours)
+            except ProviderError as e:
+                raise ConnectError(f"Twilio: {e}") from e
+            token = secrets.token_urlsafe(18)
+            params = f'<Parameter name="test_id" value="{escape(ctx.test_id)}"/>'
+            line.answers[token] = (f'<?xml version="1.0" encoding="UTF-8"?><Response><Connect>'
+                                   f'<Stream url="{escape(line.public)}/stream/{token}">{params}</Stream>'
+                                   f"</Connect></Response>")
+            waiting = line.expect(token)
+            before = (str(record.get("voice_url") or ""), str(record.get("voice_method") or "POST"))
+            try:
+                await asyncio.to_thread(client.set_voice_url, record["sid"], f"{line.http_public}/answer/{token}", "GET")
+                if out.get("trigger_url"):
+                    meta = call_metadata(ctx)
+                    body = {"to": ours, "test_id": ctx.test_id, **(meta.get("outbound") or {})}
+                    headers = {"Content-Type": "application/json", **{str(k): str(v) for k, v in
+                                                                      (out.get("trigger_headers") or {}).items()}}
+                    url = str(out["trigger_url"])
+                    try:
+                        req = urllib.request.Request(netguard.check_url(url), data=json.dumps(body).encode(),
+                                                     headers=headers, method="POST")
+                        await asyncio.to_thread(lambda: netguard.urlopen(req, 20).close())
+                    except (urllib.error.URLError, OSError) as e:
+                        raise ConnectError(f"the agent's call could not be started ({url}): {e}") from e
+                try:
+                    ws, start, done = await asyncio.wait_for(asyncio.shield(waiting), wait_s)
+                except asyncio.TimeoutError:
+                    raise ConnectError(f"the agent did not call {ours} within {wait_s} s") from None
+            except ProviderError as e:
+                raise ConnectError(f"Twilio: {e}") from e
+            finally:
+                answered = line.answered.get(token) or {}
+                line.forget(token)
+                try:
+                    await asyncio.to_thread(client.set_voice_url, record["sid"], *before)
+                except Exception:  # noqa: BLE001 - the call goes on; the number is put back next time
+                    pass
+        sid = str(answered.get("CallSid") or "")
+        meta = {"provider": client.name, "call_sid": sid, "to": ours, "from": str(answered.get("From") or ""),
+                "direction": "outbound"}
+        return PhoneCallSession(ws, start, done, recorder, client, meta,
+                                jitter_ms=int(o.get("jitter_buffer_ms", JITTER_MS)), ref=sid)

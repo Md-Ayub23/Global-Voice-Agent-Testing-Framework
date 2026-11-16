@@ -15,6 +15,7 @@ const STATUS: Record<string, [Tone, StatusIcon, string]> = {
   NEEDS_REVIEW: ["warn", "help", "Needs review"],
   NOT_APPLICABLE: ["neutral", "minus", "N/A"],
   running: ["run", null, "Running"],
+  queued: ["neutral", "minus", "Waiting to start"],
   finished: ["good", "check", "Finished"],
   stopped: ["neutral", "stop", "Stopped"],
   interrupted: ["neutral", "stop", "Interrupted"],

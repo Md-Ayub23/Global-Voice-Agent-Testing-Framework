@@ -29,6 +29,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Callable, Mapping, Sequence
 
+from . import netguard
 from .contracts.models import CallContext
 from .contracts.observers import EventSink
 from .util import expand_env
@@ -225,8 +226,8 @@ def _http_call(method: str, url: str, args: Mapping[str, Any], headers: Mapping[
         req = urllib.request.Request(url, data=json.dumps(args).encode("utf-8"), method=method,
                                      headers={"Content-Type": "application/json", **headers})
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read().decode("utf-8")
+        with netguard.urlopen(req, timeout=30) as resp:
+            raw = netguard.read_limited(resp).decode("utf-8")
             try:
                 return resp.status, json.loads(raw) if raw else None
             except ValueError:

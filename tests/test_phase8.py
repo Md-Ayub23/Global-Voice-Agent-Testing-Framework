@@ -450,6 +450,15 @@ def test_listener_needs_the_token_and_takes_calls(clinic, monkeypatch):
         assert post(port, "/ingest/clinic", b"not json, no speakers", {"X-Vocto-Token": "s3cret-token"})[0] == 400
         assert post(port, "/ingest/clinic?token=s3cret-token", vapi_call()) == (202, {"accepted": 1})
         assert post(port, "/ingest", retell_call(), {"Authorization": "Bearer s3cret-token"}) == (202, {"accepted": 1})
+        # a platform's own login header must not hide the ?token= in the URL
+        assert post(port, "/ingest/clinic?token=s3cret-token", {"message": {"type": "status-update"}},
+                    {"Authorization": "Basic dXNlcjpwYXNz"})[0] == 200
+        assert post(port, "/ingest/clinic?token=s3cret-token", {"message": {"type": "status-update"}},
+                    {"Authorization": "Bearer platform-own"})[0] == 200
+        assert post(port, "/ingest/clinic?token=nope", {"message": {"type": "status-update"}},
+                    {"Authorization": "Basic dXNlcjpwYXNz"})[0] == 401
+        assert post(port, "/ingest/clinic", {"message": {"type": "status-update"}},
+                    {"Authorization": "bearer s3cret-token"})[0] == 200
         for _ in range(100):
             if len(m.store.index()) == 2:
                 break

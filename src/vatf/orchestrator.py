@@ -7,12 +7,14 @@ import asyncio
 import re
 import secrets
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from . import claimread, modes, recordings, statewatch
+import numpy as np
+
+from . import calls, claimread, modes, recordings, statewatch
 from .attacks import is_safety
 from .calibration import calibration
 from .caller import LLMCaller, LLMValidator, RuleCaller, ScriptedCaller, ScriptThenLLM, follow_up_scenario
@@ -44,6 +46,7 @@ from .verdict import LocalVerdictBuilder, merge_results
 
 FOLLOW_UP_TURNS = 6   # caller turns Claude adds after a scripted call's fixed lines (limits.follow_up_turns)
 MAX_WENT_ON = 3   # voice: times one agent turn may go on again before the caller answers anyway
+RECORDING = "audio/call.wav"   # the call recording, inside the call folder (as voice_call.RECORDING)
 
 
 class RunSetupError(ProjectError):
@@ -573,11 +576,7 @@ class Orchestrator:
             cond = self._conditions(scenario, ctx.test_id, pc.conditions) if self.mode == "voice" else None
             writer.emit("connector", "call_started", {"test_id": ctx.test_id, "mode": self.mode,
                                                       **({"conditions": cond.summary()} if cond else {})})
-            caller = self._caller(scenario, meta)
-            if self.mode == "voice":
-                ended_by, reason, turn = await self._converse_voice(ctx, scenario, caller, proxy, writer, live, cond)
-            else:
-                ended_by, reason, turn = await self._converse_text(ctx, scenario, caller, proxy, writer, live)
+            ended_by, reason, turn = await self._converse(ctx, scenario, meta, proxy, writer, live, cond)
             writer.emit("connector", "call_ended", {"ended_by": ended_by, "reason": reason,
                                                     **live.pop("recording", {})}, turn=turn)
             ended = True
@@ -589,7 +588,8 @@ class Orchestrator:
             if logs.enabled:
                 await self._collect_logs(logs, ctx, writer)
 
-            if scenario["style"] == "simulated" and not self.config.offline and self.config.caller != "free":
+            if (scenario["style"] == "simulated" and not self.config.offline and self.config.caller != "free"
+                    and not scenario.get("returning") and not calls.is_voicemail(scenario)):
                 validator = LLMValidator(self.llm, model=self.config.validator_model, metadata=meta)
                 res = await validator.validate(CallTrace(writer.record, writer.events), scenario)
                 validator_off_script = not res.on_script
@@ -708,15 +708,71 @@ class Orchestrator:
                      else scenario["caller"].get("max_turns", limits.get("max_turns", 30)))
         return max_turns, time.monotonic() + limits.get("max_call_seconds", 300)
 
-    async def _converse_text(self, ctx, scenario, caller, proxy, writer, live) -> tuple[str, str, int]:
+    async def _converse(self, ctx, scenario, meta, proxy, writer, live, cond) -> tuple[str, str, int]:
+        """One test call, or a returning caller's chain of calls (scenario `returning`): after each call the
+        same caller rings again, the backend as the call left it. Turn numbers run on across the chain."""
+        legs = calls.legs(scenario)
+        turn, ended_by, reason = 0, "caller", ""
+        remembered: dict[str, str] = {}
+        for k, leg in enumerate(legs, 1):
+            last = k == len(legs)
+            if k > 1:
+                remembered.update(calls.remember(scenario, list(writer.events)))
+                leg = calls.with_remembered(leg, remembered)
+                writer.emit("harness", "harness_event", {
+                    "level": "info", "code": "call_part_ended", "call": k - 1, "ended_by": ended_by,
+                    "message": f"Call {k - 1} ended: {reason or ended_by}."}, turn=turn)
+                await asyncio.sleep(calls.gap_s(scenario, k))
+                writer.emit("harness", "harness_event", {
+                    "level": "info", "code": "next_call", "call": k, "first_turn": turn + 1,
+                    "remembered": sorted(remembered),
+                    "message": f"Call {k}: the same caller rings again" + (f" ({leg['title']})" if leg.get("title") else "")
+                               + "."}, turn=turn + 1)
+            caller = self._caller(leg, meta)
+            leg_ctx = ctx if k == 1 else replace(ctx, scenario=leg)     # the agent hears of each call as it is
+            if self.mode == "voice":
+                ended_by, reason, turn = await self._converse_voice(leg_ctx, leg, caller, proxy, writer, live, cond,
+                                                                    turn0=turn, last_leg=last)
+            else:
+                ended_by, reason, turn = await self._converse_text(leg_ctx, leg, caller, proxy, writer, live, turn0=turn)
+        return ended_by, reason, turn
+
+    async def _converse_text(self, ctx, scenario, caller, proxy, writer, live, turn0: int = 0) -> tuple[str, str, int]:
         try:
             session = await build_connector(self.profile, self.config.root, proxy).open(ctx, writer.now_ms)
         except ConnectError as e:
             raise HarnessError("connect_failed", str(e)) from e
         live["session"] = session
         greeting = await session.receive()
-        writer.emit("connector", "agent_turn", {"heard_text": greeting.text or ""}, turn=1)
-        heard, turn = greeting.text or "", 1
+        turn = turn0 + 1
+        if scenario.get("direction") == "outbound":
+            # The agent rang; Vocto picks up. Words the agent sent before anyone answered are kept (and
+            # marked): an outbound agent should wait for the pickup.
+            if greeting.text:
+                writer.emit("connector", "agent_turn", {"heard_text": greeting.text, "before_pickup": True}, turn=turn)
+            words, data = calls.pickup(scenario)
+            proxy.turn = turn
+            writer.emit("caller", "caller_turn", {"text": words, **data}, turn=turn)
+            try:
+                await session.send_text(words)
+            except Exception as e:  # noqa: BLE001 - the agent failing to answer the pickup is the agent's fault
+                writer.emit("harness", "harness_event", {"level": "error", "code": "agent_exception",
+                                                         "message": f"{type(e).__name__}: {e}"}, turn=turn)
+                await session.close()
+                live.pop("session", None)
+                return "agent", "the agent raised an error", turn
+            greeting = await session.receive()
+            if calls.is_voicemail(scenario):
+                # A voicemail records one message and says nothing back.
+                writer.emit("connector", "agent_turn", {"heard_text": greeting.text or "", "voicemail_message": True},
+                            turn=turn)
+                closed = session.has_output() and (await session.receive()).kind == "closed"
+                await session.close()
+                live.pop("session", None)
+                return (("agent", "the agent hung up after its message", turn) if closed
+                        else ("caller", "the voicemail stopped recording", turn))
+        writer.emit("connector", "agent_turn", {"heard_text": greeting.text or ""}, turn=turn)
+        heard = greeting.text or ""
         ended_by, reason = None, ""
         max_turns, deadline = self._limits(scenario)
         caller_turns = 0
@@ -802,7 +858,8 @@ class Orchestrator:
         persona = self.project.personas.get((scenario.get("caller") or {}).get("persona", ""), {})
         return call_language(self.profile, persona)
 
-    async def _converse_voice(self, ctx, scenario, caller, proxy, writer, live, cond=None) -> tuple[str, str, int]:
+    async def _converse_voice(self, ctx, scenario, caller, proxy, writer, live, cond=None, turn0: int = 0,
+                              last_leg: bool = True) -> tuple[str, str, int]:
         from .audio.line import LineEffects, NetworkJitter
         from .audio.noise import load_noise
         from .audio.recorder import Line, Recorder
@@ -813,7 +870,8 @@ class Orchestrator:
 
         connector = build_connector(self.profile, self.config.root, proxy)
         sr = connector.sample_rate
-        rec = Recorder(sr, writer.elapsed)
+        # A returning caller's calls share one recorder: one recording of the whole chain, on one clock.
+        rec = live.get("recorder") if live.get("recorder") is not None and live["recorder"].sr == sr else Recorder(sr, writer.elapsed)
         limits = self.profile.get("limits", {})
         audio = scenario.get("audio", {})
         persona = self.project.personas.get(scenario.get("caller", {}).get("persona", ""), {})
@@ -861,9 +919,20 @@ class Orchestrator:
             except Exception as e:
                 raise HarnessError("speech_setup_failed", f"background voice {other}: {type(e).__name__}: {e}") from e
 
-        heard = await conv.listen(since=answered, caller_end=None, turn=1)
-        conv.emit_agent_turn(heard, 1, None, answered=answered)
-        turn, caller_turns, silent = 1, 0, 0
+        turn = turn0 + 1
+        if scenario.get("direction") == "outbound":
+            words, data = calls.pickup(scenario)
+            if calls.is_voicemail(scenario):
+                return await self._voicemail(conv, scenario, words, data, turn, writer, live, last_leg)
+            p_start, p_end = await conv.say(words, turn, emit=False)
+            writer.emit("caller", "caller_turn", {"text": words, **data, "audio": {
+                "file": RECORDING, "start_ms": rec.ms(p_start), "end_ms": rec.ms(p_end)}}, turn=turn, t_ms=rec.ms(p_start))
+            heard = await conv.listen(since=answered, caller_end=p_end, turn=turn)
+            conv.emit_agent_turn(heard, turn, p_end)
+        else:
+            heard = await conv.listen(since=answered, caller_end=None, turn=turn)
+            conv.emit_agent_turn(heard, turn, None, answered=answered)
+        caller_turns, silent = 0, 0
         if heard.interrupted:          # a scenario cut-in on the greeting (audio.barge_in agent_turn 1)
             heard, turn, caller_turns = await self._after_cut_in(conv, caller, heard, turn, caller_turns)
         ended_by, reason = None, ""
@@ -913,7 +982,64 @@ class Orchestrator:
             if heard.interrupted:
                 heard, turn, caller_turns = await self._after_cut_in(conv, caller, heard, turn, caller_turns)
             silent = silent + 1 if heard.start is None else 0
-        await self._hang_up(live, writer)
+        if last_leg:
+            await self._hang_up(live, writer)
+        else:
+            await self._end_leg(live)
+        return ended_by, reason, turn
+
+    async def _end_leg(self, live: dict[str, Any]) -> None:
+        """One call of a returning caller's chain is over: hang up, keep the recorder for the next call."""
+        line, session, tap = live.pop("line", None), live.pop("session", None), live.pop("tap", None)
+        if line is not None:
+            await line.stop()
+        if tap is not None:
+            await tap.stop()
+        if session is not None:
+            try:
+                await session.close()
+            except Exception:  # noqa: BLE001 - the next call starts anyway
+                pass
+
+    async def _voicemail(self, conv, scenario, words: str, data: dict[str, Any], turn: int, writer,
+                         live: dict[str, Any], last_leg: bool) -> tuple[str, str, int]:
+        """Outbound call answered by voicemail: the greeting, the beep, then silence while it records.
+        Ends when the agent hangs up, or when the voicemail stops recording (max_message_s, or the agent
+        has said nothing more for a while after its message)."""
+        rec = conv.rec
+        settings = calls.voicemail_settings(scenario)
+        greeting = await conv.synthesize(words)
+        parts = [greeting]
+        if settings["beep"]:
+            parts += [np.zeros(int(rec.sr * 0.35), dtype=np.float32), calls.beep(rec.sr)]
+        start, end = await conv.say(words, turn, clip=np.concatenate(parts), emit=False)
+        writer.emit("caller", "caller_turn", {"text": words, **data,
+                                              "audio": {"file": RECORDING, "start_ms": rec.ms(start),
+                                                        "end_ms": rec.ms(end)},
+                                              "beep_end_ms": rec.ms(end) if settings["beep"] else None},
+                    turn=turn, t_ms=rec.ms(start))
+        heard = await conv.listen(since=start, caller_end=end, turn=turn)
+        conv.emit_agent_turn(heard, turn, end)
+        deadline = end + settings["max_message_s"] * rec.sr
+        quiet_s = 4.0
+        while not conv._done() and rec.now_sample() < deadline:
+            if conv.agent_went_on():
+                heard = await conv.hear_rest(turn)
+                conv.emit_agent_turn(heard, turn, None)
+                continue
+            last = max([e for _, e in rec.agent_spans(start, rec.now_sample())] or [end])
+            if rec.now_sample() - last > quiet_s * rec.sr:
+                break
+            await asyncio.sleep(0.1)
+        if conv._done():
+            ended_by, reason = "agent", "the agent hung up after its message"
+        else:
+            ended_by, reason = "caller", ("the voicemail stopped recording (time limit)" if rec.now_sample() >= deadline
+                                          else "the voicemail stopped recording")
+        if last_leg:
+            await self._hang_up(live, writer)
+        else:
+            await self._end_leg(live)
         return ended_by, reason, turn
 
     async def _clip(self, conv, action):
@@ -961,7 +1087,7 @@ class Orchestrator:
         end = spoke if spoke is not None else max(deadline, start)
         data: dict[str, Any] = {"kind": "silence", "text": "", "quiet_ms": cond.behaviour.quiet_ms,
                                 "agent_spoke_after_ms": rec.ms(spoke - start) if spoke is not None else None,
-                                "audio": {"file": "audio/call.wav", "start_ms": rec.ms(start), "end_ms": rec.ms(end)}}
+                                "audio": {"file": RECORDING, "start_ms": rec.ms(start), "end_ms": rec.ms(end)}}
         writer.emit("caller", "caller_sound", data, turn=turn, t_ms=rec.ms(start))
 
     async def _hang_up(self, live: dict[str, Any], writer) -> None:

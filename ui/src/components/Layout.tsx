@@ -3,6 +3,7 @@
 // (one page per test type, each with a status dot), its results, and its settings at the bottom.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { useApp, useLoad } from "../lib/app";
 import { cx } from "../lib/format";
 import { connectionWords, mainProfile, projectByKey, projectHref, projectOfJob } from "../lib/links";
@@ -104,6 +105,7 @@ function ProjectSwitcher({ projectKey }: { projectKey: string }) {
 
 export function Layout({ section, projectKey, children }: { section: string; projectKey: string | null; children: ReactNode }) {
   const { system, offline, activeJob, crumbs, projects } = useApp();
+  const { user, signOut } = useAuth();
   const [navOpen, setNavOpen] = useState(false);
   const [theme, setTheme] = useState(currentTheme);
   const [scrolled, setScrolled] = useState(false);
@@ -218,6 +220,15 @@ export function Layout({ section, projectKey, children }: { section: string; pro
               <a href="#/settings" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-warn-soft text-warn font-bold hover:no-underline"><Icon name="key" size={13} />No API key</a>
             ) : null}
           </div>
+          {user && (
+            <div className="flex items-center gap-2 -mx-1 px-1 py-1 rounded-[12px]" id="user-menu">
+              <a href="#/account" className="flex items-center gap-2 min-w-0 flex-1 text-ink hover:no-underline" title="Your account">
+                <span className="size-[26px] rounded-full grid place-items-center bg-accent-soft text-accent-ink text-[11.5px] font-bold flex-none">{(user.name || user.username).slice(0, 2).toUpperCase()}</span>
+                <span className="min-w-0 leading-tight"><b className="block truncate text-[13px]">{user.name || user.username}</b><span className="text-muted text-[12px]">{user.role}</span></span>
+              </a>
+              <Button variant="ghost" size="sm" iconOnly icon="logout" title="Sign out" aria-label="Sign out" id="sign-out" onClick={() => void signOut()} />
+            </div>
+          )}
           <div className="flex items-center">
             <span>Vocto {system?.version || ""}</span>
             <span className="flex-1" />
@@ -246,7 +257,7 @@ export function Layout({ section, projectKey, children }: { section: string; pro
           {activeJob && (
             <a href={jobProject ? projectHref(jobProject.key, `/live/${activeJob.id}`) : "#/"} id="active-pill"
               className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-soft text-accent-ink text-[13px] font-semibold whitespace-nowrap hover:no-underline animate-rise">
-              <LiveDot /><span className="hidden sm:inline">{activeJob.kind === "exit-check" ? "Exit check running" : "Run in progress"}{jobProject ? ` · ${jobProject.name}` : ""}</span>
+              <LiveDot /><span className="hidden sm:inline">{activeJob.status === "queued" ? "Run waiting to start" : activeJob.kind === "exit-check" ? "Exit check running" : "Run in progress"}{jobProject ? ` · ${jobProject.name}` : ""}</span>
               <span className="sm:hidden">Live</span>
             </a>
           )}
