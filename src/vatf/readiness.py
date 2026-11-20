@@ -426,8 +426,12 @@ def _error_finding(verdicts, calls: _Calls, titles) -> _Finding | None:
         return None
     why = []
     for v in errs:
-        w = (v.get("load") or {}).get("why") or next((c["message"] for c in v.get("checks", [])
-                                                       if c["result"] in ("ERROR", "NOT_VERIFIED")), "")
+        # Why the call stopped, best first: the load test's note, Vocto's own error in the call (the agent
+        # unreachable, a missing secret), then a check that couldn't decide.
+        harness = next((str((e.get("data") or {}).get("message") or "") for e in calls.events(v["test_id"])
+                        if e.get("type") == "harness_event" and (e.get("data") or {}).get("level") == "error"), "")
+        w = (v.get("load") or {}).get("why") or harness.removeprefix("HarnessError: ") or next(
+            (c["message"] for c in v.get("checks", []) if c["result"] in ("ERROR", "NOT_VERIFIED")), "")
         if w and w not in why:
             why.append(w)
     f = _Finding(("error",), "evidence", "Some calls could not be completed",
@@ -436,6 +440,7 @@ def _error_finding(verdicts, calls: _Calls, titles) -> _Finding | None:
                  + ("; ".join(_short(w, 120) for w in why[:3]) or "see each call for the error") + ".",
                  fix="Check that the agent is running and reachable, then run again. These never count against the agent.",
                  cause="setup")
+    f.messages = [_short(w, 160) for w in why[:3]]
     for v in errs:
         f.scenarios[v["scenario_id"]] = f.scenarios.get(v["scenario_id"], 0) + 1
         f.failed_calls.append(v["test_id"])
@@ -608,16 +613,24 @@ def _scorecard(decision, verdicts, findings, info, voice, faulty) -> list[dict[s
     rows: dict[str, dict[str, Any]] = {}
     rel = [r for r in decision.get("reliability", []) if not r["scenario_id"].startswith("safety.")
            and r["scenario_id"] not in faulty]
-    if rel:
-        passed = sum(bool(r["pass_hat_k"]) for r in rel)
-        crit_bad = [r for r in rel if r["criticality"] == "critical" and r["failed"]]
-        st = "fail" if crit_bad else ("watch" if passed < len(rel) else "pass")
+    # Only test cases with at least one clear result count: a case whose calls Vocto couldn't complete
+    # (the agent unreachable, say) has neither passed nor failed, and must not read as a failure.
+    judged = [r for r in rel if r["passed"] or r["failed"]]
+    unjudged = len(rel) - len(judged)
+    if rel and not judged:
+        rows["task"] = _row("task", "watch", f"None of {_plural(len(rel), 'test case')} could be judged",
+                            "No call gave a clear result: see Test evidence for why")
+    elif rel:
+        passed = sum(bool(r["pass_hat_k"]) for r in judged)
+        crit_bad = [r for r in judged if r["criticality"] == "critical" and r["failed"]]
+        st = "fail" if crit_bad else ("watch" if passed < len(judged) or unjudged else "pass")
         st = "fail" if st != "fail" and status_of("task") == "fail" else st
-        rows["task"] = _row("task", st, f"{passed} of {_plural(len(rel), 'test case')} passed every repeat",
-                            f"{_plural(len(crit_bad), 'key test case')} failed" if crit_bad else
-                            ("Every key test case passed every repeat" if passed == len(rel) else
-                             "Some test cases failed at least one repeat"),
-                            percent=_pct(passed, len(rel)), range=_range(passed, len(rel)))
+        not_judged = f" · {unjudged} not judged" if unjudged else ""
+        rows["task"] = _row("task", st, f"{passed} of {_plural(len(judged), 'test case')} passed every repeat",
+                            (f"{_plural(len(crit_bad), 'key test case')} failed" if crit_bad else
+                             ("Every key test case passed every repeat" if passed == len(judged) else
+                              "Some test cases didn't pass every repeat")) + not_judged,
+                            percent=_pct(passed, len(judged)), range=_range(passed, len(judged)))
     action_checks = [c for v in own if v["scenario_id"] not in faulty for c in v.get("checks", [])
                      if _area_of(c, v["scenario_id"], voice, False) == "actions"]
     ok, n = _rate(action_checks)
@@ -687,10 +700,17 @@ def _scorecard(decision, verdicts, findings, info, voice, faulty) -> list[dict[s
         rows["resilience"] = _row("resilience", st, f"Handled {len(handled)} of {_plural(len(fails), 'kind')} of failure",
                                   sub, percent=_pct(len(handled), len(fails)), range=_range(len(handled), len(fails)))
     elif fault_rel:
-        passed = sum(bool(r["pass_hat_k"]) for r in fault_rel)
-        st = status_of("resilience", "pass" if passed == len(fault_rel) else "watch")
-        rows["resilience"] = _row("resilience", st, f"{passed} of {_plural(len(fault_rel), 'failure test')} handled well",
-                                  "A tool broken on purpose: did the agent stay honest?", percent=_pct(passed, len(fault_rel)), range=_range(passed, len(fault_rel)))
+        fault_judged = [r for r in fault_rel if r["passed"] or r["failed"]]
+        if not fault_judged:
+            rows["resilience"] = _row("resilience", "watch", f"None of {_plural(len(fault_rel), 'failure test')} could be judged",
+                                      "No call gave a clear result: see Test evidence for why")
+        else:
+            passed = sum(bool(r["pass_hat_k"]) for r in fault_judged)
+            st = status_of("resilience", "pass" if passed == len(fault_judged) == len(fault_rel) else "watch")
+            rows["resilience"] = _row("resilience", st, f"{passed} of {_plural(len(fault_judged), 'failure test')} handled well",
+                                      "A tool broken on purpose: did the agent stay honest?"
+                                      + (f" · {len(fault_rel) - len(fault_judged)} not judged" if len(fault_judged) < len(fault_rel) else ""),
+                                      percent=_pct(passed, len(fault_judged)), range=_range(passed, len(fault_judged)))
     load = decision.get("load")
     if load:
         st = "fail" if decision.get("decision") == "NO_GO" else status_of("load")
@@ -890,6 +910,15 @@ def _verdict(decision, findings, bugs: str | None, mode_id: str = "full") -> dic
         return {"level": "not_ready", "code": code, "headline": f"{word}: {_plural(n, 'blocking issue')}",
                 "line": f"Fix first: {first[0].lower() + first[1:] if first else ''}." + note}
     reason = decision["reasons"][0]["message"] if decision.get("reasons") else ""
+    cov = decision.get("coverage") or {}
+    err = next((f for f in findings if f["kind"] == "error"), None)
+    if err and not cov.get("verified_calls") and cov.get("error_calls"):
+        # Not one call was completed: say why first (the agent unreachable, a missing secret...), not "0 of 3".
+        return {"level": "not_enough_evidence", "code": code, "headline": LEVELS["not_enough_evidence"],
+                "line": f"Vocto couldn't complete any of the {_plural(cov['error_calls'], 'call')}, so nothing about "
+                        f"the agent was judged" + (f": {err['messages'][0].rstrip('.')}." if err.get("messages") else ".")
+                        + " Check that the agent is running and reachable (Connect › Test connection), then run again."
+                        + note}
     return {"level": "not_enough_evidence", "code": code, "headline": LEVELS["not_enough_evidence"],
             "line": (("Vocto couldn't give a clear answer yet: " + reason[0].lower() + reason[1:]) if reason else
                      "Vocto couldn't give a clear answer yet.") + note}

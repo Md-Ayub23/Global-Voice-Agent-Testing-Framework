@@ -53,7 +53,8 @@ properties:
           URL (docs/voice-protocol.md). twilio_media_stream: the ws(s) URL of the agent's Twilio Media Streams
           server, the one a TwiML <Stream url> would point at (docs/twilio-protocol.md).
           phone_call: the agent's real phone number in international format (+14155550123); Vocto rings it
-          through the team's Twilio or Plivo account (docs/phone-guide.md). sip: a phone number or SIP URI. platform: an agent id on the platform.
+          through the team's Twilio or Plivo account (docs/phone-guide.md). sip: a phone number or SIP URI.
+          platform: the agent's id on the platform (see platform).
         type: string
       launch:
         description: >
@@ -61,7 +62,11 @@ properties:
           It is called as launch(tools=<tool proxy>, options=<options>) and returns an object
           with .url and async close(). Without it, vatf dials target.
         type: string
-      platform: {enum: [vapi, retell, livekit, pipecat, elevenlabs]}
+      platform:
+        description: >
+          type platform: the hosted platform (docs/platforms-guide.md). target is the agent's id there (Vapi:
+          the assistant id; Retell and ElevenLabs: the agent id; LiveKit: the agent name to dispatch, or empty).
+        enum: [vapi, retell, livekit, elevenlabs]
       audio:
         type: object
         properties:
@@ -82,6 +87,11 @@ properties:
           answer_number, a number in the account that Vocto answers, default from_number; trigger_url, the agent's
           own "make a call" API, POSTed {to, test_id, ...the test's outbound details}; trigger_headers; wait_s,
           default 90).
+          platform: api_key (as ${NAME}; ElevenLabs: optional for a public agent), LiveKit also api_secret and
+          url (the LiveKit server, wss://...), room_prefix; variables (values for the agent's {{name}} prompt
+          variables: Vapi variableValues, Retell dynamic variables, ElevenLabs dynamic_variables, LiveKit job
+          metadata; "$fact" takes the test caller's fact), report_wait_s (how long to wait for the platform's
+          record of a call, default 45), agent_wait_s (LiveKit: for the agent to join, default 20).
         type: object
       offline_options:
         description: Merged into options for --offline runs (agents in this repo only), so nothing calls an API.
@@ -160,7 +170,8 @@ properties:
         enum: [sql, rest, none]
       connection:
         description: >
-          sql: sqlite:///path/to/file.db or postgresql://user:${PG_PASSWORD}@host:5432/db (read-only use).
+          sql: sqlite:///path/to/file.db, postgresql://user:${PG_PASSWORD}@host:5432/db or
+          mysql://user:${MYSQL_PASSWORD}@host:3306/db (MySQL or MariaDB; add ?ssl=true for TLS). Read-only use.
           rest: the API's base URL. Secrets as ${NAME}.
         type: string
       headers:

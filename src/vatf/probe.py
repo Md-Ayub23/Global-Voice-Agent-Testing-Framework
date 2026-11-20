@@ -4,9 +4,10 @@ backend.access and backend.connection in the profile say where the truth lives:
 
   sql   sqlite:///relative/or/absolute/path.db    (relative to the repo folder vatf runs from)
         postgresql://user:${PG_PASSWORD}@host:5432/dbname   (needs `uv sync --extra postgres`)
+        mysql://user:${MYSQL_PASSWORD}@host:3306/dbname      (MySQL and MariaDB)
   rest  https://api.example.com                   probes are "GET /path?x=:name" against it
 
-Probes only read: SQLite is opened read-only, Postgres sessions are read-only transactions, and
+Probes only read: SQLite is opened read-only, Postgres and MySQL sessions are read-only transactions, and
 REST probes are GET requests. Secrets are written as ${NAME} and read from the .env file.
 A probe that cannot run is reported as ok=False (a harness problem, never the agent's fault).
 """
@@ -25,7 +26,20 @@ from typing import Any, Mapping
 from . import netguard
 from .contracts.models import CallContext
 from .contracts.observers import ProbeResult
-from .util import MissingSecret, expand_env
+from .util import MissingSecret, expand_env, private_file_problem
+
+
+def _guard_sqlite(conn: "sqlite3.Connection") -> "sqlite3.Connection":
+    """A query or fixture may use the agent's database only: never ATTACH another file (Vocto's own
+    users store, say) and never write a copy somewhere else (VACUUM INTO)."""
+    def authorizer(action, arg1, arg2, db, source):
+        if action in (sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH):
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    conn.set_authorizer(authorizer)
+    return conn
+
 
 BIND = re.compile(r"(?<![\w:]):([A-Za-z_]\w*)")
 MAX_ROWS = 500
@@ -36,7 +50,7 @@ class ProbeSetupError(Exception):
 
 
 def backend_kind(profile: Mapping[str, Any]) -> str:
-    """sqlite, postgres, rest or none."""
+    """sqlite, postgres, mysql, rest or none."""
     backend = profile.get("backend", {})
     access = backend.get("access", "none")
     if access == "rest":
@@ -48,7 +62,27 @@ def backend_kind(profile: Mapping[str, Any]) -> str:
         return "sqlite"
     if conn.startswith(("postgresql://", "postgres://")):
         return "postgres"
-    raise ProbeSetupError(f"backend.connection must start with sqlite:/// or postgresql://, got {conn!r}")
+    if conn.startswith(("mysql://", "mariadb://")):
+        return "mysql"
+    raise ProbeSetupError("backend.connection must start with sqlite:///, postgresql:// or mysql://, "
+                          f"got {_redacted(conn)!r}")
+
+
+def _redacted(conn: str) -> str:
+    """A database address without its password (for messages)."""
+    p = urllib.parse.urlsplit(conn)
+    if p.password:
+        return conn.replace(f":{p.password}@", ":•••@")
+    return conn
+
+
+def _db_host_allowed(conn: str, default_port: int) -> None:
+    """The SSRF guard for database addresses: the same host rules as web addresses (netguard)."""
+    p = urllib.parse.urlsplit(conn)
+    try:
+        netguard.check_url(f"http://{p.hostname or ''}:{p.port or default_port}/", netguard.HTTP_SCHEMES)
+    except netguard.BlockedURL as e:
+        raise ProbeSetupError(f"the database address is not allowed: {e.reason}") from None
 
 
 def sqlite_path(profile: Mapping[str, Any], root: Path) -> Path:
@@ -56,7 +90,11 @@ def sqlite_path(profile: Mapping[str, Any], root: Path) -> Path:
     if not conn.startswith("sqlite:///"):
         raise ProbeSetupError(f"not a sqlite:/// backend: {conn!r}")
     path = Path(conn[len("sqlite:///"):])
-    return path if path.is_absolute() else root / path
+    path = path if path.is_absolute() else root / path
+    problem = private_file_problem(path)
+    if problem:
+        raise ProbeSetupError(f"backend.connection: {problem}")
+    return path
 
 
 def _connection(profile: Mapping[str, Any]) -> str:
@@ -76,6 +114,47 @@ def _pg_connect(profile: Mapping[str, Any], read_only: bool = True):
     except psycopg.Error as e:
         raise ProbeSetupError(f"could not connect to Postgres: {e}") from e
     conn.read_only = read_only
+    return conn
+
+
+def _mysql_connect(profile: Mapping[str, Any], read_only: bool = True):
+    """mysql://user:password@host:3306/db?ssl=true (also mariadb://). PyMySQL, pure Python."""
+    try:
+        import pymysql
+        import pymysql.cursors
+    except ImportError as e:
+        raise ProbeSetupError("MySQL needs the pymysql package: run `uv sync`") from e
+    # The password is taken apart before ${NAME}s are filled in, so one with / ? # @ in it needs no escaping.
+    raw = str(profile.get("backend", {}).get("connection", ""))
+    raw_pw = urllib.parse.urlsplit(raw).password
+    try:
+        url = expand_env(raw.replace(f":{raw_pw}@", "@", 1) if raw_pw else raw)
+        password = expand_env(urllib.parse.unquote(raw_pw)) if raw_pw else ""
+    except MissingSecret as e:
+        raise ProbeSetupError(str(e)) from e
+    p = urllib.parse.urlsplit(url)
+    _db_host_allowed(url, 3306)
+    q = dict(urllib.parse.parse_qsl(p.query))
+    db = urllib.parse.unquote(p.path.lstrip("/"))
+    if not p.hostname or not db:
+        raise ProbeSetupError("backend.connection must look like mysql://user:${MYSQL_PASSWORD}@host:3306/database")
+    # TLS with the certificate and host name checked against the system's CAs (PyMySQL ignores an empty ssl={}).
+    ssl = ({"ssl_verify_cert": True, "ssl_verify_identity": True}
+           if str(q.get("ssl", q.get("ssl-mode", ""))).lower() in ("1", "true", "required", "require", "verify_identity") else {})
+    try:
+        conn = pymysql.connect(host=p.hostname, port=p.port or 3306, user=urllib.parse.unquote(p.username or ""),
+                               password=str(password), database=db, connect_timeout=10,
+                               read_timeout=30, write_timeout=30, charset="utf8mb4",
+                               cursorclass=pymysql.cursors.DictCursor, autocommit=False, **ssl)
+    except pymysql.MySQLError as e:
+        raise ProbeSetupError(f"could not connect to MySQL at {p.hostname}: {e}") from e
+    if read_only:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("START TRANSACTION READ ONLY")
+        except pymysql.MySQLError as e:
+            conn.close()
+            raise ProbeSetupError(f"MySQL refused a read-only transaction: {e}") from e
     return conn
 
 
@@ -112,6 +191,8 @@ class BackendProbe:
                 rows = self._sqlite(spec["query"], values)
             elif kind == "postgres":
                 rows = self._postgres(spec["query"], values)
+            elif kind == "mysql":
+                rows = self._mysql(spec["query"], values)
             elif kind == "rest":
                 rows = self._rest(spec, values)
                 if isinstance(rows, (int, float)) and spec.get("returns") == "count":
@@ -141,7 +222,7 @@ class BackendProbe:
         if not path.exists():
             raise ProbeSetupError(f"the database file {path} does not exist")
         try:
-            conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)  # read only: a probe never changes state
+            conn = _guard_sqlite(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True))  # read only: a probe never changes state
             conn.row_factory = sqlite3.Row
             try:
                 return [dict(r) for r in conn.execute(query, values)]
@@ -162,6 +243,21 @@ class BackendProbe:
             return rows
         except Exception as e:  # noqa: BLE001 - psycopg.Error and friends
             raise ProbeSetupError(f"Postgres: {e}") from e
+        finally:
+            conn.close()
+
+    def _mysql(self, query: str, values: Mapping[str, Any]) -> list[dict[str, Any]]:
+        conn = _mysql_connect(self._profile)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(_pg_query(query), dict(values))       # PyMySQL takes %(name)s too
+                rows = [{k: _plain(v) for k, v in r.items()} for r in cur.fetchmany(MAX_ROWS)] if cur.description else []
+            conn.rollback()
+            return rows
+        except ProbeSetupError:
+            raise
+        except Exception as e:  # noqa: BLE001 - pymysql errors
+            raise ProbeSetupError(f"MySQL: {e}") from e
         finally:
             conn.close()
 
@@ -226,7 +322,7 @@ def check_backend(profile: Mapping[str, Any], root: Path) -> str:
         path = sqlite_path(profile, root)
         if not path.exists():
             raise ProbeSetupError(f"the database file {path} does not exist (yet)")
-        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+        conn = _guard_sqlite(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True))
         try:
             tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
         finally:
@@ -242,6 +338,21 @@ def check_backend(profile: Mapping[str, Any], root: Path) -> str:
         finally:
             conn.close()
         return f"Connected to Postgres database {db} ({version.split(',')[0]}), read-only."
+    if kind == "mysql":
+        conn = _mysql_connect(profile)
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT DATABASE() AS db, VERSION() AS version")
+                row = cur.fetchone() or {}
+                cur.execute("SHOW TABLES")
+                tables = [next(iter(r.values())) for r in cur.fetchall()]
+            conn.rollback()
+        except Exception as e:  # noqa: BLE001
+            raise ProbeSetupError(f"MySQL: {e}") from e
+        finally:
+            conn.close()
+        return (f"Connected to MySQL database {row.get('db')} ({row.get('version')}), read-only. "
+                f"Tables: {', '.join(map(str, tables[:30])) or 'none'}.")
     base = _connection(profile).rstrip("/")
     try:
         headers = {str(k): str(v) for k, v in expand_env(profile["backend"].get("headers") or {}).items()}
@@ -262,12 +373,15 @@ def load_fixtures(profile: Mapping[str, Any], scenario: Mapping[str, Any], root:
     if not fixtures:
         return
     kind = backend_kind(profile)
-    if kind not in ("sqlite", "postgres"):
-        raise ProbeSetupError("fixtures need a sql backend (SQLite or Postgres)")
+    if kind not in ("sqlite", "postgres", "mysql"):
+        raise ProbeSetupError("fixtures need a sql backend (SQLite, Postgres or MySQL)")
     scripts = []
     for item in fixtures:
         if item.endswith(".sql"):
             file = root / item
+            problem = private_file_problem(file)
+            if problem:
+                raise ProbeSetupError(f"fixture {item}: {problem}")
             if not file.exists():
                 raise ProbeSetupError(f"fixture file {file} not found")
             scripts.append(file.read_text(encoding="utf-8"))
@@ -285,9 +399,22 @@ def load_fixtures(profile: Mapping[str, Any], scenario: Mapping[str, Any], root:
         finally:
             conn.close()
         return
+    if kind == "mysql":
+        conn = _mysql_connect(profile, read_only=False)
+        try:
+            with conn.cursor() as cur:
+                for script in scripts:
+                    for statement in _statements(script):
+                        cur.execute(statement)
+            conn.commit()
+        except Exception as e:  # noqa: BLE001
+            raise ProbeSetupError(f"loading fixtures failed: {e}") from e
+        finally:
+            conn.close()
+        return
     path = sqlite_path(profile, root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
+    conn = _guard_sqlite(sqlite3.connect(path))
     try:
         for script in scripts:
             conn.executescript(script)
@@ -296,3 +423,41 @@ def load_fixtures(profile: Mapping[str, Any], scenario: Mapping[str, Any], root:
         raise ProbeSetupError(f"loading fixtures failed: {e}") from e
     finally:
         conn.close()
+
+
+def _statements(script: str) -> list[str]:
+    """A SQL script as single statements (PyMySQL runs one at a time): split on ; outside quotes and comments."""
+    out, buf, quote, i = [], [], "", 0
+    while i < len(script):
+        c = script[i]
+        if quote:
+            buf.append(c)
+            if c == "\\" and i + 1 < len(script):
+                buf.append(script[i + 1])
+                i += 2
+                continue
+            if c == quote:
+                quote = ""
+        elif c in ("'", '"', "`"):
+            quote = c
+            buf.append(c)
+        elif c == "-" and script.startswith("--", i) or c == "#":
+            j = script.find("\n", i)
+            i = len(script) if j < 0 else j
+            continue
+        elif c == "/" and script.startswith("/*", i):
+            j = script.find("*/", i + 2)
+            i = len(script) if j < 0 else j + 2
+            continue
+        elif c == ";":
+            stmt = "".join(buf).strip()
+            if stmt:
+                out.append(stmt)
+            buf = []
+        else:
+            buf.append(c)
+        i += 1
+    stmt = "".join(buf).strip()
+    if stmt:
+        out.append(stmt)
+    return out

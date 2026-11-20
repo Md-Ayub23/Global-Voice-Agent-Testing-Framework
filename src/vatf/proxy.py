@@ -64,6 +64,10 @@ class InProcessToolProxy:
         """How many times the agent has called this tool so far in the call."""
         return self._calls_per_tool.get(tool, 0)
 
+    def knows(self, tool: str) -> bool:
+        """Is this one of the agent's tools (the profile's tools list)?"""
+        return tool in self._tools
+
     def endpoint_for(self, tool: str) -> str:
         return self._tools[tool].get("upstream", "")
 

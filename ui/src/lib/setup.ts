@@ -18,6 +18,8 @@ export interface ProfileDetail {
   scenarios: ProjectFile[];
   persona_files: ProjectFile[];
   profiles: string[];
+  /** {NAME: has a value} for every ${NAME} this profile uses. Never a value. */
+  secrets?: Record<string, boolean>;
 }
 
 export interface SaveResult { saved: boolean; problems: string[]; detail?: ProfileDetail; file?: string }

@@ -1,7 +1,7 @@
 """Reads real calls from the formats agent platforms export, into one plain shape (Phase 8).
 
 A RealCall is a dict:
-  source         vocto | vapi | retell | transcript
+  source         vocto | vapi | retell | elevenlabs | livekit | transcript
   external_id    the platform's own call id (used to skip a call delivered twice), or None
   started_at     ISO time the call started (None if the export doesn't say)
   agent_version  the agent's version or release, if the export carries one (trends split by it)
@@ -19,6 +19,7 @@ Formats (detected from the content, see parse()):
                format for any platform (docs/phase8-guide.md); also a list of these, or one per line (JSONL)
   Vapi         an end-of-call-report webhook, or a call object from Vapi's API (artifact.messages)
   Retell       a call_ended / call_analyzed webhook, or a call object (transcript_object, tool calls)
+  ElevenLabs   a conversation from the Agents API (GET /v1/convai/conversations/{id}) or its post-call webhook
   Transcript   plain text, one turn per line: "Agent: ...", "Caller: ..." (optional [mm:ss] time stamps)
 """
 
@@ -236,8 +237,7 @@ def from_vapi(doc: Mapping[str, Any]) -> dict[str, Any]:
                 end = start + int(x["duration"])
             call["items"].append({"kind": "turn", "role": r, "text": str(x.get("message") or x.get("content") or "").strip(),
                                   "start_ms": start, "end_ms": end})
-    reason = (call["ended_reason"] or "").lower()
-    call["transferred"] = "transfer" in reason or "forward" in reason
+    call["transferred"] = _transferred(call)
     return _finish(call)
 
 
@@ -292,7 +292,66 @@ def from_retell(doc: Mapping[str, Any]) -> dict[str, Any]:
                                       "start_ms": start, "end_ms": end})
     elif isinstance(c.get("transcript"), str):
         call["items"] = from_transcript(c["transcript"])["items"]
-    call["transferred"] = "transfer" in (call["ended_reason"] or "").lower()
+    call["transferred"] = _transferred(call)
+    return _finish(call)
+
+
+def _transferred(call: Mapping[str, Any]) -> bool:
+    """The platform handed the call over: it ended for a transfer, or a transfer tool ran (handoff.py)."""
+    from ..handoff import reason_is_transfer, tool_is_handoff
+
+    return reason_is_transfer(call.get("ended_reason")) or any(
+        i["kind"] == "tool" and i.get("ok", True) and tool_is_handoff(str(i.get("name") or "")) for i in call["items"])
+
+
+# ---- ElevenLabs -------------------------------------------------------------------------------
+def _is_elevenlabs(doc: Mapping[str, Any]) -> bool:
+    d = doc.get("data") if isinstance(doc.get("data"), Mapping) and doc.get("type") == "post_call_transcription" else doc
+    return isinstance(d, Mapping) and "conversation_id" in d and isinstance(d.get("transcript"), list)
+
+
+def from_elevenlabs(doc: Mapping[str, Any]) -> dict[str, Any]:
+    """A conversation from the ElevenLabs Agents API, or the data of its post_call_transcription webhook.
+    Turns have a start time only (time_in_call_secs); tool calls and their results sit in the turn that made them."""
+    d = doc["data"] if isinstance(doc.get("data"), Mapping) and doc.get("type") == "post_call_transcription" else doc
+    meta = d.get("metadata") or {}
+    call = _blank("elevenlabs")
+    phone = meta.get("phone_call") or {}
+    call.update(external_id=_str(d.get("conversation_id")), started_at=_iso(meta.get("start_time_unix_secs")),
+                agent_version=_str(d.get("version_id")),
+                caller_number=_str(phone.get("external_number")) if isinstance(phone, Mapping) else None,
+                ended_reason=_str(meta.get("termination_reason")))
+    if isinstance(meta.get("call_duration_secs"), (int, float)):
+        call["duration_ms"] = int(meta["call_duration_secs"] * 1000)
+    tools: dict[str, dict[str, Any]] = {}
+    for x in d.get("transcript") or []:
+        if not isinstance(x, Mapping):
+            continue
+        at = _ms(x.get("time_in_call_secs"), seconds=True)
+        for tc in x.get("tool_calls") or []:
+            if not isinstance(tc, Mapping):
+                continue
+            item = {"kind": "tool", "name": str(tc.get("tool_name") or "tool"), "args": _args(tc.get("params_as_json")),
+                    "result": None, "ok": True, "at_ms": at, "id": _str(tc.get("request_id")),
+                    "tool_type": _str(tc.get("type"))}
+            call["items"].append(item)
+            if item["id"]:
+                tools[item["id"]] = item
+        for tr in x.get("tool_results") or []:
+            if not isinstance(tr, Mapping):
+                continue
+            result = _result(tr.get("result_value"))
+            item = tools.get(str(tr.get("request_id") or ""))
+            if item is None:
+                item = {"kind": "tool", "name": str(tr.get("tool_name") or "tool"), "args": {}, "at_ms": at,
+                        "id": _str(tr.get("request_id"))}
+                call["items"].append(item)
+            item.update(result=result, ok=_ok(result, not tr.get("is_error") if isinstance(tr.get("is_error"), bool) else None))
+        r = _role(x.get("role"))
+        text = str(x.get("message") or "").strip()
+        if r is not None and text:
+            call["items"].append({"kind": "turn", "role": r, "text": text, "start_ms": at, "end_ms": None})
+    call["transferred"] = _transferred(call)
     return _finish(call)
 
 
@@ -347,6 +406,8 @@ def from_doc(doc: Any) -> dict[str, Any] | None:
         return from_vapi(doc)
     if _is_retell(doc):
         return from_retell(doc)
+    if _is_elevenlabs(doc):
+        return from_elevenlabs(doc)
     if isinstance(doc.get("turns"), list):
         return from_vocto(doc)
     if isinstance(doc.get("transcript"), str):
@@ -355,7 +416,7 @@ def from_doc(doc: Any) -> dict[str, Any] | None:
                    agent_version=_str(doc.get("agent_version")))
         return out
     raise IntakeError("not a call Vocto can read: expected Vocto JSON (turns), a Vapi end-of-call report, "
-                      "a Retell call, or a plain transcript")
+                      "a Retell call, an ElevenLabs conversation, or a plain transcript")
 
 
 def parse(content: bytes | str, name: str = "", agent_names: Iterable[str] = ()) -> list[dict[str, Any]]:

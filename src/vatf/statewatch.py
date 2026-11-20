@@ -98,7 +98,7 @@ def _plain(v: Any) -> Any:
 
 def snapshot(profile: Mapping[str, Any], root, tables: Sequence[str]) -> dict[str, Any]:
     """{table: {"rows": [row, ...], "cut": bool}} for each watched table. Raises WatchError."""
-    from .probe import ProbeSetupError, backend_kind, sqlite_path, _pg_connect, BackendProbe
+    from .probe import ProbeSetupError, backend_kind, sqlite_path, _guard_sqlite, _mysql_connect, _pg_connect, BackendProbe
 
     try:
         kind = backend_kind(profile)
@@ -106,11 +106,14 @@ def snapshot(profile: Mapping[str, Any], root, tables: Sequence[str]) -> dict[st
         raise WatchError(str(e)) from e
     out: dict[str, Any] = {}
     if kind == "sqlite":
-        path = sqlite_path(profile, root)
+        try:
+            path = sqlite_path(profile, root)
+        except ProbeSetupError as e:
+            raise WatchError(str(e)) from e
         if not path.exists():
             raise WatchError(f"the database file {path} does not exist")
         try:
-            conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True)
+            conn = _guard_sqlite(sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True))
             conn.row_factory = sqlite3.Row
             try:
                 for t in tables:
@@ -140,6 +143,23 @@ def snapshot(profile: Mapping[str, Any], root, tables: Sequence[str]) -> dict[st
         finally:
             conn.close()
         return out
+    if kind == "mysql":
+        try:
+            conn = _mysql_connect(profile)
+        except ProbeSetupError as e:
+            raise WatchError(str(e)) from e
+        try:
+            with conn.cursor() as cur:
+                for t in tables:
+                    cur.execute(f"SELECT * FROM {_quote_mysql(t)} LIMIT {MAX_ROWS + 1}")
+                    rows = [{k: _plain(v) for k, v in r.items()} for r in cur.fetchall()]
+                    out[t] = {"rows": rows[:MAX_ROWS], "cut": len(rows) > MAX_ROWS}
+            conn.rollback()
+        except Exception as e:  # noqa: BLE001 - pymysql errors
+            raise WatchError(f"MySQL: {e}") from e
+        finally:
+            conn.close()
+        return out
     if kind == "rest":
         probe = BackendProbe(profile, root)
         for t in tables:
@@ -153,7 +173,11 @@ def snapshot(profile: Mapping[str, Any], root, tables: Sequence[str]) -> dict[st
 
 
 def _quote(table: str) -> str:
-    return ".".join(f'"{p}"' for p in table.split("."))
+    return ".".join('"' + p.replace('"', '""') + '"' for p in table.split("."))
+
+
+def _quote_mysql(table: str) -> str:
+    return ".".join("`" + p.replace("`", "``") + "`" for p in table.split("."))
 
 
 # ---- comparing ---------------------------------------------------------------------------------

@@ -111,7 +111,7 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
         # The pages read how the agent is reached even before it is ready (a new agent has no test cases yet).
         conn = doc.get("connection") if isinstance(doc.get("connection"), dict) else {}
         info["connection"] = {"type": str(conn.get("type") or ""), "target": str(conn.get("target") or ""),
-                              "launch": str(conn.get("launch") or "")}
+                              "launch": str(conn.get("launch") or ""), "platform": str(conn.get("platform") or "")}
         info["options"] = {k: "" if v is None else str(v) for k, v in (conn.get("options") or {}).items()} \
             if isinstance(conn.get("options"), dict) else {}
         return info
@@ -127,7 +127,8 @@ def profile_info(root: Path, folder: Path, file: str) -> dict[str, Any]:
     info.update({
         "id": p["id"], "name": p.get("name", p["id"]), "description": p.get("description", ""),
         "domain": p.get("domain", ""), "mode": mode, "extends": (_yaml(folder / file) or {}).get("extends"),
-        "connection": {"type": conn["type"], "target": conn.get("target", ""), "launch": conn.get("launch", "")},
+        "connection": {"type": conn["type"], "target": conn.get("target", ""), "launch": conn.get("launch", ""),
+                       "platform": str(conn.get("platform") or "")},
         "options": {k: "" if v is None else str(v) for k, v in conn.get("options", {}).items()},
         "offline_options": {k: str(v) for k, v in conn.get("offline_options", {}).items()},
         "bugs": bug_switches(root, conn),
@@ -591,9 +592,11 @@ def call_detail(root: Path, runs: Path, run_id: str, test_id: str) -> dict[str, 
     recording = next((e["data"]["recording"] for e in events
                       if e["type"] == "call_ended" and "recording" in e["data"]), None)
     phone = next((e["data"]["phone"] for e in events if e["type"] == "call_ended" and "phone" in e["data"]), None)
+    platform = next((e["data"]["platform"] for e in events if e["type"] == "call_ended"
+                     and isinstance(e["data"].get("platform"), dict)), None)
     return {
         "record": record, "live": live, "pii_masked": masked, "events": events, "verdict": verdict,
-        "phone": phone,
+        "phone": phone, "platform": platform,
         "story": [{"seq": n, "who": who, "text": text} for n, who, text in story_rows(events)],
         "judgement": [{"label": a, "text": b} for a, b in judgement(verdict, events)] if verdict else [],
         "database": [{"probe": p, "rows": rows} for p, rows in database_rows(events)],
@@ -856,12 +859,15 @@ def connection_kind(project: Mapping[str, Any]) -> dict[str, Any]:
         return {"kind": None, "label": "Not connected", "connected": False, "text_too": False}
     kind, label = connection_label(main, bool(project.get("example")))
     conn = main.get("connection") or {}
-    connected = bool(main.get("ok") and (conn.get("target") or conn.get("launch")))
+    # A LiveKit agent may come into every new room by itself (no agent name): its server address is enough.
+    reach = conn.get("target") or conn.get("launch") or (
+        conn.get("type") == "platform" and conn.get("platform") == "livekit" and (main.get("options") or {}).get("url"))
+    connected = bool(main.get("ok") and reach)
     text_too = bool(voice) and any(p.get("mode") == "text" for p in profiles)
     return {"kind": kind, "label": label, "connected": connected, "text_too": text_too}
 
 
-VOICE_ORDER = ("phone_call", "websocket_audio", "twilio_media_stream")
+VOICE_ORDER = ("phone_call", "platform", "websocket_audio", "twilio_media_stream")
 
 
 def main_profile(project: Mapping[str, Any]) -> dict[str, Any] | None:
@@ -887,6 +893,10 @@ def connection_label(profile: Mapping[str, Any], example: bool = False) -> tuple
     if ctype == "phone_call":
         prov = str((profile.get("options") or {}).get("provider") or "twilio")
         return "phone", f"Phone · {prov.capitalize()}"
+    if ctype == "platform":
+        from ..connectors.platforms import PLATFORMS
+
+        return "platform", PLATFORMS.get(str(conn.get("platform") or ""), "Hosted platform")
     if ctype == "twilio_media_stream":
         return "twilio_stream", "Twilio media stream"
     if ctype == "text_http":
@@ -968,6 +978,12 @@ def secrets(root: Path) -> list[dict[str, Any]]:
         out.append({"name": name, "projects": sorted(used[name]), "set": bool(value),
                     "hint": f"…{value[-4:]}" if value and len(value) > 8 else None})
     return out
+
+
+def secret_status(root: Path, names: list[str]) -> dict[str, bool]:
+    """{NAME: has a value} for the given secret names. Only whether each is set: never a value or its end."""
+    env = _dotenv(root)
+    return {n: bool(os.environ.get(n) or env.get(n)) for n in names if SECRET_NAME.match(n)}
 
 
 def _private(path: Path) -> None:

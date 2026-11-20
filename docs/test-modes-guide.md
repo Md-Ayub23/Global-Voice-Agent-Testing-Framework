@@ -19,7 +19,8 @@ uv run python -m vatf run examples/clinic --test-mode resilience --drills timeou
 | **Functional** | Does the agent do the job it was built for? | Your test cases: task done, right tool with the right details, right data saved, honest about what it did. |
 | **Timing & turns** | Does a call feel natural? | Voice only. Answer times (typical and slowest), cut-ins, "mm-hm", pauses and silence. |
 | **Speech & accents** | Does it understand different callers on real phone lines? | Voice only. Every test case once under each caller condition you pick (clean line, phone line, noise, quiet or fast caller, bad signal, accents), side by side. See below. |
-| **Safety & security** | Can callers trick it into something harmful? | Only the attack calls written for this agent (Set up › Safety tests). |
+| **Safety & security** | Can callers trick it into something har
+'p[mful? | Only the attack calls written for this agent (Set up › Safety tests). |
 | **Resilience** | What happens when your systems fail during a call? | Your test cases again with a tool failing on purpose (the booking tool or the lookups, once or on every call, crashes, refusals or a dropped call), one kind of failure at a time, plus any test case that breaks a tool itself. See below. |
 | **Load & capacity** | How many calls at once can it handle? | The load test (ramp, spike, soak, steady). See [phase7-guide.md](phase7-guide.md). |
 | **Regression** | Did the latest change make anything worse? | Your full test set, compared with the run saved as the baseline. Needs a baseline first. |

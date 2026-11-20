@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from . import netguard
-from .util import MissingSecret, expand_env
+from .util import MissingSecret, expand_env, private_file_problem
 
 DEFAULT_MAX_LINES = 300
 
@@ -64,7 +64,11 @@ class LogCollector:
 
     def _path(self) -> Path:
         path = Path(self._cfg.get("path", ""))
-        return path if path.is_absolute() else self._root / path
+        path = path if path.is_absolute() else self._root / path
+        problem = private_file_problem(path)
+        if problem:
+            raise LogSetupError(f"logs.path: {problem}")
+        return path
 
     def where(self) -> str:
         return str(self._cfg.get("path") if self._cfg.get("source") == "file" else self._cfg.get("url", ""))
@@ -74,7 +78,7 @@ class LogCollector:
         if self._cfg.get("source") == "file":
             try:
                 self._offset = self._path().stat().st_size
-            except OSError:
+            except (OSError, LogSetupError):
                 self._offset = 0
 
     def collect(self, test_id: str, started_at: str, ended_at: str) -> LogResult:
@@ -156,7 +160,10 @@ def sample_logs(profile: Mapping[str, Any], root: Path, n: int = 20) -> LogResul
     collector = LogCollector(profile, root)
     cfg = profile.get("logs") or {}
     if cfg.get("source") == "file":
-        path = collector._path()
+        try:
+            path = collector._path()
+        except LogSetupError as e:
+            return LogResult(False, collector.where(), error=str(e))
         if not path.exists():
             return LogResult(False, collector.where(), error=f"the log file {path} does not exist")
         lines = [ln for ln in path.read_text(encoding="utf-8", errors="replace").splitlines() if ln.strip()]

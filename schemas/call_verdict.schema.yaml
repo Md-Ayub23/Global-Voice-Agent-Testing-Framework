@@ -179,6 +179,8 @@ properties:
       latency_p50_ms: {type: [integer, "null"]}
       latency_p95_ms: {type: [integer, "null"]}
       cost_usd: {type: number}
+      platform_cost: {description: "A hosted platform's own bill for this call, in platform_currency (ElevenLabs: only when it gives a cost in dollars as well as credits).", type: number}
+      platform_currency: {type: string}
       judge_cost_usd: {description: "What the AI judges cost for this call (not part of cost_usd).", type: number}
       quality:
         description: Phase 5 call quality metrics (src/vatf/metrics.py), each with its band for this call.

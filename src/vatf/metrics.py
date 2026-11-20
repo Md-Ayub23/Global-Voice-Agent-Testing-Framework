@@ -21,10 +21,9 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Any, Iterable, Mapping, Sequence
 
-from . import stats
+from . import handoff, stats
 from .latency import percentile, turn_latencies
 
-ESCALATION_TOOL = re.compile(r"transfer|escalat|hand_?off|human|operator|live_?agent", re.I)
 def _marks() -> str:
     """Unicode combining marks (vowel signs, viramas) as a character class: they are part of a word in
     Tamil and other Indic scripts ("பதிவு"), but Python's \\w leaves them out and would split the word."""
@@ -105,7 +104,7 @@ METRICS: tuple[Metric, ...] = (
     Metric("turns_to_goal", "Turns to reach the goal", "turns", "lower", None, None, "mean", False,
            "Caller turns until the test's action succeeded (the outcome's tool answered ok)."),
     Metric("escalated", "Handed to a person", "%", "lower", None, None, "share", False,
-           "Share of calls the agent handed over or transferred (a handoff, or a transfer / human tool)."),
+           "Share of calls the agent handed over: the platform's own transfer, a transfer / human tool that worked, or the agent saying it is putting the caller through."),
     Metric("duration_s", "Call length", "s", "lower", None, None, "mean", False, "How long the call lasted."),
 )
 BY_ID = {m.id: m for m in METRICS}
@@ -243,8 +242,7 @@ def call_quality(events: Iterable[Any], mode: str, scenario: Mapping[str, Any] |
 
     ended = [e for e in ev if e["type"] == "call_ended"]
     out["duration_s"] = _value(round(ended[-1]["t_ms"] / 1000, 1) if ended else None)
-    out["escalated"] = _value(any(e["type"] == "handoff" or (e["type"] == "tool_request"
-                                  and ESCALATION_TOOL.search(str(e["data"].get("tool", "")))) for e in ev))
+    out["escalated"] = _value(handoff.detect(ev)["handed_off"])
     goal_tool = ((scenario.get("outcome") or {}).get("action") or {}).get("tool")
     reached = [e for e in ev if goal_tool and e["type"] == "tool_response" and e["data"].get("tool") == goal_tool
                and e["data"].get("ok")]

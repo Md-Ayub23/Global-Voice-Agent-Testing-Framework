@@ -174,6 +174,28 @@ def read_json(path: Path) -> Any:
     return json.loads(read_text_settled(path))
 
 
+# Vocto's own private files: the secrets file, the users/sessions store and the audit log
+# (runs/.vocto), and the git folder. A file an agent's settings point at (a SQLite backend, a log file,
+# a fixture) may never be one of them, whoever wrote the setting.
+_PRIVATE_DIRS = {".vocto", ".git", ".ssh"}
+
+
+def private_file_problem(path: Path) -> str | None:
+    """Why `path` may not be read or written as an agent's file (None when it may). Checked after
+    following links and `..`, so a path can't walk around it."""
+    try:
+        real = Path(path).resolve()
+    except (OSError, RuntimeError):
+        return f"{path} can't be used"
+    name = real.name.lower()
+    if name == ".env" or name.startswith(".env.") or name in ("users.db", "users.db-wal", "users.db-shm",
+                                                               "audit.jsonl"):
+        return f"{real.name} is one of Vocto's own private files; point this setting at the agent's own file"
+    if any(part.lower() in _PRIVATE_DIRS for part in real.parts):
+        return f"{real.name} is inside a private folder; point this setting at the agent's own file"
+    return None
+
+
 ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 

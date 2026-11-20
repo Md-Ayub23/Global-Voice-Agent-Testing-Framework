@@ -10,7 +10,7 @@ import { modeHref } from "../components/modecards";
 import { modeTitle } from "../lib/modes";
 import { api } from "../lib/api";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
-import { projectHref } from "../lib/links";
+import { PLATFORM_NAMES, projectHref } from "../lib/links";
 import { fmtDate, fmtDuration, fmtMs, money, shortScenario, plural } from "../lib/format";
 import type { CallDetail, Check, Project, RunDetail } from "../lib/types";
 
@@ -145,6 +145,7 @@ export function CallPage({ project, runId, testId, at }: { project: Project; run
                 <span className="text-muted text-sm">Click the waveform or a ▶ time to jump there.</span>
               </div>
               {c.phone && <PhoneLine p={c.phone} />}
+              {c.platform && <PlatformLine p={c.platform} />}
             </Card>
           )}
           <Card>
@@ -250,6 +251,28 @@ function judgeSub(judged: Check[]): string {
   const opinions = judged.filter((x) => x.result === "FAIL" && !x.can_block && !x.judge?.human).length;
   const you = judged.filter((x) => x.result === "NEEDS_REVIEW").length;
   return [`${plural(problems, "problem")}`, opinions ? `${plural(opinions, "opinion")} not trusted yet` : "", you ? `${you} need you` : ""].filter(Boolean).join(" · ");
+}
+
+// A hosted platform's call: what the platform itself recorded (why it ended, its bill, its latency, a link to it).
+const LATENCY_WORDS: Record<string, string> = { turn_avg: "answer", model_avg: "AI", voice_avg: "voice", transcriber_avg: "hearing", e2e_p50: "answer p50", e2e_p90: "answer p90", llm_p50: "AI p50", tts_p50: "voice p50" };
+function PlatformLine({ p }: { p: NonNullable<CallDetail["platform"]> }) {
+  const name = PLATFORM_NAMES[p.platform] || p.platform;
+  const lat = Object.entries(p.latency_ms || {}).map(([k, v]) => `${LATENCY_WORDS[k] || k} ${fmtMs(v)}`).join(" · ");
+  return (
+    <div id="platform-call" className="mt-3 text-sm text-muted grid gap-1 border-t border-line pt-2.5">
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        <span><b className="text-ink font-medium">{name} call</b>{p.ended_reason ? `, ended: ${p.ended_reason}` : ""}</span>
+        {p.cost != null && <span>{name} cost: {p.cost.toFixed(4)} {p.currency || ""}</span>}
+        {p.credits != null && <span>{p.credits} credits</span>}
+        {lat && <span>{name}'s timing: {lat}</span>}
+        {p.link ? <a href={p.link} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1">Open in {name}<Icon name="ext" size={12} /></a>
+          : p.call_id && <span className="font-mono">{p.call_id}</span>}
+      </div>
+      {p.platform_summary && <div><span className="text-ink-2">{name}'s own summary:</span> {p.platform_summary}</div>}
+      {p.error && <div className="text-bad">{name}'s record could not be read: {p.error}. Its tool calls are missing from this call.</div>}
+      {p.incomplete && !p.error && <div className="text-warn">{name} had not finished its record when Vocto stopped waiting: some tool calls may be missing.</div>}
+    </div>
+  );
 }
 
 // A real phone call: what the phone provider itself recorded (the number rung, length, its price).

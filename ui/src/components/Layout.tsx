@@ -25,7 +25,7 @@ function kindOf(p: Project | null): string | null {
   const m = p ? mainProfile(p) : null;
   if (!m) return null;
   const t = m.connection?.type;
-  return t === "phone_call" ? "phone" : t === "twilio_media_stream" ? "twilio_stream" : t === "text_http" ? "text_http"
+  return t === "phone_call" ? "phone" : t === "platform" ? "platform" : t === "twilio_media_stream" ? "twilio_stream" : t === "text_http" ? "text_http"
     : t === "text_python" ? "in_repo" : "websocket_audio";
 }
 

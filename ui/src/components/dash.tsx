@@ -39,7 +39,7 @@ export function CountUp({ value }: { value: ReactNode }) {
 
 // An agent's mark: a plain dark tile with an icon for how Vocto reaches it (a phone, a voice link, text, code).
 const KIND_ICON: Record<string, IconName> = {
-  phone: "phone", twilio_stream: "phone", websocket_audio: "wave", text_http: "text", in_repo: "bot",
+  phone: "phone", platform: "plug", twilio_stream: "phone", websocket_audio: "wave", text_http: "text", in_repo: "bot",
 };
 export function ProjectAvatar({ size = 40, className, kind }: { name?: string; k?: string; size?: number; className?: string; kind?: string | null }) {
   return (

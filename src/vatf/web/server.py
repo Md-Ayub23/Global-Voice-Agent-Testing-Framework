@@ -138,7 +138,8 @@ class App:
                         target.write_text(before[rel], encoding="utf-8", newline="")
                     else:
                         target.unlink(missing_ok=True)
-                raise Forbidden(f"only an admin may change how the agent is started, Python agents and tools, or "
+                raise Forbidden(f"only an admin may change how the agent is started, Python agents and tools, files on the server "
+                                f"(a SQLite backend, a log file, .sql fixtures), or "
                                 f"where secrets (${{NAME}}) are used ({', '.join(changed)})")
         return result
 
@@ -219,6 +220,7 @@ def make_handler(app: App):
             if any(code_settings(_parse(t)) != code_settings(None) for t in _yaml_texts(folder).values()):
                 shutil.rmtree(folder, ignore_errors=True)
                 raise Forbidden("only an admin may make an agent that Vocto starts itself, a Python agent or tools, "
+                                "one that reads files on the server (a SQLite backend or log file), "
                                 "or one that uses secrets (${NAME})")
         app.audit("project_created", h, project=out["path"])
         return {**out, "key": data.project_keys(app.root).get(out["path"], out["id"])}

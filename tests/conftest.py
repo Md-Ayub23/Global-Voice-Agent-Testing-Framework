@@ -8,6 +8,7 @@ import pytest
 
 # Tests that place real-time calls, by name; plus every test using a whole-run fixture below.
 SLOW_TESTS = {
+    "test_the_connection_test_can_make_a_short_vapi_call",
     "test_a_scripted_line_is_played_from_its_recording",
     "test_a_run_can_make_every_caller_speak_tamil",
     "test_a_tamil_voice_run_end_to_end",
@@ -29,7 +30,7 @@ SLOW_TESTS = {
     "test_a_speech_mode_run_compares_conditions_side_by_side",
     "test_a_speech_run_with_the_ladder_end_to_end",
 }
-SLOW_FIXTURES = {"clean_voice_run", "clinic_twilio_run"}
+SLOW_FIXTURES = {"clean_voice_run", "clinic_twilio_run", "vapi_run", "eleven_run", "retell_run", "livekit_run"}
 
 
 def pytest_configure(config):

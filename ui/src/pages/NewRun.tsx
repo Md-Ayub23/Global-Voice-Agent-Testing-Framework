@@ -9,7 +9,7 @@ import { can, useAuth } from "../lib/auth";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx, plural } from "../lib/format";
 import { navigate } from "../lib/router";
-import { channelLabel, mainProfile, projectHref } from "../lib/links";
+import { channelLabel, mainProfile, PLATFORM_NAMES, projectHref } from "../lib/links";
 import { MODE_TITLE } from "../lib/modes";
 import type { DrillFailure, Job, Options, PassRule, Profile, Project, RunDetail, RunInfo, SweepCondition, TestModeId } from "../lib/types";
 
@@ -290,7 +290,7 @@ function NewRunForm({ projects, prefill, prefillError, query, mode }: { projects
                     <b>{channelLabel(x, project.profiles, project.example)}</b>
                   </div>
                   <div className="text-ink-2 text-sm">
-                    {voiceOnly && x.mode !== "voice" ? `${MODE_TITLE[mode!]} measures speech, so it needs the voice channel` : x.ok ? (x.connection.type === "phone_call" ? `Rings ${x.connection.target || "the agent's number"} over the real phone network` : x.mode === "voice" ? "Like a phone call: real speech both ways, response times" : "Text messages: fast and cheap, the same checks") : "Not ready: finish its setup first"}
+                    {voiceOnly && x.mode !== "voice" ? `${MODE_TITLE[mode!]} measures speech, so it needs the voice channel` : x.ok ? (x.connection.type === "phone_call" ? `Rings ${x.connection.target || "the agent's number"} over the real phone network` : x.connection.type === "platform" ? `Calls the agent on ${PLATFORM_NAMES[x.connection.platform || ""] || "its platform"}: real speech both ways, its own tool records` : x.mode === "voice" ? "Like a phone call: real speech both ways, response times" : "Text messages: fast and cheap, the same checks") : "Not ready: finish its setup first"}
                   </div>
                 </Choice>
               ))}

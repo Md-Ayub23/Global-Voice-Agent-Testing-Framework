@@ -15,8 +15,10 @@ from typing import Any, Mapping, Sequence
 
 from . import __version__
 from .contracts.models import AudioClip, CallContext, CallTrace, TraceEvent
-from .util import mask_token, read_json, sha256_file, write_json
+from .util import mask_token, read_json, sha256_file, write_json, write_text_atomic
 
+# Data fields that name another event of the same call by its seq (kept right when events are inserted).
+SEQ_REFS = ("agent_turn", "caller_turn", "agent_seq")
 # Free-text fields that may hold spoken personal data, per event type.
 TEXT_FIELDS = {"caller_turn": ("text",), "agent_turn": ("heard_text", "platform_transcript"),
                "stt_text": ("text",), "caller_heard": ("text",), "platform_event": ("text",),
@@ -77,6 +79,37 @@ class LocalCallWriter:
             with self._file.open("a", encoding="utf-8") as f:
                 f.write(_event_line(event) + "\n")
             return event
+
+    def insert(self, items: Sequence[tuple[int, str, str, Mapping[str, Any], int | None]]) -> list[TraceEvent]:
+        """Puts events that happened earlier into their place in time: (t_ms, source, type, data, turn).
+
+        For evidence learnt after the call (a hosted platform's record of the tool calls its agent made).
+        Each goes after every event at or before its time; the events after it move down, and the fields
+        that point at another event by its seq (SEQ_REFS) are updated to match. Only before lock(), while no
+        seq of this call has been quoted anywhere else. Returns the inserted events as they now stand."""
+        with self._lock:
+            if self._locked:
+                raise EvidenceLocked(f"call {self.record['test_id']} is locked")
+            if not items:
+                return []
+            old = [(e.t_ms, 0, i, e) for i, e in enumerate(self._events)]
+            new = [(int(t), 1, k, TraceEvent(0, int(t), source, type_, dict(data), turn))
+                   for k, (t, source, type_, data, turn) in enumerate(sorted(items, key=lambda x: int(x[0])))]
+            merged = sorted(old + new, key=lambda m: (m[0], m[1], m[2]))     # same time: the older event first
+            renum = {e.seq: n for n, (_, kind, _, e) in enumerate(merged, start=1) if kind == 0}
+            events, added = [], []
+            for n, (_, kind, _, e) in enumerate(merged, start=1):
+                data = e.data
+                refs = {k: renum[v] for k, v in data.items() if k in SEQ_REFS and isinstance(v, int) and v in renum}
+                if refs:
+                    data = {**data, **refs}
+                ev = TraceEvent(n, e.t_ms, e.source, e.type, data, e.turn)
+                events.append(ev)
+                if kind == 1:
+                    added.append(ev)
+            self._events = events
+            write_text_atomic(self._file, "".join(_event_line(e) + "\n" for e in events))
+            return added
 
     def save_audio(self, name: str, clip: AudioClip) -> str:
         """Writes a mono WAV into the call folder. Audio is never masked: treat recordings as personal data."""
@@ -183,15 +216,24 @@ def mask_events(events: Sequence[TraceEvent], profile: Mapping[str, Any], facts:
 def _mask_event(e: TraceEvent, profile: Mapping[str, Any], salt: str,
                 text_patterns: list[tuple[str, re.Pattern]] = ()) -> TraceEvent:
     data = dict(e.data)
-    for field in TEXT_FIELDS.get(e.type, ()):
-        if not isinstance(data.get(field), str):
-            continue
-        text = data[field]
+
+    def masked(text: str) -> str:
         for name, pattern in text_patterns:
             text = pattern.sub(f"[{name}]", text)
         for p in profile.get("pii", {}).get("mask_patterns", []):
             text = re.sub(p["regex"], f"[{p['name']}]", text)
-        data[field] = text
+        return text
+
+    for field in TEXT_FIELDS.get(e.type, ()):
+        if isinstance(data.get(field), str):
+            data[field] = masked(data[field])
+    # A hosted platform's own summary of the call is free text about the caller too.
+    if e.type == "call_ended" and isinstance(data.get("platform"), dict):
+        plat = dict(data["platform"])
+        for field in ("platform_summary", "platform_success"):
+            if isinstance(plat.get(field), str):
+                plat[field] = masked(plat[field])
+        data["platform"] = plat
     if e.type in ("tool_request", "tool_response", "probe_result", "state_diff"):
         data = _mask_keys(data, pii_keys(profile), salt)
     return TraceEvent(e.seq, e.t_ms, e.source, e.type, data, e.turn)

@@ -1,5 +1,5 @@
-"""L4 connectors: text_python and text_http (text mode); websocket_audio, twilio_media_stream and phone_call
-(a real phone number, voice mode)."""
+"""L4 connectors: text_python and text_http (text mode); websocket_audio, twilio_media_stream, phone_call
+(a real phone number) and platform (Vapi, Retell, ElevenLabs, LiveKit: connectors/platforms) in voice mode."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
-VOICE_TYPES = ("websocket_audio", "twilio_media_stream", "phone_call")
+VOICE_TYPES = ("websocket_audio", "twilio_media_stream", "phone_call", "platform")
 
 
 def call_metadata(ctx: Any) -> dict[str, Any]:
@@ -69,5 +69,9 @@ def build_connector(profile: Mapping[str, Any], root: Path, tools: Any):
         from .phone_call import PhoneCallConnector
 
         return PhoneCallConnector(profile, root, tools)
+    if kind == "platform":
+        from .platforms import build
+
+        return build(profile, root, tools)
     raise ConnectError(f"connection type {kind!r} is not supported yet "
-                       "(text_python, text_http, websocket_audio, twilio_media_stream and phone_call are)")
+                       "(text_python, text_http, websocket_audio, twilio_media_stream, phone_call and platform are)")

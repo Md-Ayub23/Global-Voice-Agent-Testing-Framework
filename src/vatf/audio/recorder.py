@@ -110,6 +110,34 @@ class Recorder:
         return [(start + a, start + b) for a, b in spans]
 
 
+# Below this peak level a chunk of agent audio is silence (digital silence, or a codec's comfort noise):
+# lower than the speech detector's threshold (vad.THRESHOLD_DBFS, -45 dBFS) and its onset level, so
+# dropping it changes no speech span. Streams that carry the far end continuously (a phone call, WebRTC)
+# send such chunks all the time; queued as "audio", they would keep agent_playing() true for ever and the
+# caller would never hear the agent's turn end.
+SILENT_PEAK = 0.005
+
+
+def audible(x: np.ndarray, floor: float = SILENT_PEAK) -> bool:
+    return bool(len(x)) and float(np.max(np.abs(x))) >= floor
+
+
+def play_agent(rec: "Recorder", x: np.ndarray, jitter_samples: int) -> bool:
+    """Queue agent audio from a stream that carries silence too (phone, WebRTC, hosted platforms), the way a
+    phone's playout buffer does: silent chunks are skipped (they are silence in the recording anyway), and a
+    chunk that arrives just after the audio before it ran out joins on without a gap. Returns whether the
+    chunk was queued."""
+    if not audible(x):
+        return False
+    now = rec.now_sample()
+    cursor = rec.cursor
+    if jitter_samples and rec.chunks and cursor < now <= cursor + jitter_samples:
+        rec.agent_audio(x, arrival_s=cursor / rec.sr)
+    else:
+        rec.agent_audio(x)
+    return True
+
+
 class Line:
     """The caller's side of the call: sends 20 ms frames in real time, speech or background.
 

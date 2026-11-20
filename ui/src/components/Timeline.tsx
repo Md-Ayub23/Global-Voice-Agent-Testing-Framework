@@ -4,6 +4,7 @@
 // a second listen is attached to the agent turn it re-checked.
 import { useImperativeHandle, useMemo, useRef, type ReactNode, type Ref } from "react";
 import { cx, fmtDuration, fmtMs, fmtSecs, plural } from "../lib/format";
+import { PLATFORM_NAMES } from "../lib/links";
 import type { EventData, Limits, TraceEvent } from "../lib/types";
 import { Icon, type IconName } from "./Icon";
 import { Chip, Spinner, Table } from "./ui";
@@ -115,10 +116,16 @@ function build(events: TraceEvent[]): { items: Item[]; owner: Map<number, number
           add({ kind: "sys", seq: e.seq, tone: d.level === "warning" ? "" : "bad", icon: "alert",
             text: `Vocto ${d.level || "error"}: ${d.code}: ${d.message} (not blamed on the agent)` });
         break;
-      case "call_ended":
-        add({ kind: "sys", seq: e.seq, tone: "", icon: "hang",
-          text: `Call ended: ${d.reason || ""} (by ${d.ended_by || "?"}) at ${fmtSecs(e.t_ms)}${d.recording ? ` · recording ${fmtDuration(d.recording.duration_ms)}` : ""}` });
+      case "handoff":
+        add({ kind: "sys", seq: e.seq, tone: "", icon: "user",
+          text: <><b>Handed over</b> to {d.to || "a person"}{d.reason ? ` (${d.reason})` : ""}{d.reported_by ? `, says ${PLATFORM_NAMES[d.reported_by] || d.reported_by}` : ""}</> });
         break;
+      case "call_ended": {
+        const plat = d.platform && typeof d.platform === "object" ? d.platform : null;
+        add({ kind: "sys", seq: e.seq, tone: "", icon: "hang",
+          text: `Call ended: ${d.reason || ""} (by ${d.ended_by || "?"}) at ${fmtSecs(e.t_ms)}${d.recording ? ` · recording ${fmtDuration(d.recording.duration_ms)}` : ""}${plat?.ended_reason ? ` · ${PLATFORM_NAMES[plat.platform] || plat.platform}: ${plat.ended_reason}` : ""}` });
+        break;
+      }
     }
   }
   return { items, owner };
@@ -248,6 +255,11 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                   <Icon name="tool" className="text-tool" />
                   {req && <span className="text-muted text-sm">Agent uses tool</span>}
                   <b className="font-mono text-sm">{it.tool}</b>
+                  {(req?.reported_by || resp?.reported_by) && (
+                    <Chip icon="plug" title="Vocto did not see this request itself: it comes from the platform's own record of the call, placed where it happened.">
+                      Reported by {PLATFORM_NAMES[req?.reported_by || resp?.reported_by] || req?.reported_by || resp?.reported_by}{(req?.tool_type || resp?.tool_type) ? ` · ${req?.tool_type || resp?.tool_type} tool` : ""}
+                    </Chip>
+                  )}
                   <span className="flex-1" />
                   {it.e && <span className="text-muted text-sm">turn {it.e.turn ?? ""} · #{it.e.seq}</span>}
                 </div>
@@ -266,7 +278,7 @@ export function Timeline({ events, limits, onSeek, typing, ref }: {
                     <>
                       <div className="flex items-center gap-2 flex-wrap text-sm">
                         <Chip tone={resp.ok ? "good" : "bad"} icon={resp.ok ? "check" : "x"}>{resp.ok ? "OK" : "Failed"} {resp.status}</Chip>
-                        <span className="text-muted">{fmtMs(resp.duration_ms)}{resp.reached_backend ? "" : " · never reached the database"} · #{it.resp!.seq}</span>
+                        <span className="text-muted">{resp.reported_by ? "" : `${fmtMs(resp.duration_ms)}`}{resp.reached_backend ? "" : " · never reached the database"} · #{it.resp!.seq}</span>
                       </div>
                       <KV obj={resp.body} />
                     </>

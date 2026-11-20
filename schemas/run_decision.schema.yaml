@@ -229,13 +229,14 @@ properties:
     type: object
 
   costs:
-    description: What the agent cost to run in this run, from the owner's prices (profile costs, costs.py).
+    description: What the agent cost to run in this run, from the owner's prices (profile costs) or the hosted platform's own bill per call (costs.py).
     type: object
     additionalProperties: false
     required: [currency, prices, calls, minutes, total, per_call, task_calls, tasks_done, per_task]
     properties:
       currency: {type: string}
       prices: {type: object, additionalProperties: {type: number}}
+      source: {description: "prices (the owner's), platform (every call's bill from the platform) or platform+prices (the bill where the platform gave one).", enum: [prices, platform, "platform+prices"]}
       calls: {type: integer}
       minutes: {type: number}
       total: {type: number}

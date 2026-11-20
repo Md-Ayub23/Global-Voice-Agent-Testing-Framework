@@ -116,6 +116,9 @@ def check_url(url: str, schemes: tuple[str, ...] = HTTP_SCHEMES) -> str:
     return url
 
 
+_PLAIN_HEADERS = {"accept", "accept-language", "user-agent", "content-type"}
+
+
 class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
     max_redirections = 5
 
@@ -123,11 +126,13 @@ class _GuardedRedirect(urllib.request.HTTPRedirectHandler):
         check_url(urllib.parse.urljoin(req.full_url, newurl))
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
         if new is not None:
-            # Never carry the caller's own login headers to another host.
+            # Never carry the caller's own headers to another host: any of them may hold a secret
+            # (a profile's headers can have any name, like X-Clinic-Token: ${TOKEN}). Only plain ones stay.
             if urllib.parse.urlsplit(new.full_url).netloc != urllib.parse.urlsplit(req.full_url).netloc:
-                for name in ("Authorization", "Cookie", "X-api-key", "X-Api-Key"):
-                    new.headers.pop(name, None)
-                    new.unredirected_hdrs.pop(name, None)
+                for store in (new.headers, new.unredirected_hdrs):
+                    for name in list(store):
+                        if name.lower() not in _PLAIN_HEADERS:
+                            store.pop(name, None)
         return new
 
 

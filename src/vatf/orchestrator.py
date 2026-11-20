@@ -582,6 +582,7 @@ class Orchestrator:
             ended = True
             if self._gateway:
                 self._gateway.detach(ctx.test_id)
+            self._platform_evidence(writer, live)
             if self.mode == "voice" and not self.light:     # light load callers skip the careful second listen
                 await self._listen_again(scenario, writer, live)
                 await self._hear_caller(scenario, writer, live)
@@ -625,6 +626,10 @@ class Orchestrator:
             if not ended:
                 writer.emit("connector", "call_ended", {"ended_by": "harness", "reason": code,
                                                         **live.pop("recording", {})})
+            try:
+                self._platform_evidence(writer, live)
+            except Exception:  # noqa: BLE001 - the harness error above is what this call reports
+                pass
             status = "harness_error"
             self.log(f"    harness error ({code}): {e}")
         finally:
@@ -1000,6 +1005,31 @@ class Orchestrator:
                 await session.close()
             except Exception:  # noqa: BLE001 - the next call starts anyway
                 pass
+            await self._platform_report(session, live)
+
+    async def _platform_report(self, session: Any, live: dict[str, Any]) -> dict[str, Any] | None:
+        """A hosted platform's record of the call just closed (connectors/platforms): kept for reconcile, and
+        its summary (call id, why it ended, cost, latency) returned for call_ended."""
+        if not hasattr(session, "report"):
+            return None
+        report = await session.report()
+        live.setdefault("platform_reports", []).append((report, session))
+        summary = dict(report.summary or {"platform": report.platform, "call_id": report.call_id})
+        if report.error:
+            summary["error"] = report.error
+        return summary
+
+    def _platform_evidence(self, writer, live: dict[str, Any]) -> None:
+        """Puts the platform's tool calls (and a transfer) into the call where they happened (reconcile.py)."""
+        reports = live.pop("platform_reports", None)
+        if not reports:
+            return
+        from . import reconcile
+
+        result = reconcile.apply(writer, reports)
+        for err in result["errors"]:
+            writer.emit("harness", "harness_event", {"level": "warning", "code": "platform_record",
+                                                     "message": f"The platform's record of the call could not be read: {err}"})
 
     async def _voicemail(self, conv, scenario, words: str, data: dict[str, Any], turn: int, writer,
                          live: dict[str, Any], last_leg: bool) -> tuple[str, str, int]:
@@ -1101,11 +1131,13 @@ class Orchestrator:
             await line.stop()
         if tap is not None:
             await tap.stop()
+        platform = None
         if session is not None:
             try:
                 await session.close()
             except Exception:
                 pass  # a failure here is recorded by the caller of _hang_up if it matters
+            platform = await self._platform_report(session, live)
         if rec is not None:
             from .audio.pcm import write_wav
             from .voice_call import RECORDING
@@ -1118,7 +1150,9 @@ class Orchestrator:
                                                "channels": ["caller", "agent"],
                                                "duration_ms": rec.ms(length),
                                                "agent_audio_cleared": len(rec.clears)}}
-            if getattr(session, "call_meta", None):        # a real phone call: its id, numbers, length, price
+            if platform is not None:                       # a hosted platform: its call id, ended reason, cost
+                live["recording"]["platform"] = platform
+            elif getattr(session, "call_meta", None):      # a real phone call: its id, numbers, length, price
                 live["recording"]["phone"] = dict(session.call_meta)
             for sample, text in getattr(session, "heard", None) or []:
                 # What the agent reported understanding (protocol "heard"): compared with the caller's

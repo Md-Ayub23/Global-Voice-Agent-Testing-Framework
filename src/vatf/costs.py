@@ -7,6 +7,10 @@ no cost is shown.
   per_reply      every answer the agent gives (an AI request per answer, mostly for chat agents)
   per_tool_call  every request the agent makes to your systems
 
+A hosted platform (Vapi, Retell, ElevenLabs) reports what each call really cost: that amount is used for
+the call instead of the owner's prices (metrics.platform_cost), when it is in the same currency. With no
+prices set, the platform's amounts alone make the summary ("source": "platform").
+
 Cost per completed task: what all the calls that should have done a task (book, order) cost, divided
 by how many really got it done. A call that failed still costs money, so an agent that needs two calls
 to get one booking done costs twice as much per booking. Calls Vocto couldn't make (setup errors) are
@@ -30,8 +34,18 @@ def prices(profile: Mapping[str, Any] | None) -> dict[str, Any] | None:
     return {"currency": str(raw.get("currency") or "USD").upper(), **p}
 
 
+def _platform_cost(verdict: Mapping[str, Any], currency: str) -> float | None:
+    m = verdict.get("metrics") or {}
+    if isinstance(m.get("platform_cost"), (int, float)) and str(m.get("platform_currency") or "USD").upper() == currency:
+        return float(m["platform_cost"])
+    return None
+
+
 def call_cost(verdict: Mapping[str, Any], p: Mapping[str, Any]) -> float:
     m = verdict.get("metrics") or {}
+    billed = _platform_cost(verdict, p["currency"])
+    if billed is not None:
+        return billed
     minutes = (m.get("duration_ms") or 0) / 60000
     return (p["per_call"] + p["per_minute"] * minutes + p["per_reply"] * (m.get("agent_turns") or 0)
             + p["per_tool_call"] * (m.get("tool_calls") or 0))
@@ -42,18 +56,26 @@ def _r(x: float | None) -> float | None:
 
 
 def summary(verdicts: Sequence[Mapping[str, Any]], p: Mapping[str, Any] | None) -> dict[str, Any] | None:
-    """decision.costs: totals for the run, or None without prices or calls."""
-    if not p:
-        return None
+    """decision.costs: totals for the run, or None without prices (or platform-billed calls) or calls."""
     made = [v for v in verdicts if v.get("status") != "ERROR"]
     if not made:
         return None
+    source = "prices"
+    if not p:
+        billed = [v for v in made if isinstance((v.get("metrics") or {}).get("platform_cost"), (int, float))]
+        currencies = {str((v.get("metrics") or {}).get("platform_currency") or "USD").upper() for v in billed}
+        if len(billed) != len(made) or len(currencies) != 1:
+            return None              # some calls have no bill: a total would be too low
+        p = {"currency": currencies.pop(), **{k: 0.0 for k in FIELDS}}
+        source = "platform"
+    elif any(_platform_cost(v, p["currency"]) is not None for v in made):
+        source = "platform+prices"
     costs = [call_cost(v, p) for v in made]
     task = [(v, c) for v, c in zip(made, costs) if (v.get("outcome") or {}).get("expected") in TASK_EXPECTED]
     done = sum((v.get("outcome") or {}).get("class") == "TRUE_SUCCESS" for v, _ in task)
     task_cost = sum(c for _, c in task)
     minutes = sum((v.get("metrics") or {}).get("duration_ms") or 0 for v in made) / 60000
-    return {"currency": p["currency"], "prices": {k: p[k] for k in FIELDS},
+    return {"currency": p["currency"], "prices": {k: p[k] for k in FIELDS}, "source": source,
             "calls": len(made), "minutes": round(minutes, 2), "total": _r(sum(costs)),
             "per_call": _r(sum(costs) / len(made)),
             "task_calls": len(task), "tasks_done": done,

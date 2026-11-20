@@ -123,14 +123,57 @@ def code_settings(doc: Any) -> str:
     conn = doc.get("connection") if isinstance(doc.get("connection"), Mapping) else {}
     tools = doc.get("tools") if isinstance(doc.get("tools"), list) else []
     out = {
+        "secret_destinations": _secret_destinations(doc, conn, tools),
         "agent_process": doc.get("agent_process"),
         "launch": conn.get("launch"),
         "python_agent": conn.get("target") if conn.get("type") == "text_python" else None,
         "python_tools": sorted(f"{t.get('name')}={t.get('upstream')}" for t in tools
                                if isinstance(t, Mapping) and str(t.get("upstream", "")).startswith("python:")),
         "secrets": sorted(_secret_refs(doc)),
+        "server_files": _server_files(doc),
     }
     return json.dumps(out, sort_keys=True, default=str)
+
+
+def _server_files(doc: Mapping[str, Any]) -> list[str]:
+    """Files on the server that Vocto reads or writes for the agent: a SQLite backend, a log file, fixture
+    .sql files. Pointing one of these somewhere else reads that file back in the dashboard (a log test shows
+    its lines, a probe its rows), so choosing them is an admin's change, like the secrets."""
+    out = []
+    backend = doc.get("backend") if isinstance(doc.get("backend"), Mapping) else {}
+    if str(backend.get("connection", "")).startswith("sqlite:"):
+        out.append(f"backend={backend.get('connection')}")
+    logs = doc.get("logs") if isinstance(doc.get("logs"), Mapping) else {}
+    if logs.get("source") == "file" or logs.get("path"):
+        out.append(f"logs={logs.get('path')}")
+    setup_ = doc.get("setup") if isinstance(doc.get("setup"), Mapping) else {}
+    fixtures = setup_.get("fixtures") if isinstance(setup_.get("fixtures"), list) else []
+    out += sorted(f"fixture={f}" for f in fixtures if isinstance(f, str) and f.strip().lower().endswith(".sql"))
+    return out
+
+
+def _secret_destinations(doc: Mapping[str, Any], conn: Mapping[str, Any], tools: list) -> dict[str, Any]:
+    """Where a secret is sent: the address that goes with secret headers or keys. Moving that address (the agent's
+    URL, a tool's upstream, the REST backend, the log server, a LiveKit server) would send the secret somewhere
+    else, so it is an admin's change too. A hosted platform's key only ever goes to the platform's own host
+    (connectors/platforms), so its agent id is anyone's to change; LiveKit's server address is not."""
+    out: dict[str, Any] = {}
+    if _secret_refs(conn):
+        opts = conn.get("options") if isinstance(conn.get("options"), Mapping) else {}
+        out["connection"] = {"type": conn.get("type"), "platform": conn.get("platform"),
+                             "target": None if conn.get("type") in ("platform", "phone_call") else conn.get("target"),
+                             "url": opts.get("url"), "trigger_url": (opts.get("outbound") or {}).get("trigger_url")
+                             if isinstance(opts.get("outbound"), Mapping) else None,
+                             "public_url": opts.get("public_url")}
+    out["tools"] = sorted(f"{t.get('name')}={t.get('upstream')}" for t in tools
+                          if isinstance(t, Mapping) and _secret_refs(t.get("headers") or {}))
+    backend = doc.get("backend") if isinstance(doc.get("backend"), Mapping) else {}
+    if _secret_refs(backend.get("headers") or {}):
+        out["backend"] = backend.get("connection")
+    logs = doc.get("logs") if isinstance(doc.get("logs"), Mapping) else {}
+    if _secret_refs(logs.get("headers") or {}):
+        out["logs"] = logs.get("url")
+    return out
 
 
 # ---- the store ---------------------------------------------------------------------------------------

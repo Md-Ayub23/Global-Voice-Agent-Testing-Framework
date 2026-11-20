@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { MiniHistory, ProjectAvatar, When } from "../components/dash";
 import { useToast } from "../components/feedback";
-import { Area, Help, Text } from "../components/form";
+import { Area, Grid, Help, Select, Text } from "../components/form";
 import { Icon } from "../components/Icon";
 import { Badge, Button, Card, CardHead, Chip, Choice, EmptyState, Field, Notice, PageHead, Skeleton } from "../components/ui";
 import { api } from "../lib/api";
 import { can, useAuth } from "../lib/auth";
 import { useApp, useCrumbs, useLoad } from "../lib/app";
 import { cx } from "../lib/format";
-import { domainLabel, modeLabel, projectHref } from "../lib/links";
+import { domainLabel, modeLabel, PLATFORM_ID_LABEL, PLATFORM_ID_PH, PLATFORM_NAMES, projectHref } from "../lib/links";
 import { navigate } from "../lib/router";
 import { setupApi, slug } from "../lib/setup";
 import type { Dashboard } from "../lib/types";
@@ -96,14 +96,16 @@ function NewProjectForm() {
   const [description, setDescription] = useState("");
   const [channel, setChannel] = useState<"voice" | "text">("voice");
   const [target, setTarget] = useState("");
-  const [voiceFormat, setVoiceFormat] = useState<"phone" | "vocto" | "twilio">("phone");
+  const [voiceFormat, setVoiceFormat] = useState<"phone" | "platform" | "vocto" | "twilio">("phone");
+  const [platform, setPlatform] = useState("vapi");
   const phoneNo = channel === "voice" && voiceFormat === "phone";
+  const hosted = channel === "voice" && voiceFormat === "platform";
   const [busy, setBusy] = useState(false);
   const create = async () => {
     if (!name.trim()) { toast("Give the agent a name", "bad"); return; }
     setBusy(true);
     try {
-      const r = await setupApi.newProject({ name, id: slug(name), domain: domain.trim().toLowerCase(), description, channel, target, voice_format: voiceFormat });
+      const r = await setupApi.newProject({ name, id: slug(name), domain: domain.trim().toLowerCase(), description, channel, target, voice_format: voiceFormat, platform });
       await reloadProjects();
       toast(`Created ${name}`);
       navigate(projectHref(r.key, "/setup/connection"));
@@ -148,10 +150,14 @@ function NewProjectForm() {
                 </Choice>
               </div>
               {channel === "voice" && (
-                <div className="grid gap-2 sm:grid-cols-3 mt-3" id="np-format">
+                <div className="grid gap-2 sm:grid-cols-2 mt-3" id="np-format">
                   <Choice radio on={voiceFormat === "phone"} onClick={() => setVoiceFormat("phone")} data-format="phone">
                     <b>Phone number</b>
                     <div className="text-muted text-sm mt-0.5">The agent answers a real phone number. Vocto rings it through your Twilio or Plivo account, like a real caller.</div>
+                  </Choice>
+                  <Choice radio on={voiceFormat === "platform"} onClick={() => setVoiceFormat("platform")} data-format="platform">
+                    <b>Hosted platform</b>
+                    <div className="text-muted text-sm mt-0.5">A Vapi, Retell, ElevenLabs or LiveKit agent. Vocto calls it with your API key and reads the platform's own record of each call: tool calls, cost, why it ended.</div>
                   </Choice>
                   <Choice radio on={voiceFormat === "twilio"} onClick={() => setVoiceFormat("twilio")} data-format="twilio">
                     <b>Twilio Media Streams</b>
@@ -163,11 +169,22 @@ function NewProjectForm() {
                   </Choice>
                 </div>
               )}
+              {hosted ? (
+                <Grid className="mt-4">
+                  <Field label="Platform">
+                    <Select id="np-platform" value={platform} options={Object.entries(PLATFORM_NAMES)} onChange={setPlatform} />
+                  </Field>
+                  <Field label={PLATFORM_ID_LABEL[platform]} hint="Optional now. Your API key goes on the next page, where only an admin can paste it.">
+                    <Text id="np-target" mono value={target} onChange={(v) => setTarget(v.trim())} placeholder={PLATFORM_ID_PH[platform]} />
+                  </Field>
+                </Grid>
+              ) : (
               <Field label={phoneNo ? "Agent's phone number" : "Agent's address"} className="mt-4"
                 hint={phoneNo ? "In international format, e.g. +14155550123. Optional now: your Twilio or Plivo details go on the next page." : "Optional now: you can add it on the next page."}>
                 <Text id="np-target" mono value={target} onChange={(v) => setTarget(phoneNo ? v.trim() : v)}
                   placeholder={phoneNo ? "+14155550123" : channel === "voice" ? "wss://agent.example.com/call" : "https://agent.example.com/vocto"} />
               </Field>
+              )}
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <Button id="np-create" variant="primary" size="lg" icon="plus" busy={busy} disabled={busy || !name.trim()} onClick={() => void create()}>Create agent</Button>

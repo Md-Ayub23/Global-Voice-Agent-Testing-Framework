@@ -42,7 +42,7 @@ import numpy as np
 
 from ..audio.g711 import pcm16_to_ulaw, ulaw_to_pcm16
 from ..audio.pcm import from_pcm16, to_pcm16
-from ..audio.recorder import Recorder
+from ..audio.recorder import Recorder, play_agent
 from ..contracts.models import CallContext
 from ..util import MissingSecret, expand_env
 from . import ConnectError
@@ -505,13 +505,10 @@ class PhoneCallSession:
 
     def play(self, x: np.ndarray) -> None:
         """The agent's voice, joined on without a gap when it arrives just after the audio before it
-        (Twilio's 20 ms packets come with network jitter), like a phone's playout buffer."""
-        now = self.rec.now_sample()
-        cursor = self.rec.cursor
-        if self._jitter and self.rec.chunks and cursor < now <= cursor + self._jitter:
-            self.rec.agent_audio(x, arrival_s=cursor / self.rec.sr)
-        else:
-            self.rec.agent_audio(x)
+        (Twilio's 20 ms packets come with network jitter), like a phone's playout buffer. A phone line
+        carries the far end all the time, silence included: silent packets are not queued as audio,
+        or the agent would seem to be talking for the whole call (recorder.play_agent)."""
+        play_agent(self.rec, x, self._jitter)
 
     def _error(self, text: str) -> None:
         if len(self.protocol_errors) < 20:

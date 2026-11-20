@@ -116,6 +116,11 @@ def call_metrics(trace: CallTrace) -> dict[str, Any]:
             metrics["latency_p50_ms"] = percentile(latencies, 50)
             metrics["latency_p95_ms"] = percentile(latencies, 95)
     metrics["cost_usd"] = trace.record.get("cost_usd", 0.0)
+    platform = (ended[-1].data.get("platform") or {}) if ended else {}
+    if isinstance(platform, dict) and isinstance(platform.get("cost"), (int, float)):
+        # What the hosted platform billed for this call (its own record), in its currency.
+        metrics["platform_cost"] = float(platform["cost"])
+        metrics["platform_currency"] = str(platform.get("currency") or "USD")
     return metrics
 
 

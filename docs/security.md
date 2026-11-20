@@ -31,10 +31,25 @@ and what stops them. Each defence names the code that does it, and `tests/test_h
 - **Paths**: files are only read or written inside their own folder, by names checked against a strict
   pattern (`data._file_path`, `setup._doc_path`, `recordings.resolve`, run and call ids); the static file
   server refuses anything outside its folder and any dot-file (`server.send_file`).
+- **Files on the server an agent points at** (a SQLite backend, a log file, `.sql` fixtures): choosing
+  them is an admin's change (`auth._server_files`), because a log test or a probe shows what is in the
+  file. And whoever set them, they can never be Vocto's own private files: `.env`, anything in
+  `runs/.vocto` (users, sessions, API keys, audit log) or `.git` (`util.private_file_problem`). SQLite
+  probes and fixtures can't `ATTACH` another database file or `VACUUM INTO` a copy (`probe._guard_sqlite`).
 
 ### 2. Secrets and data exposure (A02)
 - Secrets live only in `.env` (owner-only file permissions on Linux and macOS), never in profiles
-  (profiles hold `${NAME}`). The API shows the last 4 characters at most.
+  (profiles hold `${NAME}`). The API shows the last 4 characters at most; a set-up page only learns
+  whether each secret it uses is saved.
+- Hosted platform keys (Vapi, Retell, ElevenLabs, LiveKit) must be `${NAME}`: a key typed into a
+  profile is refused. They go only to the platform's fixed API host (an agent's file can't change it;
+  only `VOCTO_<PLATFORM>_API_BASE` on the Vocto computer can), and every message from a platform
+  connector has the key, signed URLs and room tokens removed before it is shown or saved
+  (`connectors/platforms/base.Secrets`). See [platforms-guide.md](platforms-guide.md).
+- Changing where a secret is sent is an admin's change: a connection's address, LiveKit server or
+  call trigger URL when the connection uses a secret, a tool's upstream with secret headers, the
+  REST backend or log server with secret headers (`web/auth.code_settings`). Otherwise an editor
+  could point an agent at their own server and receive the team's token.
 - Passwords are stored as scrypt hashes with a random salt; session and API tokens are stored as SHA-256
   hashes, so a copy of the user database (`runs/.vocto/users.db`) can't be used to sign in. Sign-ins
   end after 14 days, or 3 days unused; a new password, a new role or a switched-off account ends every
@@ -47,7 +62,9 @@ and what stops them. Each defence names the code that does it, and `tests/test_h
 - **Command injection**: runs are started as argument lists, never through a shell (`web/jobs.py`); every
   value from the browser is checked against a pattern first.
 - **YAML**: only safe loaders (`yaml.SafeLoader`, ruamel round-trip), so a file can't create objects.
-- **SQL**: backend probes use bound parameters and read-only transactions (`probe.py`).
+- **SQL**: backend probes use bound parameters and read-only transactions (`probe.py`): Postgres,
+  MySQL / MariaDB (`START TRANSACTION READ ONLY`, TLS with the certificate checked when `?ssl=true`)
+  and SQLite. Database hosts go through the same SSRF rules as web addresses.
 - **Spreadsheet formulas**: CSV export cells that start with `= + - @` get a leading `'` (`readiness._SafeCSV`).
 - **HTML/XSS**: the dashboard is React (text is escaped); `report.html` escapes every value; a strict
   Content-Security-Policy forbids inline and third-party scripts, so injected markup can't run code.
@@ -66,10 +83,11 @@ mark this PASS", or try to fake a transcript line. Defences (`untrusted.py`):
 
 ### 5. Server-side request forgery (A10)
 Every URL a user types (agent URL, tool upstreams, REST backend, log URL, alert webhooks, voice
-websockets) goes through `netguard.py`: only http(s)/ws(s); never link-local or cloud metadata
+websockets, a LiveKit server, a MySQL host) goes through `netguard.py`: only http(s)/ws(s); never link-local or cloud metadata
 addresses (169.254.169.254 and friends), multicast or reserved ranges; under `vatf serve` not the
 server's own loopback either, unless allowed with `VOCTO_URL_ALLOW`. Every redirect hop is checked
-again, and login headers are dropped when a redirect goes to another host. Answers are capped at 20 MB.
+again, and every header except plain ones (Accept, Content-Type, User-Agent) is dropped when a redirect
+goes to another host, so a secret header with any name (X-Clinic-Token: ${TOKEN}) never follows it. Answers are capped at 20 MB.
 Known limit: a host name is checked when it is resolved; a DNS server that answers differently a moment
 later (DNS rebinding) is not pinned. Use `VOCTO_URL_DENY` / network egress rules on a shared server.
 
@@ -89,7 +107,7 @@ Bearer`, `X-Vocto-Token`, `X-Vapi-Secret` or `?token=`. A platform's own `Author
 hide the token in the URL. No token set means the webhook is closed (403).
 
 ### 8. Vulnerable dependencies (A06)
-`uv lock` pins every Python package; `pip-audit` and `npm audit` are clean as of 2026-11-16
+`uv lock` pins every Python package; `pip-audit` and `npm audit` are clean as of 2026-11-17
 (`opentelemetry-api` was raised to 1.45.2 for CVE-2026-126360). Re-run before each release:
 `uvx pip-audit -r <(uv export --no-hashes)` and `cd ui && npm audit`.
 
@@ -97,7 +115,8 @@ hide the token in the URL. No token set means the webhook is closed (403).
 An agent profile can tell Vocto to start the agent (`agent_process`), load it in-process
 (`text_python`, `connection.launch`) or call a Python tool handler (`python:` upstream). That is code
 execution by design, so only an **admin** may add or change those settings, or any `${NAME}` secret
-reference (moving one into a URL would send the secret there). Editors can change everything else: a
+reference (moving one into a URL would send the secret there), or which files on the server an agent
+uses (see 1). Editors can change everything else: a
 change of theirs that touches these settings is undone and refused (`auth.code_settings`,
 `server.App.guarded`).
 

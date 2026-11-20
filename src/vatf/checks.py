@@ -153,11 +153,7 @@ def evaluate_check(check: Mapping[str, Any], check_id: str, events: Events, all_
         return _entity_fidelity(check, check_id, events, all_events, facts, salt)
 
     if kind == "handoff":
-        hits = [e for e in _of(events, "handoff") if e.data.get("to") == check["to"]]
-        ended = _of(all_events, "call_ended")
-        return _result(check, check_id, Result.PASS if hits else Result.FAIL,
-                       f"Handoff to {check['to']} {'happened' if hits else 'never happened'}.",
-                       _refs(hits or ended), EvidenceLevel.PLATFORM)
+        return _handoff(check, check_id, events, all_events)
 
     if kind == "latency":
         if mode != "voice":
@@ -320,6 +316,45 @@ def _identity_first(check, check_id, all_events) -> CheckResult:
                        _refs(early[:3]), EvidenceLevel.TOOL_TRAFFIC)
     return _result(check, check_id, Result.PASS, f"{verify} checked the caller before {calls[0].data['tool']}.",
                    _refs([verified[0], calls[0]]), EvidenceLevel.TOOL_TRAFFIC)
+
+
+PERSON = re.compile(r"^(?:a |an )?(?:person|human|agent|staff|colleague|operator|representative|team)$", re.I)
+HOW_RANK = {"platform": 3, "tool": 2, "speech": 1}
+HOW_LEVEL = {"platform": EvidenceLevel.PLATFORM, "tool": EvidenceLevel.TOOL_TRAFFIC, "speech": EvidenceLevel.SPEECH}
+
+
+def _handoff(check, check_id, events, all_events) -> CheckResult:
+    """The agent handed the caller over (expect true, the default) or kept the call (expect false).
+    `to`: a named sub-agent on a multi-agent platform must be the one taken over; "a person" (or none) takes any
+    hand-off. `min_evidence`: platform | tool | speech (default) - the weakest proof that counts (handoff.py)."""
+    from .handoff import detect
+
+    want = check.get("expect", True) is not False
+    to = str(check.get("to") or "").strip()
+    ended = _of(all_events, "call_ended")
+    if to and not PERSON.match(to):
+        hits = [e for e in _of(all_events, "handoff") if e.data.get("to") == to]
+        ok = bool(hits) == want
+        return _result(check, check_id, Result.PASS if ok else Result.FAIL,
+                       f"Hand-off to {to} {'happened' if hits else 'never happened'}"
+                       + ("." if ok else (" but it should not have." if hits else ".")),
+                       _refs(hits or ended), EvidenceLevel.PLATFORM)
+    found = detect(events)
+    floor = HOW_RANK.get(str(check.get("min_evidence") or "speech"), 1)
+    handed = found["handed_off"] and HOW_RANK.get(found["how"], 0) >= floor
+    proof = [e for e in all_events if e.seq == found["seq"]]
+    if handed:
+        msg = f"The agent handed the caller over: {found['detail']}."
+    elif found["handed_off"]:
+        msg = (f"Only weak proof of a hand-off ({found['detail']}); this check needs "
+               f"{check.get('min_evidence')} evidence.")
+    else:
+        msg = "The agent kept the call: no transfer or hand-off."
+    if not want and handed:
+        msg += " It should have kept the call."
+    level = HOW_LEVEL.get(found["how"], EvidenceLevel.PLATFORM) if handed else EvidenceLevel.PLATFORM
+    return _result(check, check_id, Result.PASS if handed == want else Result.FAIL, msg,
+                   _refs(proof or ended[-1:]), level)
 
 
 def _failed_answers(all_events, tools) -> list[TraceEvent]:

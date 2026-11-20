@@ -2,12 +2,16 @@
 import { useState } from "react";
 import { Area, Block, Check, Grid, Help, KeyValue, Num, Problems, SaveBar, Select, Text, TestResult, type Obj, type TestOutcome } from "../../components/form";
 import { Button, Card, Choice, Field, Notice, inputCls } from "../../components/ui";
+import { Icon } from "../../components/Icon";
 import { cx } from "../../lib/format";
-import { owner, setupApi } from "../../lib/setup";
+import { api } from "../../lib/api";
+import { can, useAuth } from "../../lib/auth";
+import { PLATFORM_ID_LABEL, PLATFORM_ID_PH, PLATFORM_NAMES } from "../../lib/links";
+import { owner, setupApi, slug, type ProfileDetail } from "../../lib/setup";
 import { asList, asObj, str, useDraft, type TabProps } from "./common";
 
 const DOMAINS = ["healthcare", "banking", "insurance", "trading", "retail", "travel", "telecom", "support", "general"];
-type Kind = "phone" | "websocket_audio" | "text_http" | "in_repo";
+type Kind = "phone" | "platform" | "websocket_audio" | "text_http" | "in_repo";
 
 function Identity({ detail, reload }: TabProps) {
   const file = owner(detail, "name");
@@ -50,12 +54,14 @@ function Identity({ detail, reload }: TabProps) {
 function kindOf(conn: Obj): Kind {
   if (conn.type === "text_python" || conn.launch) return "in_repo";
   if (conn.type === "phone_call") return "phone";
+  if (conn.type === "platform") return "platform";
   return conn.type === "text_http" ? "text_http" : "websocket_audio";
 }
 const VOICE_FORMATS: [string, string][] = [["twilio_media_stream", "Twilio Media Streams (phone agents)"], ["websocket_audio", "Vocto voice protocol (PCM16)"]];
 
 const KNOWN_OPTIONS = ["headers", "reply_field", "end_field", "timeout_s", "account_sid", "jitter_buffer_ms"];
 const PHONE_OPTIONS = ["provider", "auth_token", "from_number", "ring_timeout_s", "public_url"];
+const PLATFORM_OPTIONS = ["api_key", "api_secret", "url", "room_prefix", "report_wait_s", "agent_wait_s", "variables"];
 
 function Connection({ detail, reload }: TabProps) {
   const conn0 = asObj(detail.merged.connection);
@@ -77,9 +83,11 @@ function Connection({ detail, reload }: TabProps) {
   const toggleProp = (p: string, on: boolean) =>
     d.setDraft({ ...d.draft, test_id: { ...tid, propagation: on ? [...new Set([...prop, p])] : prop.filter((x) => x !== p) } });
   const otherOptions = Object.fromEntries(Object.entries(options).filter(([k, v]) =>
-    ![...KNOWN_OPTIONS, ...(kindOf(conn) === "phone" ? PHONE_OPTIONS : [])].includes(k) && (v == null || typeof v !== "object")));
+    ![...KNOWN_OPTIONS, ...(kind === "phone" ? PHONE_OPTIONS : kind === "platform" ? PLATFORM_OPTIONS : [])].includes(k) && (v == null || typeof v !== "object")));
   const twilio = conn.type === "twilio_media_stream";
   const phone = kind === "phone";
+  const hosted = kind === "platform";
+  const platformName = PLATFORM_NAMES[str(conn.platform)] || "the platform";
 
   const runTest = async (call = false) => {
     if (d.dirty && !(await d.save())) return;
@@ -96,6 +104,7 @@ function Connection({ detail, reload }: TabProps) {
     if (k === kind) return;
     if (k === "websocket_audio") setConn({ type: "twilio_media_stream", launch: undefined as never, target: "", audio: undefined as never });
     if (k === "text_http") setConn({ type: "text_http", launch: undefined as never, target: "", audio: undefined as never });
+    if (k === "platform") setConn({ type: "platform", platform: "vapi", launch: undefined as never, target: "", audio: undefined as never, options: {} });
     if (k === "phone") setConn({ type: "phone_call", launch: undefined as never, target: "", audio: undefined as never,
       options: { provider: "twilio", account_sid: "${TWILIO_ACCOUNT_SID}", auth_token: "${TWILIO_AUTH_TOKEN}", from_number: "" } });
   };
@@ -104,9 +113,12 @@ function Connection({ detail, reload }: TabProps) {
   return (
     <Card>
       <Block title="How Vocto reaches the agent" sub="The address Vocto calls, and how it talks to the agent.">
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
           <Choice radio on={kind === "phone"} onClick={() => pick("phone")} data-kind="phone">
             <b>Phone number</b><div className="text-muted text-sm">Vocto rings the agent's real number through your Twilio or Plivo account. Tests the whole phone line.</div>
+          </Choice>
+          <Choice radio on={hosted} onClick={() => pick("platform")} data-kind="platform">
+            <b>Hosted platform</b><div className="text-muted text-sm">A Vapi, Retell, ElevenLabs or LiveKit agent, called with your API key. No phone line needed.</div>
           </Choice>
           <Choice radio on={kind === "websocket_audio"} onClick={() => pick("websocket_audio")} data-kind="websocket_audio">
             <b>Voice (phone-like)</b><div className="text-muted text-sm">Audio over a WebSocket. The caller really speaks and listens.</div>
@@ -127,6 +139,8 @@ function Connection({ detail, reload }: TabProps) {
           </Grid>
         ) : phone ? (
           <PhoneFields conn={conn} options={options} setConn={setConn} setOpt={setOpt} />
+        ) : hosted ? (
+          <PlatformFields key={`pf${d.version}`} detail={detail} conn={conn} options={options} setConn={setConn} setOpt={setOpt} />
         ) : (
           <>
             {kind === "websocket_audio" && (
@@ -186,9 +200,10 @@ function Connection({ detail, reload }: TabProps) {
           </Field>
         )}
         <div className="flex items-center gap-2 flex-wrap">
-          <Button id="test-connection" icon={phone ? "check" : "phone"} busy={testing} disabled={testing} onClick={() => void runTest()}>{phone ? `Check ${str(options.provider) === "plivo" ? "Plivo" : "Twilio"} account` : "Test connection"}</Button>
-          {phone && <Button id="test-call" icon="phone" disabled={testing} onClick={() => void runTest(true)}>Make a test call</Button>}
+          <Button id="test-connection" icon={phone || hosted ? "check" : "phone"} busy={testing} disabled={testing} onClick={() => void runTest()}>{phone ? `Check ${str(options.provider) === "plivo" ? "Plivo" : "Twilio"} account` : hosted ? `Check ${platformName} key and agent` : "Test connection"}</Button>
+          {(phone || hosted) && <Button id="test-call" icon="phone" disabled={testing} onClick={() => void runTest(true)}>Make a test call</Button>}
           <Help>{phone ? "The check rings no one. A test call really rings the agent (a few cents), listens for its greeting, then hangs up."
+            : hosted ? `The check makes no call. A test call is a short real call on ${platformName} (billed by them): Vocto listens for the greeting, hangs up and reads the platform's record of it.`
             : <>Saves, then opens one short session the way a test call does{kind === "websocket_audio" ? " and listens for the greeting" : ""}.</>}</Help>
         </div>
         <TestResult result={test} />
@@ -203,10 +218,117 @@ function Connection({ detail, reload }: TabProps) {
           <Text mono value={str(tid.header_name)} placeholder="X-Test-Id" onChange={(v) => d.setDraft({ ...d.draft, test_id: { ...tid, header_name: v } })} />
         </Field>
       </Block>}
-      {!str(conn.target) && kind !== "in_repo" && <Notice tone="warn">{phone ? "The agent's phone number is not set yet" : "The agent's address is not set yet"}: runs can't start until it is.</Notice>}
+      {!str(conn.target) && kind !== "in_repo" && !(hosted && conn.platform === "livekit") && <Notice tone="warn">{phone ? "The agent's phone number is not set yet" : hosted ? `The agent's ${(PLATFORM_ID_LABEL[str(conn.platform)] || "ID").replace(/^Agent /, "")} is not set yet` : "The agent's address is not set yet"}: runs can't start until it is.</Notice>}
       <Problems items={d.problems} />
       <SaveBar id="save-connection" dirty={d.dirty} busy={d.busy} onSave={() => void d.save({ connection: clean(conn), test_id: d.draft.test_id })} onRevert={d.revert} />
     </Card>
+  );
+}
+
+// A hosted platform (connectors/platforms, docs/platforms-guide.md): the agent's id there and the API key.
+// The key is pasted here by an admin and kept in Settings › Secrets; the profile only says ${NAME}.
+function PlatformFields({ detail, conn, options, setConn, setOpt }: { detail: ProfileDetail; conn: Obj; options: Obj; setConn: (p: Obj) => void; setOpt: (k: string, v: unknown) => void }) {
+  const platform = str(conn.platform) || "vapi";
+  const name = PLATFORM_NAMES[platform] || platform;
+  const livekit = platform === "livekit";
+  const agentSlug = slug(str(detail.merged.id) || detail.project).replace(/-/g, "_").toUpperCase();
+  const pickPlatform = (v: string) => setConn({ platform: v, target: "", options: Object.fromEntries(Object.entries(options).filter(([k]) => !["api_key", "api_secret", "url", "room_prefix"].includes(k))) });
+  const keyWhere: Record<string, string> = {
+    vapi: "Vapi dashboard › Organization › API keys: the private key.",
+    retell: "Retell dashboard › Settings › API keys.",
+    elevenlabs: "ElevenLabs › Developers › API keys. Optional for a public agent; needed for a private one and to read the call's record.",
+    livekit: "LiveKit Cloud › Settings › API keys (or your server's keys).",
+  };
+  return (
+    <>
+      <Grid>
+        <Field label="Platform">
+          <Select id="platform-name" value={platform} options={Object.entries(PLATFORM_NAMES)} onChange={pickPlatform} />
+        </Field>
+        <Field label={PLATFORM_ID_LABEL[platform]} hint={livekit ? "The agent_name your agent registers with (explicit dispatch). Leave empty if your agent joins every new room by itself."
+          : platform === "vapi" ? "Vapi dashboard › Assistants › the assistant › ID." : platform === "retell" ? "Retell dashboard › Agents › the agent › Agent ID." : "ElevenLabs › Agents › the agent › Agent ID."}>
+          <Text id="conn-target" mono value={str(conn.target)} placeholder={PLATFORM_ID_PH[platform]} onChange={(v) => setConn({ target: v.trim() })} />
+        </Field>
+      </Grid>
+      {livekit && (
+        <Grid>
+          <Field label="LiveKit server" hint="Your project's address: LiveKit Cloud › Settings, or your own server.">
+            <Text id="platform-url" mono value={str(options.url)} placeholder="wss://my-project.livekit.cloud" onChange={(v) => setOpt("url", v.trim())} />
+          </Field>
+          <Field label="Room name start" hint='Each test call gets a new room whose name starts with this. Default "vocto".'>
+            <Text mono value={str(options.room_prefix)} placeholder="vocto" onChange={(v) => setOpt("room_prefix", v.trim())} />
+          </Field>
+        </Grid>
+      )}
+      <Grid>
+        <SecretField id="platform-key" label={livekit ? "API key" : `${name} API key`} hint={keyWhere[platform]} detail={detail}
+          value={str(options.api_key)} suggested={`${platform.toUpperCase()}_API_KEY_${agentSlug}`} onChange={(v) => setOpt("api_key", v)} />
+        {livekit && <SecretField id="platform-secret" label="API secret" hint="Shown once when the key is made." detail={detail}
+          value={str(options.api_secret)} suggested={`LIVEKIT_API_SECRET_${agentSlug}`} onChange={(v) => setOpt("api_secret", v)} />}
+      </Grid>
+      <Field label="Values for the agent's prompt" hint={livekit ? "Sent to the agent as the room's metadata (JSON). The test id is added when the agent is told it (below)."
+        : `${name} fills these into the agent's prompt ({{name}}). "$name" takes the test caller's fact of that name. Vocto adds vocto_test_id when the agent is told the test id (below).`}>
+        <KeyValue key={`v${platform}`} value={asObj(options.variables)} onChange={(v) => setOpt("variables", Object.keys(v).length ? v : undefined)} keyPh="customer_name" valPh="Asha or $name" />
+      </Field>
+      <Field label="Wait for the call's record (s)" className="max-w-80" hint={livekit ? "LiveKit keeps no record: the agent reports its tool calls itself." : "After each call, how long to wait for the platform to finish its record. Default 45."}>
+        <Num value={options.report_wait_s as number} placeholder={45} onChange={(v) => setOpt("report_wait_s", v)} />
+      </Field>
+      <Notice tone="info" icon="info" className="text-sm">
+        {livekit
+          ? <>LiveKit keeps no record of tool calls. For Vocto to check them, the agent sends each one as a data message on the topic <span className="font-mono">vocto.tool</span> (docs/platforms-guide.md has the five-line snippet), or its tools go through Tools &amp; data.</>
+          : <>After every call Vocto reads {name}'s own record of it: the tools the agent called with their answers, why the call ended, its cost and {name}'s latency. The checks and AI judges use them like any other tool call. Each test call is a real {name} call, billed by them.</>}
+      </Notice>
+    </>
+  );
+}
+
+// A secret the connection needs: its ${NAME} in the profile, its value in Settings › Secrets (.env on this computer).
+// An admin pastes the value here; everyone sees only whether it is saved.
+function SecretField({ id, label, hint, value, suggested, onChange, detail }: {
+  id: string; label: string; hint: string; value: string; suggested: string; onChange: (v: string) => void; detail: ProfileDetail;
+}) {
+  const { user } = useAuth();
+  const admin = can(user, "admin");
+  const [paste, setPaste] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  const ref = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(value.trim());
+  const secretName = ref?.[1] || "";
+  const isSet = secretName ? (saved === secretName || !!detail.secrets?.[secretName]) : false;
+  const literal = !!value.trim() && !ref;
+  const save = async () => {
+    const nameToUse = secretName || suggested;
+    setBusy(true); setErr("");
+    try {
+      await api.post("/api/settings/secrets", { name: nameToUse, value: paste });
+      onChange(`\${${nameToUse}}`);
+      setSaved(nameToUse); setPaste("");
+    } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <Field label={label} hint={hint}>
+      <div className="grid gap-2" data-secret-field={id}>
+        <div className="flex items-center gap-2 flex-wrap text-sm">
+          <Icon name="lock" size={14} className="text-muted" />
+          {secretName ? <span className="font-mono">{secretName}</span> : <span className="text-muted">No key yet</span>}
+          {secretName && (isSet ? <span className="text-good font-semibold" data-secret-state="saved">saved</span>
+            : <span className="text-warn font-semibold" data-secret-state="missing">no value saved</span>)}
+        </div>
+        {admin ? (
+          <form className="flex gap-2 flex-wrap" onSubmit={(e) => { e.preventDefault(); void save(); }}>
+            <input id={id} className={cx(inputCls, "font-mono flex-1 min-w-50")} type="password" autoComplete="off"
+              placeholder={isSet ? "Paste a new key to replace it" : "Paste the key"} value={paste} onChange={(e) => setPaste(e.target.value)} aria-label={label} />
+            <Button type="submit" size="sm" icon="save" busy={busy} disabled={busy || !paste.trim()}>Save key</Button>
+          </form>
+        ) : (
+          <Help>{isSet ? "An admin saved it." : "Ask your Vocto admin to paste the key here."} Keys are kept on this computer, never in the agent's files, and never shown again.</Help>
+        )}
+        {literal && <Notice tone="bad" className="text-sm">This field holds a key typed into the agent's file. Paste it above instead, so it is kept as a secret.</Notice>}
+        {err && <Notice tone="bad" className="text-sm">{err}</Notice>}
+        {admin && <Help>Kept in Settings › Secrets as {secretName || suggested}; this agent's file only names it. Save the connection after pasting.</Help>}
+      </div>
+    </Field>
   );
 }
 

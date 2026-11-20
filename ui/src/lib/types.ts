@@ -79,7 +79,7 @@ export interface Profile {
   name?: string;
   description?: string;
   mode: Mode;
-  connection: { type: string; target: string; launch: string };
+  connection: { type: string; target: string; launch: string; platform?: string };
   options: Options;
   offline_options: Options;
   bugs: { name: string; help: string }[] | null;
@@ -489,6 +489,10 @@ export interface CallDetail {
   /** A real phone call (connection phone_call): the provider's own record of it. */
   phone?: { provider: string; call_sid: string; to: string; from: string; status: string;
     duration_s: number | null; price: number | null; price_unit: string | null } | null;
+  /** A hosted platform's record of the call (Vapi, Retell, ElevenLabs, LiveKit). */
+  platform?: { platform: string; call_id?: string; ended_reason?: string; cost?: number; currency?: string; credits?: number;
+    latency_ms?: Record<string, number>; link?: string; platform_summary?: string; platform_success?: string;
+    reported_tools?: number; incomplete?: boolean; error?: string } | null;
   files: string[];
   llm_logs: number;
 }

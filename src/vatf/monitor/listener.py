@@ -93,7 +93,7 @@ class Listener:
         self.limit = RateLimiter(_env_int("VOCTO_INTAKE_PER_MINUTE", 600), burst=_env_int("VOCTO_INTAKE_BURST", 120))
         self.received = 0
         self.last_error: str | None = None
-        self.httpd: ThreadingHTTPServer | None = None
+        self.httpd: BoundedHTTPServer | None = None
 
     def start(self) -> "Listener":
         self.httpd = BoundedHTTPServer((self.host, self.port), self._handler())

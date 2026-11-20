@@ -9,9 +9,9 @@ with `profile.yaml`, `scenarios/` and `personas/` (git-ignored, since it holds c
 
 | # | Ask for | Why | Where it goes |
 |---|---|---|---|
-| 1 | A **test address** for the agent: the voice WebSocket its phone line uses (Twilio Media Streams, [twilio-protocol.md](twilio-protocol.md): most phone agents already have one; or [voice-protocol.md](voice-protocol.md)) and, if possible, a text endpoint ([text-http-protocol.md](text-http-protocol.md)) | Vocto calls the agent like a customer would. Text runs are cheap; voice runs measure speech, response times and barge-in. | Agent & connection |
+| 1 | A **test address** for the agent: for an agent on Vapi, Retell, ElevenLabs or LiveKit, just its ID and an API key ([platforms-guide.md](platforms-guide.md)); otherwise the voice WebSocket its phone line uses (Twilio Media Streams, [twilio-protocol.md](twilio-protocol.md): most phone agents already have one; or [voice-protocol.md](voice-protocol.md)) and, if possible, a text endpoint ([text-http-protocol.md](text-http-protocol.md)) | Vocto calls the agent like a customer would. Text runs are cheap; voice runs measure speech, response times and barge-in. | Agent & connection |
 | 2 | A setting to point the agent's **tool calls** at Vocto during tests, and the real (test) API address of each tool | Vocto sees every tool call, adds the test id, can break a tool on purpose (timeouts, errors) and forwards the call to the real API. | Tools |
-| 3 | **Read-only access to the backend**: a database user (Postgres / SQLite) or a REST endpoint that shows records | After each call Vocto checks what was really stored. This is the strongest evidence: it beats what the agent says. | Backend |
+| 3 | **Read-only access to the backend**: a database user (Postgres / MySQL / MariaDB / SQLite) or a REST endpoint that shows records | After each call Vocto checks what was really stored. This is the strongest evidence: it beats what the agent says. | Backend |
 | 4 | **The agent's logs** for test calls: a log file or a log search URL | Kept next to each call; scenarios can check them ("no ERROR"). | Logs |
 | 5 | A **test environment** with test data, and (ideally) that the agent stores and logs the test id | Tests must never touch real customers. The test id links voice, tool calls, records and logs. | Scenarios (test data), Agent (test id) |
 | 6 | **What the agent may say**: the facts it knows (prices, hours, refund rules), what it must not do, and where it sends callers it can't help | The AI judges compare the agent's answers with this, so they can tell a made-up answer from a correct one. | AI judges |
@@ -81,6 +81,15 @@ log file `logs/clinic-service.log`.
 
 A real open-source agent to practise on: Pipecat's food ordering agent, `examples/pipecat-food`
 ([real-agents-guide.md](real-agents-guide.md)). Vocto starts it itself, so nothing needs a second window.
+
+## MySQL and MariaDB
+
+`backend.connection: mysql://vocto_reader:${MYSQL_PASSWORD}@db.example.com:3306/bookings` (or
+`mariadb://`). Add `?ssl=true` for TLS with the server's certificate checked. The driver (PyMySQL) is
+included. Probes run in `START TRANSACTION READ ONLY` and are rolled back, so give Vocto a read-only
+user anyway; test data (scenario fixtures) is written with the same connection, so point it at a
+test database only. The password may contain any character: it is not part of the address once
+the `${NAME}` is filled in.
 
 ## Postgres
 

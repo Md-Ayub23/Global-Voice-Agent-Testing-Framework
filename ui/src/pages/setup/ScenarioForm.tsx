@@ -25,7 +25,7 @@ export const CHECKS: Record<string, { label: string; help: string; fields: strin
   log_not_contains: { label: "Agent log has no", help: "No log line of the call matches this pattern, e.g. ERROR.", fields: ["pattern"] },
   latency: { label: "Answer time", help: "This call's slow answers (p95) stay under a limit. Voice only.", fields: ["p95_ms", "min_answers"] },
   max_turns: { label: "Conversation length", help: "The caller needs at most this many turns.", fields: ["n"] },
-  handoff: { label: "Handed over", help: "Multi-agent platforms: the call was handed to this sub-agent.", fields: ["to"] },
+  handoff: { label: "Handed over to a person", help: "The agent put the caller through to a person (or another agent), or rightly kept the call. Strongest proof first: the platform's own record, then a transfer tool that ran, then the agent saying it transfers.", fields: ["expect", "to", "min_evidence"] },
   voicemail: { label: "Voicemail message", help: "Outbound calls answered by voicemail: the agent leaves a message (or not), after the beep, short, with what it must say and nothing private.", fields: ["message", "after_beep", "max_seconds", "must_say", "never_say"] },
   judge: { label: "AI judge question", help: "A yes/no question the AI judges answer from the conversation. It is only an opinion until your labels show the judges get it right; then it can block.", fields: ["intent", "pass_when", "fail_when", "applies_when", "rubric"] },
 };
@@ -56,6 +56,14 @@ function CheckFields({ check, set, ctx }: { check: Obj; set: (k: string, v: Json
       case "pass_when": case "fail_when": case "applies_when":
         return <Field key={f} label={{ pass_when: "Passes when", fail_when: "Fails when", applies_when: "Only applies when" }[f]}
           hint={f === "applies_when" ? "Empty: always." : undefined}><Text value={str(check[f])} onChange={(v) => set(f, v || undefined)} /></Field>;
+      case "expect":
+        return <Field key={f} label="The agent should"><Seg value={check.expect === false ? "keep" : "hand"} onChange={(v) => set("expect", v === "keep" ? false : undefined)}
+          options={[{ value: "hand", label: "Hand the caller over" }, { value: "keep", label: "Keep the call" }]} /></Field>;
+      case "to":
+        return <Field key={f} label="To (optional)" hint="Empty or 'a person': any hand-off. A sub-agent's name on a multi-agent platform: that one."><Text value={str(check.to)} placeholder="a person" onChange={(v) => set("to", v.trim() || undefined)} /></Field>;
+      case "min_evidence":
+        return <Field key={f} label="Proof needed"><Select value={str(check.min_evidence) || "speech"} onChange={(v) => set("min_evidence", v === "speech" ? undefined : v)}
+          options={[["speech", "Saying it transfers is enough"], ["tool", "A transfer tool must run"], ["platform", "The platform must record a transfer"]]} /></Field>;
       case "message":
         return <Field key={f} label="The agent should"><Seg value={check.message === false ? "no" : "yes"} onChange={(v) => set("message", v === "no" ? false : undefined)}
           options={[{ value: "yes", label: "Leave a message" }, { value: "no", label: "Hang up without one" }]} /></Field>;

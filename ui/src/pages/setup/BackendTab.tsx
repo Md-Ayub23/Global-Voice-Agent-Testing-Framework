@@ -8,7 +8,7 @@ import { asList, asObj, str, useDraft, type TabProps } from "./common";
 type Access = "none" | "sql" | "rest";
 const PLACEHOLDER: Record<Access, string> = {
   none: "",
-  sql: "postgresql://vocto_reader:${PG_PASSWORD}@db.example.com:5432/bookings   or   sqlite:///path/to/file.db",
+  sql: "postgresql://vocto_reader:${PG_PASSWORD}@db.example.com:5432/bookings   or   mysql://vocto_reader:${MYSQL_PASSWORD}@db.example.com:3306/bookings",
   rest: "https://api.example.com",
 };
 
@@ -82,7 +82,7 @@ export function BackendTab({ detail, reload }: TabProps) {
         {access !== "none" && (
           <>
             <Field label={access === "sql" ? "Database address" : "API base address"}
-              hint={access === "sql" ? "Postgres (postgresql://…) or SQLite (sqlite:///…). Use a read-only user: Vocto only reads. Passwords as ${NAME}, set in Settings › Secrets."
+              hint={access === "sql" ? "Postgres (postgresql://…), MySQL or MariaDB (mysql://…, add ?ssl=true for TLS) or SQLite (sqlite:///…). Use a read-only user: Vocto only reads. Passwords as ${NAME}, set in Settings › Secrets."
                 : "Probes are GET requests below this address."}>
               <Text id="backend-connection" mono value={str(backend.connection)} placeholder={PLACEHOLDER[access]} onChange={(v) => set({ connection: v })} />
             </Field>

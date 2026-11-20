@@ -25,6 +25,14 @@ export const projectOfJob = (job: Job | null, projects: Project[] | null) =>
 
 export const projectByKey = (projects: Project[] | null, key: string) => projects?.find((p) => p.key === key) ?? null;
 
+/** Hosted voice-agent platforms (connection type "platform"); same names as PLATFORMS in connectors/platforms. */
+export const PLATFORM_NAMES: Record<string, string> = { vapi: "Vapi", retell: "Retell", elevenlabs: "ElevenLabs", livekit: "LiveKit" };
+/** What the platform calls the agent's id (connection.target), and an example of one. */
+export const PLATFORM_ID_LABEL: Record<string, string> = { vapi: "Assistant ID", retell: "Agent ID", elevenlabs: "Agent ID", livekit: "Agent name (optional)" };
+export const PLATFORM_ID_PH: Record<string, string> = {
+  vapi: "3f1c9b2e-…", retell: "agent_8a1c…", elevenlabs: "agent_01j…", livekit: "my-agent (empty: any agent that joins every room)",
+};
+
 /** How Vocto reaches the agent through this profile, in a few words ("Phone · Twilio", "Voice WebSocket", "Text (HTTP)").
  * Same words as connection_label in src/vatf/web/data.py. `example`: one of Vocto's practice agents. */
 export function connectionWords(profile: Profile, example = false): string {
@@ -33,6 +41,7 @@ export function connectionWords(profile: Profile, example = false): string {
     const prov = (profile.options?.provider || "twilio").toString();
     return `Phone · ${prov.charAt(0).toUpperCase()}${prov.slice(1)}`;
   }
+  if (c.type === "platform") return PLATFORM_NAMES[c.platform || ""] || "Hosted platform";
   if (c.type === "twilio_media_stream") return "Twilio media stream";
   if (c.type === "text_http") return "Text (HTTP)";
   if (c.type === "text_python") return example ? "Practice agent (text)" : "Python function";
@@ -47,7 +56,7 @@ export function channelLabel(profile: Profile, all: Profile[], example = false):
   return twins.length < 2 ? words : `${words} (${profile.file.replace(/\.ya?ml$/, "")})`;
 }
 
-const VOICE_ORDER = ["phone_call", "websocket_audio", "twilio_media_stream"];
+const VOICE_ORDER = ["phone_call", "platform", "websocket_audio", "twilio_media_stream"];
 /** The agent's main connection; same rule as main_profile in src/vatf/web/data.py. */
 export function mainProfile(project: Pick<Project, "profiles">): Profile | null {
   const ps = project.profiles;
@@ -63,6 +72,7 @@ export function mainProfile(project: Pick<Project, "profiles">): Profile | null 
 export function reachLabel(profile: Profile): string {
   const c = profile.connection;
   if (c.type === "phone_call") return "real phone number";
+  if (c.type === "platform") return `${PLATFORM_NAMES[c.platform || ""] || "hosted platform"} agent`;
   if (c.launch) return "started by Vocto";
   if (c.type === "twilio_media_stream") return "phone audio stream";
   if (c.type === "websocket_audio") return "voice web link";

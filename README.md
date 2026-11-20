@@ -47,6 +47,11 @@ Twilio calls it (Twilio Media Streams). Vocto can start that agent itself, and i
 restarts it with bugs planted in its own prompts and code to prove each one is caught. See
 [docs/real-agents-guide.md](docs/real-agents-guide.md).
 
+**Hosted platforms:** an agent built on Vapi, Retell, ElevenLabs or LiveKit is called directly with
+the team's API key (no phone number), and after each call Vocto reads the platform's own record: the
+tool calls it made with their answers, why the call ended, its cost. Those feed the checks and AI
+judges like any other tool call. See [docs/platforms-guide.md](docs/platforms-guide.md).
+
 **Testing your own agent:** create a project for it in the dashboard (Projects > New project) and
 fill in its address, tools, backend and logs access, test plan and test settings with forms. See
 [docs/onboarding-guide.md](docs/onboarding-guide.md) for what to ask the agent's team.
@@ -67,6 +72,7 @@ fill in its address, tools, backend and logs access, test plan and test settings
 - [docs/phase8-guide.md](docs/phase8-guide.md): monitoring real calls: import or receive them, privacy, scoring, trends, alerts
 - [docs/real-agents-guide.md](docs/real-agents-guide.md): testing a real open-source agent (Pipecat food ordering), planted bugs, agents Vocto starts itself
 - [docs/phone-guide.md](docs/phone-guide.md): testing a real phone number: Vocto rings the agent through your Twilio or Plivo account
+- [docs/platforms-guide.md](docs/platforms-guide.md): testing a Vapi, Retell, ElevenLabs or LiveKit agent with your API key; the platform's own tool calls feed the checks
 - [docs/twilio-protocol.md](docs/twilio-protocol.md): calling a phone agent the way Twilio Media Streams does
 - [docs/voice-protocol.md](docs/voice-protocol.md): how vatf talks to a voice agent over a WebSocket
 - [docs/text-http-protocol.md](docs/text-http-protocol.md): how vatf talks to an agent in text over HTTP

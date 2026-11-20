@@ -141,6 +141,14 @@ def new_project(root: Path, body: Mapping[str, Any]) -> dict[str, Any]:
         connection = {"type": "phone_call", "target": str(body.get("target", "")).strip(),
                       "options": {"provider": "twilio", "account_sid": "${TWILIO_ACCOUNT_SID}",
                                   "auth_token": "${TWILIO_AUTH_TOKEN}", "from_number": ""}}
+    elif channel == "voice" and body.get("voice_format") == "platform":
+        # A hosted platform (Vapi, Retell, ElevenLabs, LiveKit): its key is pasted in Connect, kept in .env.
+        from ..connectors.platforms import PLATFORMS
+
+        platform = str(body.get("platform") or "")
+        if platform not in PLATFORMS:
+            raise ValueError(f"platform must be one of {', '.join(PLATFORMS)}")
+        connection = {"type": "platform", "platform": platform, "target": str(body.get("target", "")).strip()}
     elif channel == "voice" and body.get("voice_format") == "twilio":
         connection = {"type": "twilio_media_stream", "target": str(body.get("target", ""))}
     elif channel == "voice":
@@ -219,6 +227,8 @@ def profile_detail(root: Path, project: str, file: str) -> dict[str, Any]:
         "scenarios": [s for s in data.project_files(root, project) if s["kind"] == "scenario"],
         "persona_files": [s for s in data.project_files(root, project) if s["kind"] == "persona"],
         "profiles": [f["file"] for f in data.project_files(root, project) if f["kind"] == "client_profile"],
+        # Which ${NAME}s this setup uses have a value saved: yes or no only, never the value.
+        "secrets": data.secret_status(root, sorted(set(data.SECRET_REF.findall(json.dumps(merged or raw))))),
     }
 
 
@@ -349,9 +359,65 @@ def test_connection(root: Path, project: str, file: str, call: bool = False) -> 
             return asyncio.run(_test_twilio(profile))
         if kind == "phone_call":
             return asyncio.run(_test_phone(profile, root, call))
+        if kind == "platform":
+            return asyncio.run(_test_platform(profile, call))
         return {"ok": False, "message": f"connection type {kind!r} can't be tested yet"}
     except Exception as e:  # noqa: BLE001 - every failure is a plain answer for the form
         return {"ok": False, "message": str(e) or type(e).__name__}
+
+
+async def _test_platform(profile: Mapping[str, Any], call: bool) -> dict[str, Any]:
+    """A hosted platform: without `call`, the key and the agent are checked (no call, no cost). With it, a short
+    real test call: Vocto listens for the greeting in silence, hangs up, and reads the platform's record."""
+    import numpy as np
+
+    from ..audio.recorder import Recorder, monotonic_clock
+    from ..connectors import platforms
+    from ..connectors.platforms.base import SAMPLE_RATE
+    from ..contracts.models import CallContext
+
+    if not call:
+        return await platforms.check(profile)
+    ctx = CallContext(test_id="t-vocto-connection-test", run_id="r-test", profile=profile,
+                      scenario={"setup": {"now": datetime.now(timezone.utc).isoformat(timespec="seconds")}},
+                      repeat=1, attempt=1, mode="voice")
+    rec = Recorder(SAMPLE_RATE, monotonic_clock())
+    session = await platforms.build(profile, Path("."), None).open(ctx, rec)
+    silence = np.zeros(SAMPLE_RATE // 50, dtype=np.float32)
+    start, first_ms, quiet_since, last = rec.clock(), None, None, 0
+    try:
+        while rec.clock() - start < 12 and not session.closed.is_set():
+            await session.send_frame(silence)
+            await asyncio.sleep(0.02)
+            if rec.chunks and first_ms is None:
+                first_ms = int((rec.clock() - start) * 1000)
+            if rec.chunks != last:
+                last, quiet_since = rec.chunks, rec.clock()
+            elif quiet_since and rec.clock() - quiet_since > 1.5 and not rec.agent_playing():
+                break
+    finally:
+        await session.close()
+    heard_s = sum(b - a for a, b in rec.agent_spans(0, rec.agent.length)) / SAMPLE_RATE
+    details = [f"Speech heard: {heard_s:.1f} s" + (f", first sound after {first_ms} ms" if first_ms is not None else "")]
+    if session.transcripts:
+        details.append(f"The platform says the agent said: {session.transcripts[0][1][:160]}")
+    details += [f"Problem: {e}" for e in session.protocol_errors[:5]]
+    report = await session.report(wait_s=20)
+    if report.call_id:
+        details.append(f"Platform call id: {report.call_id}")
+    if report.summary.get("cost") is not None:
+        details.append(f"Cost of this test call: {report.summary['cost']} {report.summary.get('currency', '')}".strip())
+    if report.error:
+        details.append(f"Platform record: {report.error}")
+    elif report.call is not None:
+        tools = [i for i in report.call.get("items") or [] if i.get("kind") == "tool"]
+        details.append(f"Platform record read: {len(tools)} tool call(s)"
+                       + (f", ended: {report.summary.get('ended_reason')}" if report.summary.get("ended_reason") else ""))
+    if not rec.chunks:
+        why = f" The call ended: {session.close_reason}." if session.closed_by_agent else ""
+        return {"ok": False, "message": f"Connected, but the agent said nothing in 12 seconds (it should greet the caller).{why}",
+                "details": details}
+    return {"ok": True, "message": "Connected. The agent greeted the caller; Vocto hung up.", "details": details}
 
 
 async def _test_text_http(profile: Mapping[str, Any]) -> dict[str, Any]:

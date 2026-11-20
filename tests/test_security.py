@@ -113,3 +113,44 @@ def test_csv_cells_never_become_formulas():
     assert _SafeCSV.cell("=HYPERLINK(\"http://evil\",\"x\")").startswith("'=")
     assert _SafeCSV.cell("+1+1") == "'+1+1" and _SafeCSV.cell("@SUM(A1)") == "'@SUM(A1)"
     assert _SafeCSV.cell("-12") == "-12" and _SafeCSV.cell("42%") == "42%" and _SafeCSV.cell(3) == 3
+
+
+def test_a_redirect_to_another_host_drops_every_custom_header(monkeypatch):
+    """A profile's secret header can have any name: none of them follows a redirect to another host."""
+    monkeypatch.setenv("VOCTO_URL_POLICY", "local")
+    seen = {}
+
+    class Target(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.update({k.lower(): v for k, v in self.headers.items()})
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"ok")
+
+        def log_message(self, *a):
+            pass
+
+    target = http.server.HTTPServer(("127.0.0.1", 0), Target)
+
+    class Redirect(Target):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{target.server_address[1]}/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    first = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
+    for s in (target, first):
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{first.server_address[1]}/",
+                                     headers={"X-Clinic-Token": "secret", "Authorization": "Bearer s",
+                                              "Accept": "application/json"})
+        with netguard.urlopen(req, timeout=5) as resp:
+            assert resp.read() == b"ok"
+        assert "x-clinic-token" not in seen and "authorization" not in seen and seen["accept"] == "application/json"
+    finally:
+        for s in (target, first):
+            s.shutdown()
+            s.server_close()
